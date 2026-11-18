@@ -1,0 +1,45 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    direction: rtl;
+    font-family: 'Heebo', system-ui, sans-serif;
+  }
+
+  body {
+    background-color: #FAF6F0;
+    color: #1E242B;
+    overflow-x: hidden;
+  }
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Custom subtle scrollbars */
+::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+
+::-webkit-scrollbar-track {
+  background: #F3E9DC;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #D4B493;
+  border-radius: 999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #B88B5D;
+}
+
+/* Hide number input arrows for cleaner inline price editing */
+input[type='number']::-webkit-inner-spin-button,
+input[type='number']::-webkit-outer-spin-button {
+  opacity: 0.5;
+}
