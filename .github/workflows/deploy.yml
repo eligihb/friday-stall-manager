@@ -17,6 +17,9 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: .
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -30,18 +33,19 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Build application
+      - name: Build production bundle
         run: npm run build
 
-      - name: Prepare SPA fallback and nojekyll
+      - name: Verify dist output and prepare SPA fallback
         run: |
+          grep -q "/friday-stall-manager/assets/" dist/index.html
           cp dist/index.html dist/404.html
           touch dist/.nojekyll
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
 
-      - name: Upload artifact
+      - name: Upload dist artifact
         uses: actions/upload-pages-artifact@v3
         with:
           path: './dist'
