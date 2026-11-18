@@ -1,16 +1,18 @@
-import type { FridayInventoryItem, Order, User } from '../types';
+import type { BusinessSettings, FridayInventoryItem, Order, User } from '../types';
 import { formatFridayLabel, formatILS, ORDER_STATUS_LABELS } from './format';
 
 export function formatProductionWhatsApp(
   fridayDate: string,
-  items: FridayInventoryItem[]
+  items: FridayInventoryItem[],
+  settings?: Partial<BusinessSettings>
 ): string {
+  const bizName = settings?.business_name || 'המטבח התימני';
   const activeItems = items.filter((i) => i.total_to_bake > 0);
   const totalUnits = activeItems.reduce((s, i) => s + i.total_to_bake, 0);
   const totalCost = activeItems.reduce((s, i) => s + i.total_to_bake * i.cost_price, 0);
 
   const lines: string[] = [
-    `🔥 *המטבח התימני — ריכוז ייצור ואפייה*`,
+    `🔥 *${bizName} — ריכוז ייצור ואפייה*`,
     `📅 ${formatFridayLabel(fridayDate)}`,
     `━━━━━━━━━━━━━━━━`,
   ];
@@ -31,9 +33,11 @@ export function formatProductionWhatsApp(
   return lines.join('\n');
 }
 
-export function formatOrderWhatsApp(order: Order): string {
+export function formatOrderWhatsApp(order: Order, settings?: Partial<BusinessSettings>): string {
+  const bizName = settings?.business_name || 'המטבח התימני';
+  const footer = settings?.whatsapp_footer ?? 'שבת שלום ומבורכת! 🕯️';
   const lines: string[] = [
-    `🫓 *המטבח התימני — סיכום הזמנה #${order.id}*`,
+    `🫓 *${bizName} — סיכום הזמנה #${order.id}*`,
     `👤 ${order.recipient_name}`,
     `📅 ${formatFridayLabel(order.friday_date)}`,
     `━━━━━━━━━━━━━━━━`,
@@ -56,7 +60,7 @@ export function formatOrderWhatsApp(order: Order): string {
   }
   lines.push(`📌 סטטוס: ${ORDER_STATUS_LABELS[order.status]}`);
   if (order.notes) lines.push(`📝 הערות: ${order.notes}`);
-  lines.push(`\nשבת שלום ומבורכת! 🕯️`);
+  if (footer) lines.push(`\n${footer}`);
   return lines.join('\n');
 }
 

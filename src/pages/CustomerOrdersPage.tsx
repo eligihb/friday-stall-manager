@@ -23,7 +23,7 @@ import {
 } from '../lib/format';
 import { formatOrderWhatsApp } from '../lib/whatsappFormat';
 import { FridaySelector } from '../components/FridaySelector';
-import type { AdminProduct, Order, OrderStatus, PaymentMethod, Transaction, User } from '../types';
+import type { AdminProduct, BusinessSettings, Order, OrderStatus, PaymentMethod, Transaction, User } from '../types';
 
 export function CustomerOrdersPage() {
   const [fridayDate, setFridayDate] = useState(getNextFridayISO());
@@ -31,6 +31,7 @@ export function CustomerOrdersPage() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [products, setProducts] = useState<AdminProduct[]>([]);
   const [users, setUsers] = useState<User[]>([]);
+  const [bizSettings, setBizSettings] = useState<BusinessSettings | undefined>(undefined);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [copiedId, setCopiedId] = useState<number | null>(null);
@@ -68,14 +69,16 @@ export function CustomerOrdersPage() {
       if (fridayDate) qs.set('friday_date', fridayDate);
       if (statusFilter) qs.set('status', statusFilter);
 
-      const [ordRes, prodRes, usrRes] = await Promise.all([
+      const [ordRes, prodRes, usrRes, setRes] = await Promise.all([
         apiFetch<{ orders: Order[] }>(`/api/orders?${qs.toString()}`),
         apiFetch<{ products: AdminProduct[] }>('/api/products'),
         apiFetch<{ users: User[] }>('/api/users'),
+        apiFetch<{ settings: BusinessSettings }>('/api/settings'),
       ]);
       setOrders(ordRes.orders);
       setProducts(prodRes.products.filter((p) => p.is_active));
       setUsers(usrRes.users.filter((u) => u.role === 'customer'));
+      setBizSettings(setRes.settings);
       setError('');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'שגיאה בטעינת הזמנות הלקוחות');
@@ -93,7 +96,7 @@ export function CustomerOrdersPage() {
     setFormFriday(fridayDate || getNextFridayISO());
     setSelectedUserId('');
     setRecipientName('');
-    setDeliveryFee('0');
+    setDeliveryFee(String(bizSettings?.default_delivery_fee ?? 0));
     setCreditDiscount('0');
     setPaidAmount('0');
     setPaymentMethod('bit');
@@ -218,7 +221,7 @@ export function CustomerOrdersPage() {
   };
 
   const copyWhatsApp = async (order: Order) => {
-    await navigator.clipboard.writeText(formatOrderWhatsApp(order));
+    await navigator.clipboard.writeText(formatOrderWhatsApp(order, bizSettings));
     setCopiedId(order.id);
     setTimeout(() => setCopiedId((c) => (c === order.id ? null : c)), 1800);
   };

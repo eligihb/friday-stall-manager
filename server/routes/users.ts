@@ -137,6 +137,29 @@ router.put('/:id', async (req, res) => {
   }
 });
 
+router.post('/:id/reset-password', async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const newPassword = String(req.body?.password || '').trim();
+    if (newPassword.length < 6) {
+      res.status(400).json({ error: 'הסיסמה החדשה חייבת להכיל לפחות 6 תווים' });
+      return;
+    }
+    const db = await getDb();
+    const existing = await db.get<{ id: number }>('SELECT id FROM users WHERE id = ?', [id]);
+    if (!existing) {
+      res.status(404).json({ error: 'המשתמש לא נמצא' });
+      return;
+    }
+    const hash = bcrypt.hashSync(newPassword, 10);
+    await db.run('UPDATE users SET password_hash = ? WHERE id = ?', [hash, id]);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('Reset password error:', err);
+    res.status(500).json({ error: 'שגיאה באיפוס הסיסמה' });
+  }
+});
+
 // Record payment received from a supplier/customer -> increases balance (reduces debt) + logs income transaction
 router.post('/:id/payment', async (req, res) => {
   try {

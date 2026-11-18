@@ -1,35 +1,77 @@
-import React, { useEffect, useState, useMemo } from 'react';
-import { Plus, Trash2, ArrowUpCircle, ArrowDownCircle, Repeat, X } from 'lucide-react';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
+import {
+  Plus,
+  Trash2,
+  ArrowUpCircle,
+  ArrowDownCircle,
+  Repeat,
+  Store,
+  Receipt,
+  Download,
+  CheckCircle2,
+  Edit3,
+  X,
+  Filter,
+  PlayCircle,
+} from 'lucide-react';
 import { apiFetch } from '../lib/api';
 import { formatHebrewDate, formatILS, getNextFridayISO, PAYMENT_METHOD_LABELS } from '../lib/format';
+import { downloadCsv } from '../lib/csvExport';
+import { FridaySelector } from '../components/FridaySelector';
 import type { FixedExpense, PaymentMethod, Transaction } from '../types';
+
+const EXPENSE_PRESETS = [
+  'חומרי גלם (קמח, שמן, תבלינים)',
+  'אריזות וכלים חד-פעמיים',
+  'דלק ומשלוחים',
+  'שכר עובד דוכן',
+  'גז, חשמל ותחזוקה',
+];
 
 export function FinancePage() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [fixedExpenses, setFixedExpenses] = useState<FixedExpense[]>([]);
-  const [cogsSummary, setCogsSummary] = useState({
-    sales_cogs: 0,
-    charity_cogs: 0,
-    charity_units: 0,
-    total_cogs: 0,
-  });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [toast, setToast] = useState('');
 
-  // מודאל תנועה חדשה
+  // סינון יומן הכנסות והוצאות
+  const [filterFriday, setFilterFriday] = useState('');
+  const [filterFrom, setFilterFrom] = useState('');
+  const [filterTo, setFilterTo] = useState('');
+  const [filterType, setFilterType] = useState<'' | 'income' | 'expense'>('');
+  const [filterPayment, setFilterPayment] = useState<'' | PaymentMethod>('');
+
+  // טופס מהיר 1: סיכום קופת דוכן (מזומן + ביט)
+  const [stallFriday, setStallFriday] = useState(getNextFridayISO());
+  const [stallCash, setStallCash] = useState('');
+  const [stallBit, setStallBit] = useState('');
+  const [stallNotes, setStallNotes] = useState('');
+  const [savingStall, setSavingStall] = useState(false);
+
+  // טופס מהיר 2: הזנת הוצאה משתנה
+  const [expFriday, setExpFriday] = useState(getNextFridayISO());
+  const [expCategory, setExpCategory] = useState(EXPENSE_PRESETS[0]);
+  const [expAmount, setExpAmount] = useState('');
+  const [expMethod, setExpMethod] = useState<PaymentMethod>('cash');
+  const [expNotes, setExpNotes] = useState('');
+  const [savingExp, setSavingExp] = useState(false);
+
+  // מודאל תנועה כללית
   const [showTxModal, setShowTxModal] = useState(false);
   const [txForm, setTxForm] = useState({
     date: new Date().toISOString().slice(0, 10),
     friday_date: getNextFridayISO(),
-    type: 'expense' as 'income' | 'expense',
+    type: 'income' as 'income' | 'expense',
     category: '',
     payment_method: 'cash' as PaymentMethod,
     amount: '',
     notes: '',
   });
 
-  // מודאל הוצאה קבועה
+  // מודאל הוצאה קבועה (יצירה / עריכה)
   const [showFixedModal, setShowFixedModal] = useState(false);
+  const [editingFixed, setEditingFixed] = useState<FixedExpense | null>(null);
   const [fixedForm, setFixedForm] = useState({
     name: '',
     amount: '',
@@ -37,42 +79,130 @@ export function FinancePage() {
     payment_method: 'transfer' as PaymentMethod,
   });
 
-  const load = async () => {
+  const showToast = (msg: string) => {
+    setToast(msg);
+    setTimeout(() => setToast(''), 2600);
+  };
+
+  const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [txRes, fixRes, sumRes] = await Promise.all([
-        apiFetch<{ transactions: Transaction[] }>('/api/finance/transactions'),
+      const qs = new URLSearchParams();
+      if (filterFriday) qs.set('friday_date', filterFriday);
+      if (filterFrom) qs.set('from_date', filterFrom);
+      if (filterTo) qs.set('to_date', filterTo);
+      if (filterType) qs.set('type', filterType);
+      if (filterPayment) qs.set('payment_method', filterPayment);
+
+      const [txRes, fixRes] = await Promise.all([
+        apiFetch<{ transactions: Transaction[] }>(`/api/finance/transactions?${qs.toString()}`),
         apiFetch<{ fixed_expenses: FixedExpense[] }>('/api/finance/fixed-expenses'),
-        apiFetch<{ sales_cogs: number; charity_cogs: number; charity_units: number; total_cogs: number }>(
-          '/api/finance/summary'
-        ),
       ]);
       setTransactions(txRes.transactions);
       setFixedExpenses(fixRes.fixed_expenses);
-      setCogsSummary(sumRes);
       setError('');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'שגיאה בטעינת נתונים כספיים');
     } finally {
       setLoading(false);
     }
-  };
+  }, [filterFriday, filterFrom, filterTo, filterType, filterPayment]);
 
   useEffect(() => {
     load();
-  }, []);
+  }, [load]);
 
   const summary = useMemo(() => {
-    const income = transactions.filter((t) => t.type === 'income').reduce((s, t) => s + t.amount, 0);
-    const expense = transactions.filter((t) => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
+    let cashIn = 0;
+    let cashOut = 0;
+    let bitIn = 0;
+    let bitOut = 0;
+    let transferIn = 0;
+    let transferOut = 0;
+    for (const t of transactions) {
+      if (t.type === 'income') {
+        if (t.payment_method === 'cash') cashIn += t.amount;
+        else if (t.payment_method === 'bit') bitIn += t.amount;
+        else transferIn += t.amount;
+      } else {
+        if (t.payment_method === 'cash') cashOut += t.amount;
+        else if (t.payment_method === 'bit') bitOut += t.amount;
+        else transferOut += t.amount;
+      }
+    }
+    const income = cashIn + bitIn + transferIn;
+    const expense = cashOut + bitOut + transferOut;
     const weeklyFixed = fixedExpenses
       .filter((f) => f.is_active && f.frequency === 'weekly')
       .reduce((s, f) => s + f.amount, 0);
     const monthlyFixed = fixedExpenses
       .filter((f) => f.is_active && f.frequency === 'monthly')
       .reduce((s, f) => s + f.amount, 0);
-    return { income, expense, net: income - expense, weeklyFixed, monthlyFixed };
+    return {
+      income,
+      expense,
+      net: income - expense,
+      cashNet: cashIn - cashOut,
+      bitNet: bitIn - bitOut,
+      transferNet: transferIn - transferOut,
+      weeklyFixed,
+      monthlyFixed,
+    };
   }, [transactions, fixedExpenses]);
+
+  const handleStallCloseout = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSavingStall(true);
+    setError('');
+    try {
+      await apiFetch('/api/finance/stall-closeout', {
+        method: 'POST',
+        body: JSON.stringify({
+          friday_date: stallFriday,
+          cash_amount: Number(stallCash) || 0,
+          bit_amount: Number(stallBit) || 0,
+          notes: stallNotes.trim(),
+        }),
+      });
+      setStallCash('');
+      setStallBit('');
+      setStallNotes('');
+      showToast('סיכום קופת הדוכן (מזומן + ביט) נרשם ביומן ההכנסות!');
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'שגיאה ברישום סיכום הקופה');
+    } finally {
+      setSavingStall(false);
+    }
+  };
+
+  const handleQuickExpense = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSavingExp(true);
+    setError('');
+    try {
+      await apiFetch('/api/finance/transactions', {
+        method: 'POST',
+        body: JSON.stringify({
+          date: new Date().toISOString().slice(0, 10),
+          friday_date: expFriday || null,
+          type: 'expense',
+          category: expCategory.trim(),
+          payment_method: expMethod,
+          amount: Number(expAmount),
+          notes: expNotes.trim(),
+        }),
+      });
+      setExpAmount('');
+      setExpNotes('');
+      showToast('ההוצאה המשתנה נרשמה בהצלחה!');
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'שגיאה ברישום ההוצאה');
+    } finally {
+      setSavingExp(false);
+    }
+  };
 
   const handleCreateTx = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -87,6 +217,7 @@ export function FinancePage() {
       });
       setShowTxModal(false);
       setTxForm((f) => ({ ...f, category: '', amount: '', notes: '' }));
+      showToast('התנועה נשמרה ביומן!');
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'שגיאה ברישום תנועה');
@@ -94,26 +225,61 @@ export function FinancePage() {
   };
 
   const handleDeleteTx = async (id: number) => {
-    if (!window.confirm('למחוק תנועה זו?')) return;
+    if (!window.confirm('למחוק תנועה זו מהיומן?')) return;
     await apiFetch(`/api/finance/transactions/${id}`, { method: 'DELETE' });
     await load();
   };
 
-  const handleCreateFixed = async (e: React.FormEvent) => {
+  const openAddFixed = () => {
+    setEditingFixed(null);
+    setFixedForm({ name: '', amount: '', frequency: 'weekly', payment_method: 'transfer' });
+    setShowFixedModal(true);
+  };
+
+  const openEditFixed = (f: FixedExpense) => {
+    setEditingFixed(f);
+    setFixedForm({
+      name: f.name,
+      amount: String(f.amount),
+      frequency: f.frequency,
+      payment_method: f.payment_method,
+    });
+    setShowFixedModal(true);
+  };
+
+  const handleSaveFixed = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      await apiFetch('/api/finance/fixed-expenses', {
-        method: 'POST',
-        body: JSON.stringify({
-          ...fixedForm,
-          amount: Number(fixedForm.amount),
-        }),
-      });
+      if (editingFixed) {
+        await apiFetch(`/api/finance/fixed-expenses/${editingFixed.id}`, {
+          method: 'PUT',
+          body: JSON.stringify({ ...fixedForm, amount: Number(fixedForm.amount) }),
+        });
+      } else {
+        await apiFetch('/api/finance/fixed-expenses', {
+          method: 'POST',
+          body: JSON.stringify({ ...fixedForm, amount: Number(fixedForm.amount) }),
+        });
+      }
       setShowFixedModal(false);
-      setFixedForm({ name: '', amount: '', frequency: 'weekly', payment_method: 'transfer' });
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'שגיאה בהוספת הוצאה קבועה');
+      setError(err instanceof Error ? err.message : 'שגיאה בשמירת ההוצאה הקבועה');
+    }
+  };
+
+  const handleApplyFixedBulk = async (frequency: 'weekly' | 'monthly') => {
+    const lbl = frequency === 'weekly' ? 'השבועיות' : 'החודשיות';
+    if (!window.confirm(`להחיל את כל ההוצאות הקבועות ${lbl} הפעילות ליומן התנועות?`)) return;
+    try {
+      const res = await apiFetch<{ count: number }>('/api/finance/fixed-expenses/apply', {
+        method: 'POST',
+        body: JSON.stringify({ frequency, friday_date: stallFriday }),
+      });
+      showToast(`נרשמו ${res.count} הוצאות קבועות ${lbl} ביומן!`);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'שגיאה בהחלת הוצאות קבועות');
     }
   };
 
@@ -128,99 +294,318 @@ export function FinancePage() {
     await load();
   };
 
-  const applyFixedToTransactions = async (f: FixedExpense) => {
-    await apiFetch('/api/finance/transactions', {
-      method: 'POST',
-      body: JSON.stringify({
-        date: new Date().toISOString().slice(0, 10),
-        friday_date: getNextFridayISO(),
-        type: 'expense',
-        category: f.name,
-        payment_method: f.payment_method,
-        amount: f.amount,
-        notes: `רישום מהוצאה קבועה (${f.frequency === 'weekly' ? 'שבועי' : 'חודשי'})`,
-      }),
-    });
-    await load();
+  const exportTransactionsCsv = () => {
+    downloadCsv(
+      `יומן-תנועות-${new Date().toISOString().slice(0, 10)}.csv`,
+      ['תאריך', 'יום שישי', 'סוג', 'קטגוריה', 'אמצעי תשלום', 'סכום (₪)', 'לקוח/ספק', 'הערות'],
+      transactions.map((t) => [
+        t.date,
+        t.friday_date || '',
+        t.type === 'income' ? 'הכנסה' : 'הוצאה',
+        t.category,
+        PAYMENT_METHOD_LABELS[t.payment_method],
+        t.type === 'income' ? t.amount : -t.amount,
+        t.user_name || '',
+        t.notes,
+      ])
+    );
   };
 
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h2 className="font-serif text-3xl font-bold text-slateink-800">כספים ותזרים</h2>
+          <h2 className="font-serif text-3xl font-bold text-slateink-800">
+            יומן הכנסות והוצאות (ביט מול מזומן)
+          </h2>
           <p className="text-sm text-slate-600 mt-1">
-            מעקב הכנסות והוצאות (מזומן, ביט, העברה בנקאית) וניהול הוצאות קבועות שבועיות וחודשיות.
+            סיכום מהיר של קופת הדוכן, תיעוד הוצאות משתנות וקבועות, וסנכרון אוטומטי מכל תשלום בהזמנות.
           </p>
         </div>
-        <div className="flex gap-2.5">
+        <div className="flex flex-wrap gap-2">
           <button
             type="button"
             onClick={() => setShowTxModal(true)}
-            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#C85A17] hover:bg-[#A9440F] text-white font-bold text-sm shadow-sm"
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#1E242B] hover:bg-slate-800 text-white font-bold text-xs shadow-sm"
           >
             <Plus className="w-4 h-4" />
-            <span>רישום תנועה</span>
+            <span>תנועה ידנית</span>
           </button>
           <button
             type="button"
-            onClick={() => setShowFixedModal(true)}
-            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white border border-[#E8D5BE] hover:border-[#C85A17] text-slate-800 font-bold text-sm"
+            onClick={exportTransactionsCsv}
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white border border-[#E8D5BE] hover:border-[#C85A17] text-slate-800 font-bold text-xs"
           >
-            <Repeat className="w-4 h-4 text-[#C85A17]" />
-            <span>הוצאה קבועה</span>
+            <Download className="w-4 h-4 text-[#C85A17]" />
+            <span>ייצוא יומן (CSV)</span>
           </button>
         </div>
       </div>
 
-      {/* כרטיסי סיכום */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5 tabular-nums">
-        <div className="bg-white rounded-2xl p-4 border border-[#E8D5BE]/80 shadow-soft">
-          <div className="text-xs font-bold text-slate-500">סה״כ הכנסות</div>
-          <div className="text-2xl font-extrabold text-emerald-700 mt-1.5">{formatILS(summary.income)}</div>
+      {toast && (
+        <div className="p-3.5 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm font-bold flex items-center gap-2">
+          <CheckCircle2 className="w-5 h-5 shrink-0" />
+          <span>{toast}</span>
         </div>
-        <div className="bg-white rounded-2xl p-4 border border-[#E8D5BE]/80 shadow-soft">
-          <div className="text-xs font-bold text-slate-500">סה״כ הוצאות תזרים</div>
-          <div className="text-2xl font-extrabold text-red-700 mt-1.5">{formatILS(summary.expense)}</div>
-        </div>
-        <div className="bg-white rounded-2xl p-4 border border-[#E8D5BE]/80 shadow-soft">
-          <div className="text-xs font-bold text-slate-500">מאזן תזרימי נטו</div>
-          <div
-            className={`text-2xl font-extrabold mt-1.5 ${
-              summary.net >= 0 ? 'text-slate-900' : 'text-red-700'
-            }`}
-          >
-            {formatILS(summary.net)}
-          </div>
-        </div>
-        <div className="bg-white rounded-2xl p-4 border border-[#E8D5BE]/80 shadow-soft">
-          <div className="text-xs font-bold text-slate-500">עלות מכר הזמנות (COGS)</div>
-          <div className="text-2xl font-extrabold text-amber-800 mt-1.5">{formatILS(cogsSummary.sales_cogs)}</div>
-        </div>
-        <div className="bg-purple-50/70 rounded-2xl p-4 border border-purple-200 shadow-soft">
-          <div className="text-xs font-bold text-purple-900">עלות חבילות חסד (נזקקים)</div>
-          <div className="text-2xl font-extrabold text-purple-900 mt-1.5">{formatILS(cogsSummary.charity_cogs)}</div>
-          <div className="text-[11px] text-purple-700 mt-0.5">{cogsSummary.charity_units} יח׳ תרומה (₪0 הכנסה)</div>
-        </div>
-      </div>
-
+      )}
       {error && (
-        <div className="p-3.5 rounded-xl bg-red-50 border border-red-200 text-red-700 text-sm font-semibold">
+        <div className="p-3.5 rounded-2xl bg-red-50 border border-red-200 text-red-700 text-sm font-bold">
           {error}
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* ספר תנועות */}
-        <div className="lg:col-span-2 bg-white rounded-2xl border border-[#E8D5BE]/80 shadow-soft overflow-hidden">
-          <div className="px-5 py-4 border-b border-[#F3E9DC] flex items-center justify-between">
-            <h3 className="font-bold text-lg text-slate-900">יומן תנועות כספיות</h3>
-            <span className="text-xs text-slate-500 tabular-nums">{transactions.length} תנועות</span>
+      {/* שני טפסים מהירים: סיכום קופת דוכן + הוצאה משתנה */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        {/* טופס 1: סיכום קופת דוכן */}
+        <form
+          onSubmit={handleStallCloseout}
+          className="bg-gradient-to-br from-[#FFF7ED] to-white rounded-3xl border border-[#E8D5BE] shadow-soft p-5 space-y-4"
+        >
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2.5">
+              <div className="w-9 h-9 rounded-xl bg-[#C85A17] text-white flex items-center justify-center">
+                <Store className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="font-serif text-xl font-bold text-slate-900">סיכום קופת דוכן (סוף יום שישי)</h3>
+                <p className="text-xs text-slate-500">הזנת פדיון מכירות חופשיות בדוכן במזומן ובביט בשני קליקים.</p>
+              </div>
+            </div>
           </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div>
+              <label className="block text-xs font-bold text-slate-600 mb-1">יום שישי</label>
+              <input
+                type="date"
+                required
+                value={stallFriday}
+                onChange={(e) => setStallFriday(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl border border-[#E8D5BE] bg-white text-sm font-semibold"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-emerald-800 mb-1">מזומן בקופה (₪)</label>
+              <input
+                type="number"
+                min="0"
+                step="0.5"
+                dir="ltr"
+                placeholder="0.00"
+                value={stallCash}
+                onChange={(e) => setStallCash(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl border border-emerald-300 bg-white text-left tabular-nums font-extrabold text-emerald-800"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-sky-800 mb-1">ביט בדוכן (₪)</label>
+              <input
+                type="number"
+                min="0"
+                step="0.5"
+                dir="ltr"
+                placeholder="0.00"
+                value={stallBit}
+                onChange={(e) => setStallBit(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl border border-sky-300 bg-white text-left tabular-nums font-extrabold text-sky-800"
+              />
+            </div>
+          </div>
+
+          <div className="flex flex-col sm:flex-row gap-2.5 items-stretch sm:items-center">
+            <input
+              type="text"
+              value={stallNotes}
+              onChange={(e) => setStallNotes(e.target.value)}
+              placeholder="הערה (לדוגמה: דוכן שוק ראש העין)"
+              className="flex-1 px-3 py-2 rounded-xl border border-[#E8D5BE] bg-white text-sm"
+            />
+            <button
+              type="submit"
+              disabled={savingStall || (!Number(stallCash) && !Number(stallBit))}
+              className="px-5 py-2.5 rounded-xl bg-[#C85A17] hover:bg-[#A9440F] disabled:opacity-50 text-white font-bold text-sm shadow-sm whitespace-nowrap"
+            >
+              {savingStall
+                ? 'רושם...'
+                : `רשום קופה (${formatILS((Number(stallCash) || 0) + (Number(stallBit) || 0))})`}
+            </button>
+          </div>
+        </form>
+
+        {/* טופס 2: הזנת הוצאה משתנה מהירה */}
+        <form
+          onSubmit={handleQuickExpense}
+          className="bg-white rounded-3xl border border-[#E8D5BE] shadow-soft p-5 space-y-3.5"
+        >
+          <div className="flex items-center gap-2.5">
+            <div className="w-9 h-9 rounded-xl bg-red-100 text-red-700 flex items-center justify-center">
+              <Receipt className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="font-serif text-xl font-bold text-slate-900">רישום הוצאה משתנה מהירה</h3>
+              <p className="text-xs text-slate-500">חומרי גלם, אריזות, דלק, שכר עובד דוכן ועוד.</p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap gap-1.5">
+            {EXPENSE_PRESETS.map((preset) => (
+              <button
+                key={preset}
+                type="button"
+                onClick={() => setExpCategory(preset)}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-colors ${
+                  expCategory === preset
+                    ? 'bg-red-700 text-white'
+                    : 'bg-[#FAF6F0] text-slate-600 hover:bg-[#F3E9DC]'
+                }`}
+              >
+                {preset}
+              </button>
+            ))}
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+            <input
+              type="text"
+              required
+              value={expCategory}
+              onChange={(e) => setExpCategory(e.target.value)}
+              placeholder="קטגוריה"
+              className="sm:col-span-1 px-3 py-2 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] text-sm"
+            />
+            <input
+              type="number"
+              min="0.01"
+              step="0.01"
+              required
+              dir="ltr"
+              placeholder="סכום (₪)"
+              value={expAmount}
+              onChange={(e) => setExpAmount(e.target.value)}
+              className="px-3 py-2 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] text-left tabular-nums font-bold text-sm"
+            />
+            <select
+              value={expMethod}
+              onChange={(e) => setExpMethod(e.target.value as PaymentMethod)}
+              className="px-3 py-2 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] text-sm font-semibold"
+            >
+              {(['cash', 'bit', 'transfer'] as const).map((pm) => (
+                <option key={pm} value={pm}>
+                  {PAYMENT_METHOD_LABELS[pm]}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="flex flex-col sm:flex-row gap-2.5 items-stretch sm:items-center">
+            <input
+              type="date"
+              value={expFriday}
+              onChange={(e) => setExpFriday(e.target.value)}
+              className="px-3 py-2 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] text-xs font-semibold"
+              title="שיוך לשישי"
+            />
+            <input
+              type="text"
+              value={expNotes}
+              onChange={(e) => setExpNotes(e.target.value)}
+              placeholder="פירוט / שם ספק חומרי גלם"
+              className="flex-1 px-3 py-2 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] text-sm"
+            />
+            <button
+              type="submit"
+              disabled={savingExp}
+              className="px-5 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white font-bold text-sm whitespace-nowrap"
+            >
+              {savingExp ? 'שומר...' : 'רשום הוצאה'}
+            </button>
+          </div>
+        </form>
+      </div>
+
+      {/* כרטיסי תזרים לפי אמצעי תשלום (לפי הסינון הנוכחי) */}
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 tabular-nums">
+        <div className="bg-white rounded-2xl p-4 border border-[#E8D5BE]/80 shadow-soft">
+          <div className="text-xs font-bold text-slate-500">הכנסות (מסונן)</div>
+          <div className="text-xl font-extrabold text-emerald-700 mt-1">{formatILS(summary.income)}</div>
+        </div>
+        <div className="bg-white rounded-2xl p-4 border border-[#E8D5BE]/80 shadow-soft">
+          <div className="text-xs font-bold text-slate-500">הוצאות (מסונן)</div>
+          <div className="text-xl font-extrabold text-red-700 mt-1">{formatILS(summary.expense)}</div>
+        </div>
+        <div className="bg-white rounded-2xl p-4 border border-emerald-200 shadow-soft">
+          <div className="text-xs font-bold text-emerald-800">נטו מזומן</div>
+          <div className="text-xl font-extrabold text-slate-900 mt-1">{formatILS(summary.cashNet)}</div>
+        </div>
+        <div className="bg-white rounded-2xl p-4 border border-sky-200 shadow-soft">
+          <div className="text-xs font-bold text-sky-800">נטו ביט</div>
+          <div className="text-xl font-extrabold text-slate-900 mt-1">{formatILS(summary.bitNet)}</div>
+        </div>
+        <div className="bg-white rounded-2xl p-4 border border-amber-200 shadow-soft">
+          <div className="text-xs font-bold text-amber-800">נטו העברה בנקאית</div>
+          <div className="text-xl font-extrabold text-slate-900 mt-1">{formatILS(summary.transferNet)}</div>
+        </div>
+      </div>
+
+      {/* יומן תנועות + הוצאות קבועות */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* ספר תנועות עם סינון מלא */}
+        <div className="lg:col-span-2 bg-white rounded-3xl border border-[#E8D5BE] shadow-soft overflow-hidden">
+          <div className="p-4 border-b border-[#F3E9DC] space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Filter className="w-4 h-4 text-[#C85A17]" />
+                <h3 className="font-bold text-lg text-slate-900">יומן תנועות כספיות</h3>
+              </div>
+              <span className="text-xs font-bold text-slate-500 tabular-nums">
+                {transactions.length} רשומות
+              </span>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-xs">
+              <FridaySelector value={filterFriday} onChange={setFilterFriday} allowAll label="" />
+              <input
+                type="date"
+                value={filterFrom}
+                onChange={(e) => setFilterFrom(e.target.value)}
+                className="px-2.5 py-2 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7]"
+                title="מתאריך"
+              />
+              <input
+                type="date"
+                value={filterTo}
+                onChange={(e) => setFilterTo(e.target.value)}
+                className="px-2.5 py-2 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7]"
+                title="עד תאריך"
+              />
+              <select
+                value={filterType}
+                onChange={(e) => setFilterType(e.target.value as '' | 'income' | 'expense')}
+                className="px-2.5 py-2 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] font-semibold"
+              >
+                <option value="">הכנסות והוצאות</option>
+                <option value="income">הכנסות בלבד</option>
+                <option value="expense">הוצאות בלבד</option>
+              </select>
+              <select
+                value={filterPayment}
+                onChange={(e) => setFilterPayment(e.target.value as '' | PaymentMethod)}
+                className="px-2.5 py-2 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] font-semibold"
+              >
+                <option value="">כל אמצעי התשלום</option>
+                <option value="cash">מזומן</option>
+                <option value="bit">ביט</option>
+                <option value="transfer">העברה בנקאית</option>
+              </select>
+            </div>
+          </div>
+
           {loading ? (
-            <div className="p-8 text-center text-slate-400">טוען...</div>
+            <div className="p-8 text-center text-slate-400">טוען תנועות...</div>
           ) : transactions.length === 0 ? (
-            <div className="p-8 text-center text-slate-400">אין תנועות רשומות.</div>
+            <div className="p-10 text-center text-slate-400 text-sm">
+              לא נמצאו תנועות לפי הסינון הנוכחי.
+            </div>
           ) : (
             <div className="divide-y divide-[#F3E9DC]">
               {transactions.map((t) => (
@@ -233,14 +618,26 @@ export function FinancePage() {
                     )}
                     <div>
                       <div className="font-bold text-sm text-slate-900">{t.category}</div>
-                      <div className="text-xs text-slate-500 mt-0.5">
-                        {formatHebrewDate(t.date)} · {PAYMENT_METHOD_LABELS[t.payment_method]}
-                        {t.user_name ? ` · ${t.user_name}` : ''}
+                      <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-500 mt-0.5">
+                        <span>{formatHebrewDate(t.date)}</span>
+                        <span>·</span>
+                        <span
+                          className={`px-2 py-0.5 rounded-md font-bold text-[11px] ${
+                            t.payment_method === 'cash'
+                              ? 'bg-emerald-50 text-emerald-800'
+                              : t.payment_method === 'bit'
+                              ? 'bg-sky-50 text-sky-800'
+                              : 'bg-amber-50 text-amber-800'
+                          }`}
+                        >
+                          {PAYMENT_METHOD_LABELS[t.payment_method]}
+                        </span>
+                        {t.user_name && <span>· {t.user_name}</span>}
                       </div>
                       {t.notes && <div className="text-xs text-slate-400 mt-0.5">{t.notes}</div>}
                     </div>
                   </div>
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-2.5 shrink-0">
                     <span
                       className={`font-extrabold tabular-nums text-sm ${
                         t.type === 'income' ? 'text-emerald-700' : 'text-red-700'
@@ -264,19 +661,51 @@ export function FinancePage() {
         </div>
 
         {/* הוצאות קבועות */}
-        <div className="bg-white rounded-2xl border border-[#E8D5BE]/80 shadow-soft p-5 space-y-4">
-          <div>
-            <h3 className="font-bold text-lg text-slate-900">הוצאות קבועות</h3>
-            <p className="text-xs text-slate-500 mt-0.5 tabular-nums">
-              שבועי פעיל: {formatILS(summary.weeklyFixed)} · חודשי פעיל: {formatILS(summary.monthlyFixed)}
-            </p>
+        <div className="bg-white rounded-3xl border border-[#E8D5BE] shadow-soft p-5 space-y-4">
+          <div className="flex items-center justify-between gap-2">
+            <div>
+              <h3 className="font-bold text-lg text-slate-900 flex items-center gap-2">
+                <Repeat className="w-4 h-4 text-[#C85A17]" />
+                <span>הוצאות קבועות</span>
+              </h3>
+              <p className="text-xs text-slate-500 mt-0.5 tabular-nums">
+                שבועי פעיל: {formatILS(summary.weeklyFixed)} · חודשי פעיל: {formatILS(summary.monthlyFixed)}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={openAddFixed}
+              className="p-2 rounded-xl bg-[#FFF7ED] text-[#C85A17] hover:bg-[#FFEDD5]"
+              title="הוסף הוצאה קבועה"
+            >
+              <Plus className="w-4 h-4" />
+            </button>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => handleApplyFixedBulk('weekly')}
+              className="py-2 px-2.5 rounded-xl bg-[#FAF6F0] hover:bg-[#FFF7ED] border border-[#E8D5BE] text-[11px] font-bold text-[#8A330B] flex items-center justify-center gap-1"
+            >
+              <PlayCircle className="w-3.5 h-3.5" />
+              <span>החל שבועיות ליומן</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => handleApplyFixedBulk('monthly')}
+              className="py-2 px-2.5 rounded-xl bg-[#FAF6F0] hover:bg-[#FFF7ED] border border-[#E8D5BE] text-[11px] font-bold text-[#8A330B] flex items-center justify-center gap-1"
+            >
+              <PlayCircle className="w-3.5 h-3.5" />
+              <span>החל חודשיות ליומן</span>
+            </button>
           </div>
 
           <div className="space-y-2.5">
             {fixedExpenses.map((f) => (
               <div
                 key={f.id}
-                className={`p-3.5 rounded-xl border ${
+                className={`p-3.5 rounded-2xl border ${
                   f.is_active ? 'border-[#E8D5BE] bg-[#FDFBF7]' : 'border-slate-200 bg-slate-50 opacity-60'
                 }`}
               >
@@ -292,18 +721,20 @@ export function FinancePage() {
                 <div className="flex items-center justify-between mt-3 pt-2 border-t border-[#F3E9DC]">
                   <button
                     type="button"
-                    onClick={() => applyFixedToTransactions(f)}
-                    className="text-xs font-bold text-[#C85A17] hover:underline"
+                    onClick={() => toggleFixed(f.id)}
+                    className={`text-xs font-bold ${
+                      f.is_active ? 'text-emerald-700' : 'text-slate-500'
+                    }`}
                   >
-                    + רשום בתזרים היום
+                    {f.is_active ? 'פעיל (השבת)' : 'מושבת (הפעל)'}
                   </button>
                   <div className="flex items-center gap-2">
                     <button
                       type="button"
-                      onClick={() => toggleFixed(f.id)}
-                      className="text-xs font-semibold text-slate-600 hover:text-slate-900"
+                      onClick={() => openEditFixed(f)}
+                      className="text-slate-400 hover:text-slate-800"
                     >
-                      {f.is_active ? 'השבת' : 'הפעל'}
+                      <Edit3 className="w-3.5 h-3.5" />
                     </button>
                     <button
                       type="button"
@@ -320,12 +751,12 @@ export function FinancePage() {
         </div>
       </div>
 
-      {/* מודאל תנועה */}
+      {/* מודאל תנועה ידנית */}
       {showTxModal && (
         <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-[#E8D5BE]">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="font-serif text-xl font-bold">רישום תנועה כספית</h3>
+              <h3 className="font-serif text-xl font-bold">רישום תנועה ידנית</h3>
               <button type="button" onClick={() => setShowTxModal(false)} className="p-1 text-slate-400">
                 <X className="w-5 h-5" />
               </button>
@@ -362,7 +793,6 @@ export function FinancePage() {
                   required
                   value={txForm.category}
                   onChange={(e) => setTxForm({ ...txForm, category: e.target.value })}
-                  placeholder="לדוגמה: מכירות דוכן מזומן / רכישת קמח"
                   className="w-full px-3.5 py-2 rounded-xl border border-[#E8D5BE] text-sm"
                 />
               </div>
@@ -440,12 +870,14 @@ export function FinancePage() {
         <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-[#E8D5BE]">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="font-serif text-xl font-bold">הוספת הוצאה קבועה</h3>
+              <h3 className="font-serif text-xl font-bold">
+                {editingFixed ? 'עריכת הוצאה קבועה' : 'הוספת הוצאה קבועה'}
+              </h3>
               <button type="button" onClick={() => setShowFixedModal(false)} className="p-1 text-slate-400">
                 <X className="w-5 h-5" />
               </button>
             </div>
-            <form onSubmit={handleCreateFixed} className="space-y-3.5">
+            <form onSubmit={handleSaveFixed} className="space-y-3.5">
               <div>
                 <label className="block text-xs font-semibold text-slate-600 mb-1">שם ההוצאה</label>
                 <input
@@ -453,7 +885,7 @@ export function FinancePage() {
                   required
                   value={fixedForm.name}
                   onChange={(e) => setFixedForm({ ...fixedForm, name: e.target.value })}
-                  placeholder="לדוגמה: גז וחשמל למאפייה"
+                  placeholder="לדוגמה: שכירות מטבח / ביטוח / אחסון / תוכנה"
                   className="w-full px-3.5 py-2 rounded-xl border border-[#E8D5BE] text-sm"
                 />
               </div>
@@ -505,7 +937,7 @@ export function FinancePage() {
                 type="submit"
                 className="w-full py-2.5 rounded-xl bg-[#C85A17] hover:bg-[#A9440F] text-white font-bold text-sm"
               >
-                שמור הוצאה קבועה
+                {editingFixed ? 'עדכן הוצאה קבועה' : 'שמור הוצאה קבועה'}
               </button>
             </form>
           </div>

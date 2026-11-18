@@ -11,6 +11,7 @@ import ordersRoutes from './routes/orders.ts';
 import usersRoutes from './routes/users.ts';
 import financeRoutes from './routes/finance.ts';
 import inventoryRoutes from './routes/inventory.ts';
+import settingsRoutes from './routes/settings.ts';
 
 export function createApp() {
   const app = express();
@@ -39,6 +40,7 @@ export function createApp() {
   app.use('/api/users', usersRoutes);
   app.use('/api/finance', financeRoutes);
   app.use('/api/inventory', inventoryRoutes);
+  app.use('/api/settings', settingsRoutes);
 
   // Serve built frontend in production
   const distDir = path.resolve(process.cwd(), 'dist');

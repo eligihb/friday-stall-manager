@@ -25,6 +25,7 @@ import { WhatsAppOrderParser } from '../components/WhatsAppOrderParser';
 import type { AdminTab } from '../components/Layout';
 import type {
   AdminProduct,
+  BusinessSettings,
   FridayInventoryItem,
   Order,
   OrderStatus,
@@ -48,6 +49,7 @@ export function AdminDashboard({ onNavigate }: AdminDashboardProps) {
   const [users, setUsers] = useState<User[]>([]);
   const [products, setProducts] = useState<AdminProduct[]>([]);
   const [inventory, setInventory] = useState<FridayInventoryItem[]>([]);
+  const [bizSettings, setBizSettings] = useState<BusinessSettings | undefined>(undefined);
   const [extras, setExtras] = useState<Record<number, number>>({});
   const [savingExtraId, setSavingExtraId] = useState<number | null>(null);
   const [savedExtraId, setSavedExtraId] = useState<number | null>(null);
@@ -59,16 +61,18 @@ export function AdminDashboard({ onNavigate }: AdminDashboardProps) {
   const loadAll = useCallback(async () => {
     setLoading(true);
     try {
-      const [ordRes, usrRes, prodRes, invRes] = await Promise.all([
+      const [ordRes, usrRes, prodRes, invRes, setRes] = await Promise.all([
         apiFetch<{ orders: Order[] }>(`/api/orders?friday_date=${fridayDate}`),
         apiFetch<{ users: User[] }>('/api/users'),
         apiFetch<{ products: AdminProduct[] }>('/api/products'),
         apiFetch<{ items: FridayInventoryItem[] }>(`/api/inventory?friday_date=${fridayDate}`),
+        apiFetch<{ settings: BusinessSettings }>('/api/settings'),
       ]);
       setOrders(ordRes.orders);
       setUsers(usrRes.users);
       setProducts(prodRes.products);
       setInventory(invRes.items);
+      setBizSettings(setRes.settings);
       const map: Record<number, number> = {};
       for (const it of invRes.items) {
         map[it.product_id] = it.extra_stall_qty;
@@ -146,7 +150,7 @@ export function AdminDashboard({ onNavigate }: AdminDashboardProps) {
       const ex = extras[it.product_id] ?? it.extra_stall_qty;
       return { ...it, extra_stall_qty: ex, total_to_bake: it.ordered_total + ex };
     });
-    const text = formatProductionWhatsApp(fridayDate, liveItems);
+    const text = formatProductionWhatsApp(fridayDate, liveItems, bizSettings);
     await navigator.clipboard.writeText(text);
     setCopiedProd(true);
     setTimeout(() => setCopiedProd(false), 2000);
@@ -170,7 +174,7 @@ export function AdminDashboard({ onNavigate }: AdminDashboardProps) {
   };
 
   const copyOrderSummary = async (order: Order) => {
-    await navigator.clipboard.writeText(formatOrderWhatsApp(order));
+    await navigator.clipboard.writeText(formatOrderWhatsApp(order, bizSettings));
     setCopiedOrderId(order.id);
     setTimeout(() => setCopiedOrderId((c) => (c === order.id ? null : c)), 1800);
   };

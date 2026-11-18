@@ -8,7 +8,8 @@ import { SupplierOrdersPage } from './pages/SupplierOrdersPage';
 import { CharityOrdersPage } from './pages/CharityOrdersPage';
 import { ProductsCatalog } from './pages/ProductsCatalog';
 import { FinancePage } from './pages/FinancePage';
-import { UsersPage } from './pages/UsersPage';
+import { ReportsPage } from './pages/ReportsPage';
+import { SettingsPage } from './pages/SettingsPage';
 import { SupplierPortal } from './pages/SupplierPortal';
 import { CustomerPortal } from './pages/CustomerPortal';
 
@@ -41,7 +42,8 @@ function AppRouter() {
           {adminTab === 'charity-orders' && <CharityOrdersPage />}
           {adminTab === 'products' && <ProductsCatalog />}
           {adminTab === 'finance' && <FinancePage />}
-          {adminTab === 'users' && <UsersPage />}
+          {adminTab === 'reports' && <ReportsPage />}
+          {adminTab === 'settings' && <SettingsPage />}
         </>
       ) : user.role === 'supplier' ? (
         <SupplierPortal />

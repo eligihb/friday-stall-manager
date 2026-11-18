@@ -213,6 +213,16 @@ async function initializeSchemaAndSeed(db: DbClient): Promise<void> {
         UNIQUE (friday_date, product_id)
       );
 
+      CREATE TABLE IF NOT EXISTS business_settings (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        business_name TEXT NOT NULL DEFAULT 'המטבח התימני',
+        default_delivery_fee REAL NOT NULL DEFAULT 0,
+        whatsapp_footer TEXT NOT NULL DEFAULT 'שבת שלום ומבורכת! 🕯️'
+      );
+
+      INSERT OR IGNORE INTO business_settings (id, business_name, default_delivery_fee, whatsapp_footer)
+      VALUES (1, 'המטבח התימני', 0, 'שבת שלום ומבורכת! 🕯️');
+
       CREATE INDEX IF NOT EXISTS idx_orders_friday_date ON orders(friday_date);
       CREATE INDEX IF NOT EXISTS idx_orders_user_id ON orders(user_id);
       CREATE INDEX IF NOT EXISTS idx_order_items_order_id ON order_items(order_id);

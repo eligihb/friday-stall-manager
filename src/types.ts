@@ -98,3 +98,62 @@ export interface FridayInventoryItem {
   extra_stall_qty: number;
   total_to_bake: number;
 }
+
+export interface BusinessSettings {
+  business_name: string;
+  default_delivery_fee: number;
+  whatsapp_footer: string;
+}
+
+export interface PaymentBucket {
+  in: number;
+  out: number;
+  net: number;
+}
+
+export interface PnlReportResponse {
+  period: { mode: 'friday' | 'month' | 'custom'; label: string };
+  pnl: {
+    customer_orders_revenue: number;
+    supplier_orders_revenue: number;
+    walkin_stall_cash: number;
+    walkin_stall_bit: number;
+    walkin_stall_revenue: number;
+    total_revenue: number;
+    orders_cogs: number;
+    extra_stall_cogs: number;
+    extra_stall_units: number;
+    charity_cogs: number;
+    charity_units: number;
+    total_cogs: number;
+    gross_profit: number;
+    gross_margin_pct: number;
+    variable_expenses: number;
+    expense_breakdown: Array<{ category: string; amount: number }>;
+    prorated_fixed_expenses: number;
+    prorated_fixed_items: Array<{
+      id: number;
+      name: string;
+      frequency: 'weekly' | 'monthly';
+      base_amount: number;
+      prorated_amount: number;
+    }>;
+    posted_fixed_expenses: number;
+    net_profit: number;
+    net_margin_pct: number;
+  };
+  reconciliation: {
+    cash: PaymentBucket;
+    bit: PaymentBucket;
+    transfer: PaymentBucket;
+    digital_combined: PaymentBucket;
+    total_in: number;
+    total_out: number;
+    total_net: number;
+  };
+  open_balances: {
+    items: User[];
+    total_receivables: number;
+    total_credits: number;
+  };
+}

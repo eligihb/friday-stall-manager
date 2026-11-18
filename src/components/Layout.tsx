@@ -7,7 +7,8 @@ import {
   Store,
   HeartHandshake,
   Wallet,
-  Users,
+  BarChart3,
+  Settings,
   LogOut,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
@@ -20,7 +21,8 @@ export type AdminTab =
   | 'charity-orders'
   | 'products'
   | 'finance'
-  | 'users';
+  | 'reports'
+  | 'settings';
 
 interface NavItem {
   id: AdminTab;
@@ -35,8 +37,9 @@ const ADMIN_NAV: NavItem[] = [
   { id: 'supplier-orders', label: 'הזמנות ספקים', shortLabel: 'ספקים', icon: Store },
   { id: 'charity-orders', label: 'המשפחות הנזקקות', shortLabel: 'תרומות', icon: HeartHandshake },
   { id: 'products', label: 'מחירון מוצרים', shortLabel: 'מחירון', icon: Tag },
-  { id: 'finance', label: 'כספים ותזרים', shortLabel: 'כספים', icon: Wallet },
-  { id: 'users', label: 'משתמשים וחשבונות', shortLabel: 'חשבונות', icon: Users },
+  { id: 'finance', label: 'הכנסות, הוצאות וקבועות', shortLabel: 'כספים', icon: Wallet },
+  { id: 'reports', label: 'דוחות ורווח והפסד', shortLabel: 'דוחות', icon: BarChart3 },
+  { id: 'settings', label: 'הגדרות ומשתמשים', shortLabel: 'הגדרות', icon: Settings },
 ];
 
 interface LayoutProps {
@@ -158,7 +161,7 @@ export function Layout({ activeTab, onSelectTab, children }: LayoutProps) {
         {/* ניווט תחתון למובייל למנהל */}
         {isAdmin && (
           <nav className="lg:hidden fixed bottom-0 inset-x-0 z-30 bg-white border-t border-[#E8D5BE] shadow-lg px-1 py-1.5 overflow-x-auto">
-            <div className="grid grid-cols-7 gap-0.5 min-w-[360px]">
+            <div className="grid grid-cols-8 gap-0.5 min-w-[420px]">
               {ADMIN_NAV.map((item) => {
                 const Icon = item.icon;
                 const active = activeTab === item.id;
