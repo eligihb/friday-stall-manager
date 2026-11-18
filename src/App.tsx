@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { FridayProvider } from './context/FridayContext';
 import { AuthScreen } from './components/AuthScreen';
@@ -14,9 +14,41 @@ import { SettingsPage } from './pages/SettingsPage';
 import { SupplierPortal } from './pages/SupplierPortal';
 import { CustomerPortal } from './pages/CustomerPortal';
 
+const VALID_TABS: AdminTab[] = [
+  'dashboard',
+  'customer-orders',
+  'supplier-orders',
+  'charity-orders',
+  'products',
+  'finance',
+  'reports',
+  'settings',
+];
+
+function getTabFromHash(): AdminTab {
+  const clean = window.location.hash.replace(/^#\/?/, '') as AdminTab;
+  return VALID_TABS.includes(clean) ? clean : 'dashboard';
+}
+
 function AppRouter() {
   const { user, loading } = useAuth();
-  const [adminTab, setAdminTab] = useState<AdminTab>('dashboard');
+  const [adminTab, setAdminTabState] = useState<AdminTab>(() => getTabFromHash());
+
+  const setAdminTab = useCallback((tab: AdminTab) => {
+    setAdminTabState(tab);
+    const targetHash = `#/${tab}`;
+    if (window.location.hash !== targetHash) {
+      window.location.hash = targetHash;
+    }
+  }, []);
+
+  useEffect(() => {
+    const onHashChange = () => {
+      setAdminTabState(getTabFromHash());
+    };
+    window.addEventListener('hashchange', onHashChange);
+    return () => window.removeEventListener('hashchange', onHashChange);
+  }, []);
 
   if (loading) {
     return (

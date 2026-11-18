@@ -42,10 +42,17 @@ export function createApp() {
   app.use('/api/inventory', inventoryRoutes);
   app.use('/api/settings', settingsRoutes);
 
-  // Serve built frontend in production
+  // Serve built frontend in production (supports both /friday-stall-manager/ base and /)
   const distDir = path.resolve(process.cwd(), 'dist');
   if (fs.existsSync(distDir)) {
+    app.use('/friday-stall-manager', express.static(distDir));
     app.use(express.static(distDir));
+    app.get('/', (_req, res) => {
+      res.sendFile(path.join(distDir, 'index.html'));
+    });
+    app.get('/friday-stall-manager/*', (_req, res) => {
+      res.sendFile(path.join(distDir, 'index.html'));
+    });
     app.get('*', (_req, res) => {
       res.sendFile(path.join(distDir, 'index.html'));
     });
