@@ -7,6 +7,12 @@ import type { FixedExpense, PaymentMethod, Transaction } from '../types';
 export function FinancePage() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [fixedExpenses, setFixedExpenses] = useState<FixedExpense[]>([]);
+  const [cogsSummary, setCogsSummary] = useState({
+    sales_cogs: 0,
+    charity_cogs: 0,
+    charity_units: 0,
+    total_cogs: 0,
+  });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -34,12 +40,16 @@ export function FinancePage() {
   const load = async () => {
     setLoading(true);
     try {
-      const [txRes, fixRes] = await Promise.all([
+      const [txRes, fixRes, sumRes] = await Promise.all([
         apiFetch<{ transactions: Transaction[] }>('/api/finance/transactions'),
         apiFetch<{ fixed_expenses: FixedExpense[] }>('/api/finance/fixed-expenses'),
+        apiFetch<{ sales_cogs: number; charity_cogs: number; charity_units: number; total_cogs: number }>(
+          '/api/finance/summary'
+        ),
       ]);
       setTransactions(txRes.transactions);
       setFixedExpenses(fixRes.fixed_expenses);
+      setCogsSummary(sumRes);
       setError('');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'שגיאה בטעינת נתונים כספיים');
@@ -164,24 +174,33 @@ export function FinancePage() {
       </div>
 
       {/* כרטיסי סיכום */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 tabular-nums">
-        <div className="bg-white rounded-2xl p-5 border border-[#E8D5BE]/80 shadow-soft">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5 tabular-nums">
+        <div className="bg-white rounded-2xl p-4 border border-[#E8D5BE]/80 shadow-soft">
           <div className="text-xs font-bold text-slate-500">סה״כ הכנסות</div>
-          <div className="text-2xl font-extrabold text-emerald-700 mt-2">{formatILS(summary.income)}</div>
+          <div className="text-2xl font-extrabold text-emerald-700 mt-1.5">{formatILS(summary.income)}</div>
         </div>
-        <div className="bg-white rounded-2xl p-5 border border-[#E8D5BE]/80 shadow-soft">
-          <div className="text-xs font-bold text-slate-500">סה״כ הוצאות</div>
-          <div className="text-2xl font-extrabold text-red-700 mt-2">{formatILS(summary.expense)}</div>
+        <div className="bg-white rounded-2xl p-4 border border-[#E8D5BE]/80 shadow-soft">
+          <div className="text-xs font-bold text-slate-500">סה״כ הוצאות תזרים</div>
+          <div className="text-2xl font-extrabold text-red-700 mt-1.5">{formatILS(summary.expense)}</div>
         </div>
-        <div className="bg-white rounded-2xl p-5 border border-[#E8D5BE]/80 shadow-soft">
-          <div className="text-xs font-bold text-slate-500">מאזן נטו</div>
+        <div className="bg-white rounded-2xl p-4 border border-[#E8D5BE]/80 shadow-soft">
+          <div className="text-xs font-bold text-slate-500">מאזן תזרימי נטו</div>
           <div
-            className={`text-2xl font-extrabold mt-2 ${
+            className={`text-2xl font-extrabold mt-1.5 ${
               summary.net >= 0 ? 'text-slate-900' : 'text-red-700'
             }`}
           >
             {formatILS(summary.net)}
           </div>
+        </div>
+        <div className="bg-white rounded-2xl p-4 border border-[#E8D5BE]/80 shadow-soft">
+          <div className="text-xs font-bold text-slate-500">עלות מכר הזמנות (COGS)</div>
+          <div className="text-2xl font-extrabold text-amber-800 mt-1.5">{formatILS(cogsSummary.sales_cogs)}</div>
+        </div>
+        <div className="bg-purple-50/70 rounded-2xl p-4 border border-purple-200 shadow-soft">
+          <div className="text-xs font-bold text-purple-900">עלות חבילות חסד (נזקקים)</div>
+          <div className="text-2xl font-extrabold text-purple-900 mt-1.5">{formatILS(cogsSummary.charity_cogs)}</div>
+          <div className="text-[11px] text-purple-700 mt-0.5">{cogsSummary.charity_units} יח׳ תרומה (₪0 הכנסה)</div>
         </div>
       </div>
 

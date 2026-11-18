@@ -1,16 +1,23 @@
 import React from 'react';
 import { Calendar } from 'lucide-react';
-import { formatFridayLabel, getUpcomingFridays } from '../lib/format';
+import { formatFridayLabel, getFridaysRange, getNextFridayISO } from '../lib/format';
 
 interface FridaySelectorProps {
   value: string;
   onChange: (fridayIso: string) => void;
   label?: string;
+  allowAll?: boolean;
 }
 
-export function FridaySelector({ value, onChange, label = 'יום שישי:' }: FridaySelectorProps) {
-  const fridays = getUpcomingFridays(6);
-  const options = fridays.includes(value) ? fridays : [value, ...fridays];
+export function FridaySelector({
+  value,
+  onChange,
+  label = 'יום שישי:',
+  allowAll = false,
+}: FridaySelectorProps) {
+  const nextFri = getNextFridayISO();
+  const fridays = getFridaysRange(3, 6);
+  const options = value && !fridays.includes(value) ? [value, ...fridays] : fridays;
 
   return (
     <div className="inline-flex items-center gap-2 bg-white border border-[#E8D5BE] rounded-xl px-3 py-2 shadow-sm">
@@ -21,9 +28,11 @@ export function FridaySelector({ value, onChange, label = 'יום שישי:' }: 
         onChange={(e) => onChange(e.target.value)}
         className="text-sm font-bold text-slate-800 bg-transparent focus:outline-none cursor-pointer"
       >
+        {allowAll && <option value="">כל התאריכים</option>}
         {options.map((f) => (
           <option key={f} value={f}>
             {formatFridayLabel(f)}
+            {f === nextFri ? ' (הקרוב)' : ''}
           </option>
         ))}
       </select>

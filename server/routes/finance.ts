@@ -27,6 +27,50 @@ interface DbFixedExpense {
   is_active: number | boolean;
 }
 
+router.get('/summary', async (req, res) => {
+  try {
+    const db = await getDb();
+    const fridayDate = req.query.friday_date ? String(req.query.friday_date) : '';
+    const params: unknown[] = [];
+    const orderWhere = fridayDate ? 'WHERE o.friday_date = ?' : '';
+    if (fridayDate) params.push(fridayDate);
+
+    const cogsRows = await db.query<{ order_type: string; total_cost: number; total_units: number }>(
+      `SELECT o.order_type,
+              COALESCE(SUM(oi.quantity * oi.cost_price_snapshot), 0) as total_cost,
+              COALESCE(SUM(oi.quantity), 0) as total_units
+       FROM order_items oi
+       JOIN orders o ON o.id = oi.order_id
+       ${orderWhere}
+       GROUP BY o.order_type`,
+      params
+    );
+
+    let sales_cogs = 0;
+    let charity_cogs = 0;
+    let charity_units = 0;
+
+    for (const r of cogsRows) {
+      if (r.order_type === 'charity') {
+        charity_cogs += Number(r.total_cost || 0);
+        charity_units += Number(r.total_units || 0);
+      } else {
+        sales_cogs += Number(r.total_cost || 0);
+      }
+    }
+
+    res.json({
+      sales_cogs: Math.round(sales_cogs * 100) / 100,
+      charity_cogs: Math.round(charity_cogs * 100) / 100,
+      charity_units,
+      total_cogs: Math.round((sales_cogs + charity_cogs) * 100) / 100,
+    });
+  } catch (err) {
+    console.error('Finance summary error:', err);
+    res.status(500).json({ error: 'שגיאה בטעינת סיכום העלויות' });
+  }
+});
+
 router.get('/transactions', async (req, res) => {
   try {
     const db = await getDb();

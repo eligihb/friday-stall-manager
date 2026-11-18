@@ -59,10 +59,21 @@ export const ROLE_LABELS: Record<UserRole, string> = {
   customer: 'לקוח',
 };
 
+export function getFridaysRange(pastCount = 3, upcomingCount = 6): string[] {
+  const first = new Date(`${getNextFridayISO()}T12:00:00`);
+  const list: string[] = [];
+  for (let i = -pastCount; i < upcomingCount; i++) {
+    const d = new Date(first);
+    d.setDate(first.getDate() + i * 7);
+    list.push(d.toISOString().slice(0, 10));
+  }
+  return list;
+}
+
 export const ORDER_TYPE_LABELS: Record<OrderType, string> = {
   customer: 'לקוח',
   supplier: 'ספק סיטונאי',
-  charity: 'חסד / תרומה',
+  charity: 'תרומה למשפחות נזקקות',
 };
 
 export const ORDER_STATUS_LABELS: Record<OrderStatus, string> = {

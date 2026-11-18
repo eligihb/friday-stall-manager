@@ -3,20 +3,24 @@ import {
   Flame,
   LayoutDashboard,
   Tag,
-  ClipboardList,
-  ChefHat,
+  ShoppingBag,
+  Store,
+  HeartHandshake,
   Wallet,
   Users,
   LogOut,
-  Store,
-  ShoppingBag,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { ROLE_LABELS } from '../lib/format';
 
-export type AdminTab = 'dashboard' | 'products' | 'orders' | 'inventory' | 'finance' | 'users';
-export type SupplierTab = 'portal';
-export type CustomerTab = 'portal';
+export type AdminTab =
+  | 'dashboard'
+  | 'customer-orders'
+  | 'supplier-orders'
+  | 'charity-orders'
+  | 'products'
+  | 'finance'
+  | 'users';
 
 interface NavItem {
   id: AdminTab;
@@ -26,10 +30,11 @@ interface NavItem {
 }
 
 const ADMIN_NAV: NavItem[] = [
-  { id: 'dashboard', label: 'לוח בקרה', shortLabel: 'ראשי', icon: LayoutDashboard },
+  { id: 'dashboard', label: 'מסך ראשי ותפעול שישי', shortLabel: 'ראשי', icon: LayoutDashboard },
+  { id: 'customer-orders', label: 'הזמנות לקוחות', shortLabel: 'לקוחות', icon: ShoppingBag },
+  { id: 'supplier-orders', label: 'הזמנות ספקים', shortLabel: 'ספקים', icon: Store },
+  { id: 'charity-orders', label: 'המשפחות הנזקקות', shortLabel: 'תרומות', icon: HeartHandshake },
   { id: 'products', label: 'מחירון מוצרים', shortLabel: 'מחירון', icon: Tag },
-  { id: 'orders', label: 'הזמנות שישי', shortLabel: 'הזמנות', icon: ClipboardList },
-  { id: 'inventory', label: 'היערכות ומלאי', shortLabel: 'אפייה', icon: ChefHat },
   { id: 'finance', label: 'כספים ותזרים', shortLabel: 'כספים', icon: Wallet },
   { id: 'users', label: 'משתמשים וחשבונות', shortLabel: 'חשבונות', icon: Users },
 ];
@@ -68,7 +73,7 @@ export function Layout({ activeTab, onSelectTab, children }: LayoutProps) {
           </div>
         </div>
 
-        <nav className="flex-1 p-4 space-y-1.5 overflow-y-auto">
+        <nav className="flex-1 p-3.5 space-y-1 overflow-y-auto">
           {isAdmin ? (
             ADMIN_NAV.map((item) => {
               const Icon = item.icon;
@@ -78,14 +83,14 @@ export function Layout({ activeTab, onSelectTab, children }: LayoutProps) {
                   key={item.id}
                   type="button"
                   onClick={() => onSelectTab(item.id)}
-                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold transition-all ${
+                  className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-semibold transition-all ${
                     active
                       ? 'bg-[#C85A17] text-white shadow-md'
                       : 'text-slate-300 hover:bg-white/8 hover:text-white'
                   }`}
                 >
-                  <Icon className="w-5 h-5 shrink-0" />
-                  <span>{item.label}</span>
+                  <Icon className="w-4 h-4 shrink-0" />
+                  <span className="truncate">{item.label}</span>
                 </button>
               );
             })
@@ -152,8 +157,8 @@ export function Layout({ activeTab, onSelectTab, children }: LayoutProps) {
 
         {/* ניווט תחתון למובייל למנהל */}
         {isAdmin && (
-          <nav className="lg:hidden fixed bottom-0 inset-x-0 z-30 bg-white border-t border-[#E8D5BE] shadow-lg px-1 py-1.5">
-            <div className="grid grid-cols-6 gap-0.5">
+          <nav className="lg:hidden fixed bottom-0 inset-x-0 z-30 bg-white border-t border-[#E8D5BE] shadow-lg px-1 py-1.5 overflow-x-auto">
+            <div className="grid grid-cols-7 gap-0.5 min-w-[360px]">
               {ADMIN_NAV.map((item) => {
                 const Icon = item.icon;
                 const active = activeTab === item.id;
@@ -166,7 +171,7 @@ export function Layout({ activeTab, onSelectTab, children }: LayoutProps) {
                       active ? 'text-[#C85A17] bg-[#FFF7ED]' : 'text-slate-500'
                     }`}
                   >
-                    <Icon className="w-5 h-5" />
+                    <Icon className="w-4 h-4" />
                     <span className="text-[10px] font-bold mt-0.5 truncate max-w-full">{item.shortLabel}</span>
                   </button>
                 );

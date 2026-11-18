@@ -58,6 +58,9 @@ router.get('/', requireAuth, async (req: AuthenticatedRequest, res) => {
     if (role !== 'admin') {
       conditions.push('o.user_id = ?');
       params.push(req.user!.id);
+    } else if (req.query.user_id) {
+      conditions.push('o.user_id = ?');
+      params.push(Number(req.query.user_id));
     }
     if (fridayDate) {
       conditions.push('o.friday_date = ?');
@@ -306,6 +309,134 @@ router.post('/', requireAuth, async (req: AuthenticatedRequest, res) => {
   } catch (err) {
     console.error('Create order error:', err);
     res.status(500).json({ error: 'שגיאה ביצירת ההזמנה' });
+  }
+});
+
+router.put('/:id', requireAuth, requireRole('admin'), async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const db = await getDb();
+    const existing = await db.get<DbOrder>('SELECT * FROM orders WHERE id = ?', [id]);
+    if (!existing) {
+      res.status(404).json({ error: 'ההזמנה לא נמצאה' });
+      return;
+    }
+
+    const friday_date = req.body?.friday_date
+      ? String(req.body.friday_date).slice(0, 10)
+      : String(existing.friday_date).slice(0, 10);
+    const recipient_name =
+      req.body?.recipient_name !== undefined
+        ? String(req.body.recipient_name).trim()
+        : existing.recipient_name;
+    const notes = req.body?.notes !== undefined ? String(req.body.notes).trim() : existing.notes;
+    const status =
+      req.body?.status && ['pending', 'ready', 'delivered'].includes(req.body.status)
+        ? req.body.status
+        : existing.status;
+
+    const delivery_fee =
+      existing.order_type === 'charity'
+        ? 0
+        : req.body?.delivery_fee !== undefined
+        ? Math.max(0, Number(req.body.delivery_fee) || 0)
+        : Number(existing.delivery_fee);
+    const credit_discount =
+      existing.order_type === 'charity'
+        ? 0
+        : req.body?.credit_discount !== undefined
+        ? Math.max(0, Number(req.body.credit_discount) || 0)
+        : Number(existing.credit_discount);
+
+    let newTotal = Number(existing.total_amount);
+
+    if (Array.isArray(req.body?.items)) {
+      const validItems = req.body.items
+        .map((it: { product_id: unknown; quantity: unknown }) => ({
+          product_id: Number(it.product_id),
+          quantity: Math.floor(Number(it.quantity)),
+        }))
+        .filter((it: { product_id: number; quantity: number }) => Number.isInteger(it.product_id) && it.quantity > 0);
+
+      if (validItems.length === 0) {
+        res.status(400).json({ error: 'יש להשאיר לפחות מוצר אחד בהזמנה' });
+        return;
+      }
+
+      const productIds = [...new Set(validItems.map((i: { product_id: number }) => i.product_id))];
+      const placeholders = productIds.map(() => '?').join(', ');
+      const dbProducts = await db.query<DbProduct>(
+        `SELECT * FROM products WHERE id IN (${placeholders})`,
+        productIds
+      );
+      const productMap = new Map(dbProducts.map((p) => [Number(p.id), p]));
+
+      const priceTier =
+        existing.order_type === 'charity'
+          ? 'charity'
+          : existing.order_type === 'supplier'
+          ? 'supplier_price'
+          : req.body?.price_tier === 'customer_price'
+          ? 'customer_price'
+          : 'preorder_price';
+
+      let subtotal = 0;
+      const prepared = validItems.map((it: { product_id: number; quantity: number }) => {
+        const prod = productMap.get(it.product_id);
+        if (!prod) throw new Error(`מוצר #${it.product_id} לא נמצא`);
+        const unitPrice = priceTier === 'charity' ? 0 : Number(prod[priceTier]);
+        subtotal += unitPrice * it.quantity;
+        return {
+          product_id: it.product_id,
+          quantity: it.quantity,
+          unit_price_snapshot: unitPrice,
+          cost_price_snapshot: Number(prod.cost_price),
+        };
+      });
+
+      newTotal =
+        existing.order_type === 'charity' ? 0 : Math.max(0, round2(subtotal + delivery_fee - credit_discount));
+
+      await db.run('DELETE FROM order_items WHERE order_id = ?', [id]);
+      for (const item of prepared) {
+        await db.run(
+          `INSERT INTO order_items (order_id, product_id, quantity, unit_price_snapshot, cost_price_snapshot)
+           VALUES (?, ?, ?, ?, ?)`,
+          [id, item.product_id, item.quantity, item.unit_price_snapshot, item.cost_price_snapshot]
+        );
+      }
+    } else if (existing.order_type !== 'charity') {
+      // Recompute total from existing items if only delivery_fee / credit_discount changed
+      const curItems = await db.query<{ quantity: number; unit_price_snapshot: number }>(
+        'SELECT quantity, unit_price_snapshot FROM order_items WHERE order_id = ?',
+        [id]
+      );
+      const subtotal = curItems.reduce(
+        (s, it) => s + Number(it.quantity) * Number(it.unit_price_snapshot),
+        0
+      );
+      newTotal = Math.max(0, round2(subtotal + delivery_fee - credit_discount));
+    }
+
+    const oldTotal = Number(existing.total_amount);
+    const totalDiff = round2(newTotal - oldTotal);
+
+    await db.run(
+      `UPDATE orders
+       SET recipient_name = ?, friday_date = ?, delivery_fee = ?, credit_discount = ?, total_amount = ?, status = ?, notes = ?
+       WHERE id = ?`,
+      [recipient_name, friday_date, delivery_fee, credit_discount, newTotal, status, notes, id]
+    );
+
+    // Adjust linked user balance if total changed
+    if (existing.user_id && existing.order_type !== 'charity' && totalDiff !== 0) {
+      await db.run('UPDATE users SET balance = balance - ? WHERE id = ?', [totalDiff, existing.user_id]);
+    }
+
+    res.json({ ok: true, total_amount: newTotal });
+  } catch (err) {
+    console.error('Full update order error:', err);
+    res.status(500).json({ error: 'שגיאה בעדכון פרטי ההזמנה' });
   }
 });
 

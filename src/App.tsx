@@ -3,9 +3,10 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import { AuthScreen } from './components/AuthScreen';
 import { Layout, type AdminTab } from './components/Layout';
 import { AdminDashboard } from './pages/AdminDashboard';
+import { CustomerOrdersPage } from './pages/CustomerOrdersPage';
+import { SupplierOrdersPage } from './pages/SupplierOrdersPage';
+import { CharityOrdersPage } from './pages/CharityOrdersPage';
 import { ProductsCatalog } from './pages/ProductsCatalog';
-import { AdminOrders } from './pages/AdminOrders';
-import { FridayInventory } from './pages/FridayInventory';
 import { FinancePage } from './pages/FinancePage';
 import { UsersPage } from './pages/UsersPage';
 import { SupplierPortal } from './pages/SupplierPortal';
@@ -13,7 +14,7 @@ import { CustomerPortal } from './pages/CustomerPortal';
 
 function AppRouter() {
   const { user, loading } = useAuth();
-  const [adminTab, setAdminTab] = useState<AdminTab>('products');
+  const [adminTab, setAdminTab] = useState<AdminTab>('dashboard');
 
   if (loading) {
     return (
@@ -35,9 +36,10 @@ function AppRouter() {
       {user.role === 'admin' ? (
         <>
           {adminTab === 'dashboard' && <AdminDashboard onNavigate={setAdminTab} />}
+          {adminTab === 'customer-orders' && <CustomerOrdersPage />}
+          {adminTab === 'supplier-orders' && <SupplierOrdersPage />}
+          {adminTab === 'charity-orders' && <CharityOrdersPage />}
           {adminTab === 'products' && <ProductsCatalog />}
-          {adminTab === 'orders' && <AdminOrders />}
-          {adminTab === 'inventory' && <FridayInventory />}
           {adminTab === 'finance' && <FinancePage />}
           {adminTab === 'users' && <UsersPage />}
         </>
