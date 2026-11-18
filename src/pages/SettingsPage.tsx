@@ -11,10 +11,20 @@ import {
   Phone,
   Mail,
   X,
+  Cloud,
+  Database,
+  RotateCcw,
 } from 'lucide-react';
 import { apiFetch } from '../lib/api';
 import { formatILS, PAYMENT_METHOD_LABELS, ROLE_LABELS } from '../lib/format';
 import { APP_VERSION } from '../lib/version';
+import {
+  clearCloudConfig,
+  getSavedCloudConfig,
+  hasCloudCredentials,
+  saveCloudConfig,
+  type CloudConfig,
+} from '../lib/cloudConfig';
 import type { BusinessSettings, PaymentMethod, User, UserRole } from '../types';
 
 export function SettingsPage() {
@@ -28,6 +38,11 @@ export function SettingsPage() {
   });
   const [savingSettings, setSavingSettings] = useState(false);
   const [settingsSaved, setSettingsSaved] = useState(false);
+
+  // הגדרות מסד נתונים בענן (Fallback ל-localStorage כשאין משתני סביבה)
+  const [cloudCfg, setCloudCfg] = useState<CloudConfig>(() => getSavedCloudConfig());
+  const [showCloudForm, setShowCloudForm] = useState(false);
+  const cloudConfigured = hasCloudCredentials();
 
   // ניהול משתמשים
   const [users, setUsers] = useState<User[]>([]);
@@ -266,6 +281,125 @@ export function SettingsPage() {
           {error}
         </div>
       )}
+
+      {/* באנר עדין למצב אחסון מקומי / חיבור למסד נתונים בענן */}
+      <div className="bg-[#FFF7ED]/90 border border-[#E8D5BE] rounded-2xl p-4 space-y-3">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2.5">
+          <div className="flex items-start gap-2.5">
+            <div className="w-8 h-8 rounded-xl bg-amber-100 text-[#8A330B] flex items-center justify-center shrink-0 mt-0.5">
+              {cloudConfigured ? <Cloud className="w-4 h-4" /> : <Database className="w-4 h-4" />}
+            </div>
+            <div>
+              <div className="text-xs font-extrabold text-slate-900">
+                {cloudConfigured
+                  ? 'חיבור ענן מוגדר במכשיר זה'
+                  : 'מצב אחסון מקומי בדפדפן (localStorage)'}
+              </div>
+              <p className="text-xs text-slate-600 mt-0.5">
+                {cloudConfigured
+                  ? 'ניתן לעדכן או לאפס את פרטי החיבור לענן (Supabase / שרת API) בכל עת.'
+                  : 'לא זוהו משתני סביבה של מסד ענן — הנתונים נשמרים מקומית בדפדפן בצורה בטוחה. ניתן להדביק כאן פרטי חיבור לענן.'}
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setShowCloudForm((v) => !v)}
+            className="px-3.5 py-2 rounded-xl bg-white border border-[#E8D5BE] hover:border-[#C85A17] text-xs font-bold text-[#8A330B] shrink-0 self-start sm:self-center"
+          >
+            {showCloudForm ? 'הסתר הגדרות ענן' : 'הגדר חיבור ענן'}
+          </button>
+        </div>
+
+        {showCloudForm && (
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              saveCloudConfig(cloudCfg);
+              notify('פרטי החיבור לענן נשמרו! מרענן את האפליקציה...');
+              setTimeout(() => window.location.reload(), 600);
+            }}
+            className="pt-3 border-t border-[#E8D5BE] space-y-3"
+          >
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Supabase URL (אופציונלי)
+                </label>
+                <input
+                  type="url"
+                  dir="ltr"
+                  value={cloudCfg.supabaseUrl}
+                  onChange={(e) => setCloudCfg({ ...cloudCfg, supabaseUrl: e.target.value })}
+                  placeholder="https://xxxxx.supabase.co"
+                  className="w-full px-3 py-2 rounded-xl border border-[#E8D5BE] bg-white text-left text-xs"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Supabase Anon Key (אופציונלי)
+                </label>
+                <input
+                  type="password"
+                  dir="ltr"
+                  value={cloudCfg.supabaseAnonKey}
+                  onChange={(e) => setCloudCfg({ ...cloudCfg, supabaseAnonKey: e.target.value })}
+                  placeholder="eyJhbGciOi..."
+                  className="w-full px-3 py-2 rounded-xl border border-[#E8D5BE] bg-white text-left text-xs"
+                />
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">
+                כתובת שרת API בענן (Render / Railway — אופציונלי)
+              </label>
+              <input
+                type="url"
+                dir="ltr"
+                value={cloudCfg.apiUrl}
+                onChange={(e) => setCloudCfg({ ...cloudCfg, apiUrl: e.target.value })}
+                placeholder="https://your-backend.onrender.com"
+                className="w-full px-3 py-2 rounded-xl border border-[#E8D5BE] bg-white text-left text-xs"
+              />
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="submit"
+                className="px-4 py-2 rounded-xl bg-[#C85A17] hover:bg-[#A9440F] text-white text-xs font-bold"
+              >
+                שמור פרטי ענן
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  clearCloudConfig();
+                  setCloudCfg({ supabaseUrl: '', supabaseAnonKey: '', apiUrl: '' });
+                  notify('פרטי הענן נוקו — המערכת חוזרת למצב אחסון מקומי.');
+                }}
+                className="px-3.5 py-2 rounded-xl bg-white border border-[#E8D5BE] text-slate-600 text-xs font-bold"
+              >
+                נקה חיבור ענן
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (!window.confirm('לאפס את נתוני ההדגמה המקומיים בדפדפן?')) return;
+                  try {
+                    localStorage.removeItem('ht_static_db_v1');
+                  } catch {}
+                  window.location.reload();
+                }}
+                className="inline-flex items-center gap-1 px-3.5 py-2 rounded-xl bg-white border border-red-200 text-red-700 text-xs font-bold mr-auto"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>אפס נתוני הדגמה מקומיים</span>
+              </button>
+            </div>
+          </form>
+        )}
+      </div>
 
       {loading ? (
         <div className="bg-white rounded-3xl p-10 text-center text-slate-400 border border-[#E8D5BE]">

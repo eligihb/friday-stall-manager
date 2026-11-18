@@ -1,4 +1,5 @@
 import { localApiFetch } from './localApi';
+import { getSavedCloudConfig } from './cloudConfig';
 
 export class ApiError extends Error {
   status: number;
@@ -8,16 +9,15 @@ export class ApiError extends Error {
   }
 }
 
-const API_BASE = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, '') || '';
-
-function isStaticHosting(): boolean {
-  if (API_BASE) return false;
+function shouldUseStaticFallback(): boolean {
+  const cfg = getSavedCloudConfig();
+  if (cfg.apiUrl) return false;
   if (typeof window === 'undefined') return false;
   return window.location.hostname.endsWith('github.io');
 }
 
 export async function apiFetch<T>(url: string, options: RequestInit = {}): Promise<T> {
-  if (isStaticHosting()) {
+  if (shouldUseStaticFallback()) {
     try {
       return await localApiFetch<T>(url, options);
     } catch (err) {
@@ -26,17 +26,24 @@ export async function apiFetch<T>(url: string, options: RequestInit = {}): Promi
     }
   }
 
-  const targetUrl = API_BASE ? `${API_BASE}${url}` : url;
-  const res = await fetch(targetUrl, {
-    ...options,
-    credentials: 'include',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(options.headers || {}),
-    },
-  });
+  const cfg = getSavedCloudConfig();
+  const targetUrl = cfg.apiUrl ? `${cfg.apiUrl}${url}` : url;
 
-  // Fallback gracefully if hosted on static host without API backend
+  let res: Response;
+  try {
+    res = await fetch(targetUrl, {
+      ...options,
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(options.headers || {}),
+      },
+    });
+  } catch {
+    // אם אין שרת זמין בסביבה הסטטית, עוברים אוטומטית לשמירה מקומית ללא קריסה
+    return localApiFetch<T>(url, options);
+  }
+
   const contentType = res.headers.get('content-type') || '';
   if (res.status === 404 && !contentType.includes('application/json')) {
     return localApiFetch<T>(url, options);

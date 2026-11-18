@@ -129,10 +129,41 @@ function createInitialDb(): LocalDb {
   };
 }
 
-function loadDb(): LocalDb {
+let memoryDbFallback: LocalDb | null = null;
+let memorySessionUid: string | null = null;
+
+function safeGetItem(key: string): string | null {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) return JSON.parse(raw) as LocalDb;
+    return localStorage.getItem(key);
+  } catch {
+    return key === SESSION_KEY ? memorySessionUid : null;
+  }
+}
+
+function safeSetItem(key: string, val: string): void {
+  try {
+    localStorage.setItem(key, val);
+  } catch {
+    if (key === SESSION_KEY) memorySessionUid = val;
+  }
+}
+
+function safeRemoveItem(key: string): void {
+  try {
+    localStorage.removeItem(key);
+  } catch {
+    if (key === SESSION_KEY) memorySessionUid = null;
+  }
+}
+
+function loadDb(): LocalDb {
+  if (memoryDbFallback) return memoryDbFallback;
+  try {
+    const raw = safeGetItem(STORAGE_KEY);
+    if (raw) {
+      memoryDbFallback = JSON.parse(raw) as LocalDb;
+      return memoryDbFallback;
+    }
   } catch {}
   const fresh = createInitialDb();
   saveDb(fresh);
@@ -140,7 +171,8 @@ function loadDb(): LocalDb {
 }
 
 function saveDb(db: LocalDb) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(db));
+  memoryDbFallback = db;
+  safeSetItem(STORAGE_KEY, JSON.stringify(db));
 }
 
 function sanitizeUser(u: StoredUser): User {
@@ -149,7 +181,7 @@ function sanitizeUser(u: StoredUser): User {
 }
 
 function getSessionUser(db: LocalDb): StoredUser | null {
-  const uid = Number(localStorage.getItem(SESSION_KEY) || 0);
+  const uid = Number(safeGetItem(SESSION_KEY) || 0);
   if (!uid) return null;
   return db.users.find((u) => u.id === uid) || null;
 }
@@ -188,7 +220,7 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
     const password = String(body.password || '');
     const user = db.users.find((u) => u.email.toLowerCase() === email && u.password === password);
     if (!user) throwErr('פרטי ההתחברות שגויים', 401);
-    localStorage.setItem(SESSION_KEY, String(user.id));
+    safeSetItem(SESSION_KEY, String(user.id));
     return { user: sanitizeUser(user) } as T;
   }
 
@@ -216,12 +248,12 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
     };
     db.users.push(user);
     saveDb(db);
-    localStorage.setItem(SESSION_KEY, String(user.id));
+    safeSetItem(SESSION_KEY, String(user.id));
     return { user: sanitizeUser(user) } as T;
   }
 
   if (path === '/api/auth/logout' && method === 'POST') {
-    localStorage.removeItem(SESSION_KEY);
+    safeRemoveItem(SESSION_KEY);
     return { ok: true } as T;
   }
 
