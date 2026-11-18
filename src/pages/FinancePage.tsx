@@ -388,26 +388,28 @@ export function FinancePage() {
               <label className="block text-xs font-bold text-emerald-800 mb-1">מזומן בקופה (₪)</label>
               <input
                 type="number"
+                inputMode="decimal"
                 min="0"
                 step="0.5"
                 dir="ltr"
                 placeholder="0.00"
                 value={stallCash}
                 onChange={(e) => setStallCash(e.target.value)}
-                className="w-full px-3 py-2 rounded-xl border border-emerald-300 bg-white text-left tabular-nums font-extrabold text-emerald-800"
+                className="w-full px-3 py-2.5 rounded-xl border border-emerald-300 bg-white text-left tabular-nums font-extrabold text-emerald-800"
               />
             </div>
             <div>
               <label className="block text-xs font-bold text-sky-800 mb-1">ביט בדוכן (₪)</label>
               <input
                 type="number"
+                inputMode="decimal"
                 min="0"
                 step="0.5"
                 dir="ltr"
                 placeholder="0.00"
                 value={stallBit}
                 onChange={(e) => setStallBit(e.target.value)}
-                className="w-full px-3 py-2 rounded-xl border border-sky-300 bg-white text-left tabular-nums font-extrabold text-sky-800"
+                className="w-full px-3 py-2.5 rounded-xl border border-sky-300 bg-white text-left tabular-nums font-extrabold text-sky-800"
               />
             </div>
           </div>
@@ -475,6 +477,7 @@ export function FinancePage() {
             />
             <input
               type="number"
+              inputMode="decimal"
               min="0.01"
               step="0.01"
               required
@@ -482,7 +485,7 @@ export function FinancePage() {
               placeholder="סכום (₪)"
               value={expAmount}
               onChange={(e) => setExpAmount(e.target.value)}
-              className="px-3 py-2 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] text-left tabular-nums font-bold text-sm"
+              className="px-3 py-2.5 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] text-left tabular-nums font-bold text-sm"
             />
             <select
               value={expMethod}

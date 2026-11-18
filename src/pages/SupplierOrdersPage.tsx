@@ -2,13 +2,14 @@ import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import {
   Store,
   Plus,
+  Minus,
   CreditCard,
   RotateCcw,
   Copy,
   Check,
   Edit3,
   Trash2,
-  X,
+  Share2,
 } from 'lucide-react';
 import { apiFetch } from '../lib/api';
 import {
@@ -19,10 +20,19 @@ import {
   ORDER_STATUS_LABELS,
   PAYMENT_METHOD_LABELS,
 } from '../lib/format';
-import { formatSupplierLedgerWhatsApp } from '../lib/whatsappFormat';
-import type { AdminProduct, Order, PaymentMethod, Transaction, User } from '../types';
+import { buildWhatsAppShareUrl, formatSupplierLedgerWhatsApp } from '../lib/whatsappFormat';
+import { useFriday } from '../context/FridayContext';
+import { BottomSheet } from '../components/BottomSheet';
+import type { AdminProduct, Order, OrderStatus, PaymentMethod, Transaction, User } from '../types';
+
+const NEXT_STATUS: Record<OrderStatus, OrderStatus> = {
+  pending: 'ready',
+  ready: 'delivered',
+  delivered: 'pending',
+};
 
 export function SupplierOrdersPage() {
+  const { fridayDate: globalFriday, refreshTick } = useFriday();
   const [suppliers, setSuppliers] = useState<User[]>([]);
   const [selectedSupplierId, setSelectedSupplierId] = useState<number | null>(null);
   const [products, setProducts] = useState<AdminProduct[]>([]);
@@ -35,7 +45,7 @@ export function SupplierOrdersPage() {
   const [error, setError] = useState('');
   const [copiedLedger, setCopiedLedger] = useState(false);
 
-  // מודאל הזמנת ספק (יצירה / עריכה)
+  // חלונית הזמנת ספק (יצירה / עריכה)
   const [orderModalOpen, setOrderModalOpen] = useState(false);
   const [editingOrder, setEditingOrder] = useState<Order | null>(null);
   const [orderFriday, setOrderFriday] = useState(getNextFridayISO());
@@ -46,13 +56,13 @@ export function SupplierOrdersPage() {
   const [quantities, setQuantities] = useState<Record<number, number>>({});
   const [savingOrder, setSavingOrder] = useState(false);
 
-  // מודאל תשלום ספק
+  // חלונית תשלום ספק
   const [payModalOpen, setPayModalOpen] = useState(false);
   const [payAmount, setPayAmount] = useState('');
   const [payMethod, setPayMethod] = useState<PaymentMethod>('transfer');
   const [payNotes, setPayNotes] = useState('');
 
-  // מודאל זכות / החזרה
+  // חלונית זכות / החזרה
   const [creditModalOpen, setCreditModalOpen] = useState(false);
   const [creditOrderId, setCreditOrderId] = useState<string>('');
   const [creditAmount, setCreditAmount] = useState('');
@@ -82,7 +92,6 @@ export function SupplierOrdersPage() {
         `/api/users/${supId}/ledger`
       );
       setLedger(res);
-      // עדכון היתרה בכרטיס הספק למעלה
       setSuppliers((prev) => prev.map((s) => (s.id === supId ? { ...s, balance: res.user.balance } : s)));
       setError('');
     } catch (err) {
@@ -98,21 +107,19 @@ export function SupplierOrdersPage() {
     if (selectedSupplierId) {
       loadLedger(selectedSupplierId);
     }
-  }, [selectedSupplierId, loadLedger]);
+  }, [selectedSupplierId, loadLedger, refreshTick]);
 
-  // חישוב חוב מצטבר (Running Debt) לפי סדר כרונולוגי בכרטסת הספק
   const ledgerRowsWithRunning = useMemo(() => {
     if (!ledger) return [];
-    const chronological = [...ledger.orders].sort((a, b) =>
-      a.friday_date.localeCompare(b.friday_date) || a.id - b.id
+    const chronological = [...ledger.orders].sort(
+      (a, b) => a.friday_date.localeCompare(b.friday_date) || a.id - b.id
     );
     let runningDebt = 0;
     const computed = chronological.map((o) => {
-      const netDelta = o.total_amount - o.paid_amount;
-      runningDebt += netDelta;
+      runningDebt += o.total_amount - o.paid_amount;
       return { ...o, runningDebt };
     });
-    return computed.reverse(); // תצוגה מהחדש לישן
+    return computed.reverse();
   }, [ledger]);
 
   const draftOrderTotal = useMemo(() => {
@@ -126,7 +133,7 @@ export function SupplierOrdersPage() {
 
   const openNewSupplierOrder = () => {
     setEditingOrder(null);
-    setOrderFriday(getNextFridayISO());
+    setOrderFriday(globalFriday || getNextFridayISO());
     setOrderCredit('0');
     setOrderPaid('0');
     setOrderPayMethod('transfer');
@@ -198,6 +205,15 @@ export function SupplierOrdersPage() {
     }
   };
 
+  const handleCycleStatus = async (order: Order) => {
+    const next = NEXT_STATUS[order.status];
+    await apiFetch(`/api/orders/${order.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status: next }),
+    });
+    if (selectedSupplierId) await loadLedger(selectedSupplierId);
+  };
+
   const handleRecordPayment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedSupplierId) return;
@@ -247,22 +263,22 @@ export function SupplierOrdersPage() {
     await loadLedger(selectedSupplierId);
   };
 
+  const ledgerWaText = ledger ? formatSupplierLedgerWhatsApp(ledger.user, ledger.orders) : '';
+
   const copyLedgerWhatsApp = async () => {
-    if (!ledger) return;
-    await navigator.clipboard.writeText(formatSupplierLedgerWhatsApp(ledger.user, ledger.orders));
+    if (!ledgerWaText) return;
+    await navigator.clipboard.writeText(ledgerWaText);
     setCopiedLedger(true);
     setTimeout(() => setCopiedLedger(false), 1800);
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h2 className="font-serif text-3xl font-bold text-slateink-800">הזמנות ספקים וכרטסת חובות</h2>
-          <p className="text-sm text-slate-600 mt-1">
-            מעקב סיטונאי לכל ספק לפי תאריכי שישי: הזמנות, זכויות והחזרות, תשלומים וחוב מצטבר מעודכן אוטומטית.
-          </p>
-        </div>
+    <div className="space-y-5">
+      <div className="hidden md:block">
+        <h2 className="font-serif text-3xl font-bold text-slateink-800">הזמנות ספקים וכרטסת חובות</h2>
+        <p className="text-sm text-slate-600 mt-1">
+          מעקב סיטונאי לכל ספק לפי תאריכי שישי: הזמנות, זכויות והחזרות, תשלומים וחוב מצטבר.
+        </p>
       </div>
 
       {error && (
@@ -271,18 +287,18 @@ export function SupplierOrdersPage() {
         </div>
       )}
 
-      {/* רצועת בחירת ספקים */}
       {loading ? (
         <div className="bg-white rounded-2xl p-8 text-center text-slate-400 border border-[#E8D5BE]">
           טוען רשימת ספקים...
         </div>
       ) : suppliers.length === 0 ? (
         <div className="bg-white rounded-2xl p-8 text-center text-slate-500 border border-[#E8D5BE]">
-          אין ספקים מוגדרים עדיין. הוסף ספק במסך ״משתמשים וחשבונות״.
+          אין ספקים מוגדרים עדיין. הוסף ספק במסך ההגדרות.
         </div>
       ) : (
         <>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {/* רצועת ספקים נגללת בנוחות במובייל ורשת בדסקטופ */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
             {suppliers.map((sup) => {
               const selected = sup.id === selectedSupplierId;
               const isDebt = sup.balance < 0;
@@ -291,14 +307,14 @@ export function SupplierOrdersPage() {
                   key={sup.id}
                   type="button"
                   onClick={() => setSelectedSupplierId(sup.id)}
-                  className={`text-right p-4 rounded-2xl border transition-all ${
+                  className={`text-right p-3.5 rounded-2xl border transition-all ${
                     selected
                       ? 'bg-[#1E242B] text-white border-[#1E242B] shadow-card'
                       : 'bg-white border-[#E8D5BE] hover:border-[#C85A17] text-slate-900 shadow-soft'
                   }`}
                 >
                   <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2 font-bold">
+                    <div className="flex items-center gap-2 font-bold text-sm">
                       <Store className={`w-4 h-4 ${selected ? 'text-amber-400' : 'text-[#C85A17]'}`} />
                       <span>{sup.name}</span>
                     </div>
@@ -320,26 +336,24 @@ export function SupplierOrdersPage() {
                         : 'מאוזן'}
                     </span>
                   </div>
-                  <div className={`text-xs mt-1.5 tabular-nums ${selected ? 'text-slate-300' : 'text-slate-500'}`}>
-                    {sup.phone || sup.email}
-                  </div>
                 </button>
               );
             })}
           </div>
 
-          {/* כרטסת הספק הנבחר */}
           {ledger && (
-            <div className="space-y-5">
-              {/* סרגל פעולות ומאזן נוכחי */}
-              <div className="bg-white rounded-3xl border border-[#E8D5BE] shadow-soft p-5 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-                <div>
-                  <div className="text-xs font-bold text-slate-500">כרטסת ספק פעילה</div>
-                  <h3 className="font-serif text-2xl font-bold text-slate-900 mt-0.5">{ledger.user.name}</h3>
-                  <div className="mt-1.5 flex items-center gap-3 text-sm tabular-nums">
-                    <span className="text-slate-500">מצב חשבון נוכחי:</span>
-                    <span
-                      className={`font-extrabold text-lg ${
+            <div className="space-y-4">
+              {/* כרטיס יתרת הספק + פעולות */}
+              <div className="bg-white rounded-3xl border border-[#E8D5BE] shadow-soft p-4 sm:p-5 space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <div className="text-xs font-bold text-slate-500">כרטסת ספק פעילה</div>
+                    <h3 className="font-serif text-2xl font-bold text-slate-900">{ledger.user.name}</h3>
+                  </div>
+                  <div className="text-left tabular-nums">
+                    <div className="text-[11px] text-slate-500">מצב חשבון</div>
+                    <div
+                      className={`font-extrabold text-xl ${
                         ledger.user.balance < 0
                           ? 'text-red-600'
                           : ledger.user.balance > 0
@@ -348,22 +362,22 @@ export function SupplierOrdersPage() {
                       }`}
                     >
                       {ledger.user.balance < 0
-                        ? `חוב פתוח ${formatILS(Math.abs(ledger.user.balance))}`
+                        ? `חוב ${formatILS(Math.abs(ledger.user.balance))}`
                         : ledger.user.balance > 0
                         ? `זכות ${formatILS(ledger.user.balance)}`
-                        : 'מאוזן (₪0.00)'}
-                    </span>
+                        : 'מאוזן'}
+                    </div>
                   </div>
                 </div>
 
-                <div className="flex flex-wrap gap-2">
+                <div className="grid grid-cols-2 sm:flex sm:flex-wrap gap-2">
                   <button
                     type="button"
                     onClick={openNewSupplierOrder}
-                    className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-[#C85A17] hover:bg-[#A9440F] text-white text-xs font-bold shadow-sm"
+                    className="min-h-[44px] inline-flex items-center justify-center gap-1.5 px-3.5 rounded-xl bg-[#C85A17] hover:bg-[#A9440F] text-white text-xs font-bold shadow-sm"
                   >
                     <Plus className="w-4 h-4" />
-                    <span>הזמנת ספק חדשה</span>
+                    <span>הזמנה חדשה</span>
                   </button>
                   <button
                     type="button"
@@ -371,7 +385,7 @@ export function SupplierOrdersPage() {
                       setPayAmount(ledger.user.balance < 0 ? Math.abs(ledger.user.balance).toFixed(2) : '');
                       setPayModalOpen(true);
                     }}
-                    className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-sm"
+                    className="min-h-[44px] inline-flex items-center justify-center gap-1.5 px-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-sm"
                   >
                     <CreditCard className="w-4 h-4" />
                     <span>תשלום ששולם</span>
@@ -379,33 +393,116 @@ export function SupplierOrdersPage() {
                   <button
                     type="button"
                     onClick={() => setCreditModalOpen(true)}
-                    className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-amber-50 hover:bg-amber-100 border border-amber-300 text-amber-900 text-xs font-bold"
+                    className="min-h-[44px] inline-flex items-center justify-center gap-1.5 px-3.5 rounded-xl bg-amber-50 border border-amber-300 text-amber-900 text-xs font-bold"
                   >
                     <RotateCcw className="w-4 h-4" />
                     <span>זכות / החזרה</span>
                   </button>
+                  <a
+                    href={buildWhatsAppShareUrl(ledgerWaText, ledger.user.phone)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="min-h-[44px] inline-flex items-center justify-center gap-1.5 px-3.5 rounded-xl bg-[#25D366]/15 border border-[#25D366]/40 text-emerald-900 text-xs font-bold"
+                  >
+                    <Share2 className="w-4 h-4 text-[#128C7E]" />
+                    <span>שלח בוואטסאפ</span>
+                  </a>
                   <button
                     type="button"
                     onClick={copyLedgerWhatsApp}
-                    className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-[#FAF6F0] hover:bg-[#F3E9DC] border border-[#E8D5BE] text-slate-700 text-xs font-bold"
+                    className="hidden sm:inline-flex min-h-[44px] items-center gap-1.5 px-3.5 rounded-xl bg-[#FAF6F0] border border-[#E8D5BE] text-slate-700 text-xs font-bold"
                   >
                     {copiedLedger ? <Check className="w-4 h-4 text-emerald-600" /> : <Copy className="w-4 h-4" />}
-                    <span>{copiedLedger ? 'הועתק!' : 'שלח כרטסת'}</span>
+                    <span>{copiedLedger ? 'הועתק!' : 'העתק כרטסת'}</span>
                   </button>
                 </div>
               </div>
 
-              {/* טבלת מטריצה / היסטוריית הזמנות לפי שישי */}
-              <div className="bg-white rounded-3xl border border-[#E8D5BE] shadow-soft overflow-hidden">
+              {/* כרטיסיות למובייל (< md) במקום טבלה רחבה */}
+              <div className="md:hidden space-y-3">
+                {ledgerRowsWithRunning.length === 0 ? (
+                  <div className="bg-white rounded-2xl border border-[#E8D5BE] p-8 text-center text-slate-400 text-sm">
+                    אין עדיין הזמנות לספק זה.
+                  </div>
+                ) : (
+                  ledgerRowsWithRunning.map((o) => (
+                    <div
+                      key={o.id}
+                      className="bg-white rounded-2xl border border-[#E8D5BE] shadow-soft p-4 space-y-3"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <div className="font-bold text-slate-900">{formatFridayLabel(o.friday_date)}</div>
+                          <div className="text-xs text-slate-400 tabular-nums">הזמנה #{o.id}</div>
+                        </div>
+                        <div className="text-left tabular-nums">
+                          <div className="font-extrabold text-base text-slate-900">
+                            {formatILS(o.total_amount)}
+                          </div>
+                          <div className="text-[11px] font-bold text-red-600">
+                            חוב מצטבר: {formatILS(o.runningDebt)}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap gap-1.5">
+                        {o.items.map((it) => (
+                          <span
+                            key={it.id}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-[#FAF6F0] border border-[#E8D5BE] text-xs font-bold text-slate-800 tabular-nums"
+                          >
+                            <span className="text-[#C85A17] font-extrabold">{it.quantity}</span>
+                            <span>{it.product_name}</span>
+                          </span>
+                        ))}
+                      </div>
+
+                      <div className="flex items-center justify-between text-xs tabular-nums pt-2 border-t border-[#F3E9DC]">
+                        <div className="flex gap-3">
+                          <span className="text-emerald-700 font-bold">שולם: {formatILS(o.paid_amount)}</span>
+                          {o.credit_discount > 0 && (
+                            <span className="text-amber-700 font-bold">
+                              זכות: {formatILS(o.credit_discount)}
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => handleCycleStatus(o)}
+                            className="px-2.5 py-1.5 rounded-lg bg-[#FAF6F0] border border-[#E8D5BE] font-bold text-slate-800"
+                          >
+                            {ORDER_STATUS_LABELS[o.status]}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => openEditSupplierOrder(o)}
+                            className="p-2 rounded-lg text-slate-500 hover:bg-slate-100"
+                          >
+                            <Edit3 className="w-4 h-4" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteOrder(o.id)}
+                            className="p-2 rounded-lg text-slate-400 hover:text-red-600"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              {/* טבלת מטריצה לדסקטופ (>= md) */}
+              <div className="hidden md:block bg-white rounded-3xl border border-[#E8D5BE] shadow-soft overflow-hidden">
                 <div className="px-5 py-4 border-b border-[#F3E9DC] flex items-center justify-between">
                   <h4 className="font-bold text-base text-slate-900">פירוט הזמנות לפי תאריך שישי</h4>
                   <span className="text-xs text-slate-500 tabular-nums">{ledger.orders.length} הזמנות</span>
                 </div>
-
                 {ledgerRowsWithRunning.length === 0 ? (
-                  <div className="p-8 text-center text-slate-400 text-sm">
-                    אין עדיין הזמנות לספק זה.
-                  </div>
+                  <div className="p-8 text-center text-slate-400 text-sm">אין עדיין הזמנות לספק זה.</div>
                 ) : (
                   <div className="overflow-x-auto">
                     <table className="w-full text-sm">
@@ -416,7 +513,7 @@ export function SupplierOrdersPage() {
                           <th className="text-left py-3 px-3 font-bold">חיוב הזמנה</th>
                           <th className="text-left py-3 px-3 font-bold">זכות / החזרה</th>
                           <th className="text-left py-3 px-3 font-bold">שולם בהזמנה</th>
-                          <th className="text-left py-3 px-3 font-bold">חוב מצטבר (הזמנות)</th>
+                          <th className="text-left py-3 px-3 font-bold">חוב מצטבר</th>
                           <th className="text-center py-3 px-3 font-bold">סטטוס</th>
                           <th className="text-center py-3 px-3 font-bold">פעולות</th>
                         </tr>
@@ -426,11 +523,10 @@ export function SupplierOrdersPage() {
                           <tr key={o.id} className="hover:bg-[#FDFBF7]">
                             <td className="py-3 px-4 font-bold text-slate-900 whitespace-nowrap">
                               <div>{formatFridayLabel(o.friday_date)}</div>
-                              <div className="text-[11px] text-slate-400">הזמנה #{o.id}</div>
+                              <div className="text-[11px] text-slate-400">#{o.id}</div>
                             </td>
                             <td className="py-3 px-4 text-xs text-slate-700 max-w-xs">
                               {o.items.map((it) => `${it.quantity} ${it.product_name}`).join(' · ')}
-                              {o.notes && <div className="text-slate-400 mt-0.5">{o.notes}</div>}
                             </td>
                             <td className="py-3 px-3 text-left font-extrabold text-slate-900">
                               {formatILS(o.total_amount)}
@@ -445,24 +541,26 @@ export function SupplierOrdersPage() {
                               {formatILS(o.runningDebt)}
                             </td>
                             <td className="py-3 px-3 text-center">
-                              <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-[#FAF6F0] border border-[#E8D5BE]">
+                              <button
+                                type="button"
+                                onClick={() => handleCycleStatus(o)}
+                                className="px-2.5 py-1 rounded-full text-xs font-bold bg-[#FAF6F0] border border-[#E8D5BE] hover:border-[#C85A17]"
+                              >
                                 {ORDER_STATUS_LABELS[o.status]}
-                              </span>
+                              </button>
                             </td>
                             <td className="py-3 px-3 text-center whitespace-nowrap">
                               <button
                                 type="button"
                                 onClick={() => openEditSupplierOrder(o)}
-                                className="p-1.5 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-100"
-                                title="ערוך"
+                                className="p-1.5 rounded-lg text-slate-500 hover:bg-slate-100"
                               >
                                 <Edit3 className="w-4 h-4" />
                               </button>
                               <button
                                 type="button"
                                 onClick={() => handleDeleteOrder(o.id)}
-                                className="p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50"
-                                title="מחק"
+                                className="p-1.5 rounded-lg text-slate-400 hover:text-red-600"
                               >
                                 <Trash2 className="w-4 h-4" />
                               </button>
@@ -475,10 +573,10 @@ export function SupplierOrdersPage() {
                 )}
               </div>
 
-              {/* היסטוריית תשלומים שהתקבלו מהספק */}
-              <div className="bg-white rounded-3xl border border-[#E8D5BE] shadow-soft p-5">
+              {/* תשלומים שתועדו */}
+              <div className="bg-white rounded-3xl border border-[#E8D5BE] shadow-soft p-4 sm:p-5">
                 <h4 className="font-bold text-base text-slate-900 mb-3">
-                  תשלומים שהתקבלו ותועדו בתזרים ({ledger.transactions.length})
+                  תשלומים שהתקבלו ({ledger.transactions.length})
                 </h4>
                 {ledger.transactions.length === 0 ? (
                   <p className="text-xs text-slate-400">טרם תועדו תשלומים עבור ספק זה.</p>
@@ -489,7 +587,6 @@ export function SupplierOrdersPage() {
                         <div>
                           <span className="font-bold text-slate-800">{t.category}</span> ·{' '}
                           {formatHebrewDate(t.date)} · {PAYMENT_METHOD_LABELS[t.payment_method]}
-                          {t.notes && <span className="text-slate-400"> ({t.notes})</span>}
                         </div>
                         <span className="font-extrabold text-emerald-700 text-sm">
                           +{formatILS(t.amount)}
@@ -504,283 +601,273 @@ export function SupplierOrdersPage() {
         </>
       )}
 
-      {/* מודאל יצירה/עריכה של הזמנת ספק */}
-      {orderModalOpen && ledger && (
-        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-white rounded-3xl max-w-2xl w-full p-6 shadow-2xl border border-[#E8D5BE] max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="font-serif text-2xl font-bold">
-                {editingOrder
-                  ? `עריכת הזמנת ספק #${editingOrder.id}`
-                  : `הזמנת ספק חדשה — ${ledger.user.name}`}
-              </h3>
-              <button type="button" onClick={() => setOrderModalOpen(false)} className="p-1 text-slate-400">
-                <X className="w-5 h-5" />
-              </button>
+      {/* חלונית Bottom Sheet הזמנת ספק */}
+      <BottomSheet
+        open={orderModalOpen && Boolean(ledger)}
+        onClose={() => setOrderModalOpen(false)}
+        title={
+          editingOrder
+            ? `עריכת הזמנת ספק #${editingOrder.id}`
+            : `הזמנת ספק חדשה — ${ledger?.user.name || ''}`
+        }
+        subtitle="תמחור אוטומטי לפי מחיר ספק (supplier_price)"
+        maxWidthClass="md:max-w-2xl"
+      >
+        <form onSubmit={handleSaveSupplierOrder} className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 mb-1">תאריך שישי</label>
+              <input
+                type="date"
+                required
+                value={orderFriday}
+                onChange={(e) => setOrderFriday(e.target.value)}
+                className="w-full px-3 py-2.5 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7]"
+              />
             </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 mb-1">זכות / החזרה (₪)</label>
+              <input
+                type="number"
+                inputMode="decimal"
+                min="0"
+                step="0.5"
+                dir="ltr"
+                value={orderCredit}
+                onChange={(e) => setOrderCredit(e.target.value)}
+                className="w-full px-3 py-2.5 rounded-xl border border-[#E8D5BE] text-left tabular-nums font-bold"
+              />
+            </div>
+          </div>
 
-            <form onSubmit={handleSaveSupplierOrder} className="space-y-4">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1">תאריך שישי</label>
-                  <input
-                    type="date"
-                    required
-                    value={orderFriday}
-                    onChange={(e) => setOrderFriday(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl border border-[#E8D5BE] text-sm"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1">זכות / החזרה (₪)</label>
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.5"
-                    dir="ltr"
-                    value={orderCredit}
-                    onChange={(e) => setOrderCredit(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl border border-[#E8D5BE] text-left tabular-nums text-sm font-bold"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                  מוצרים (מחירון ספק `supplier_price`)
-                </label>
-                <div className="max-h-56 overflow-y-auto border border-[#E8D5BE] rounded-2xl divide-y divide-[#F3E9DC]">
-                  {products.map((p) => {
-                    const q = quantities[p.id] || 0;
-                    return (
-                      <div key={p.id} className="flex items-center justify-between px-3.5 py-2 bg-white">
-                        <div>
-                          <div className="font-bold text-sm">{p.name}</div>
-                          <div className="text-xs text-[#8A330B] font-semibold tabular-nums">
-                            {formatILS(p.supplier_price)}
-                          </div>
-                        </div>
-                        <input
-                          type="number"
-                          min="0"
-                          value={q}
-                          onChange={(e) =>
-                            setQuantities((prev) => ({
-                              ...prev,
-                              [p.id]: Math.max(0, Math.floor(Number(e.target.value) || 0)),
-                            }))
-                          }
-                          className="w-20 text-center py-1 rounded-lg border border-[#E8D5BE] tabular-nums font-bold text-sm"
-                        />
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {!editingOrder && (
-                <div className="grid grid-cols-2 gap-3">
+          <div className="max-h-60 overflow-y-auto border border-[#E8D5BE] rounded-2xl divide-y divide-[#F3E9DC]">
+            {products.map((p) => {
+              const q = quantities[p.id] || 0;
+              return (
+                <div
+                  key={p.id}
+                  className={`flex items-center justify-between px-3.5 py-2.5 ${
+                    q > 0 ? 'bg-[#FFF7ED]/70' : 'bg-white'
+                  }`}
+                >
                   <div>
-                    <label className="block text-xs font-semibold text-slate-600 mb-1">שולם במעמד ההזמנה (₪)</label>
+                    <div className="font-bold text-sm">{p.name}</div>
+                    <div className="text-xs text-[#8A330B] font-semibold tabular-nums">
+                      {formatILS(p.supplier_price)}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setQuantities((prev) => ({
+                          ...prev,
+                          [p.id]: Math.max(0, (prev[p.id] || 0) - 5),
+                        }))
+                      }
+                      className="w-9 h-10 rounded-xl bg-[#FAF6F0] border border-[#E8D5BE] text-xs font-bold"
+                    >
+                      -5
+                    </button>
                     <input
                       type="number"
+                      inputMode="numeric"
                       min="0"
-                      step="0.5"
-                      dir="ltr"
-                      value={orderPaid}
-                      onChange={(e) => setOrderPaid(e.target.value)}
-                      className="w-full px-3 py-2 rounded-xl border border-[#E8D5BE] text-left tabular-nums text-sm font-bold"
+                      value={q}
+                      onChange={(e) =>
+                        setQuantities((prev) => ({
+                          ...prev,
+                          [p.id]: Math.max(0, Math.floor(Number(e.target.value) || 0)),
+                        }))
+                      }
+                      className="w-16 h-10 text-center rounded-xl border border-[#E8D5BE] tabular-nums font-bold"
                     />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-600 mb-1">אמצעי תשלום</label>
-                    <select
-                      value={orderPayMethod}
-                      onChange={(e) => setOrderPayMethod(e.target.value as PaymentMethod)}
-                      className="w-full px-3 py-2 rounded-xl border border-[#E8D5BE] text-sm"
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setQuantities((prev) => ({ ...prev, [p.id]: (prev[p.id] || 0) + 5 }))
+                      }
+                      className="w-9 h-10 rounded-xl bg-[#C85A17] text-white text-xs font-bold"
                     >
-                      {(['transfer', 'cash', 'bit'] as const).map((pm) => (
-                        <option key={pm} value={pm}>
-                          {PAYMENT_METHOD_LABELS[pm]}
-                        </option>
-                      ))}
-                    </select>
+                      +5
+                    </button>
                   </div>
                 </div>
-              )}
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1">הערות</label>
-                <input
-                  type="text"
-                  value={orderNotes}
-                  onChange={(e) => setOrderNotes(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl border border-[#E8D5BE] text-sm"
-                />
-              </div>
-
-              <div className="bg-[#FAF6F0] rounded-2xl p-4 border border-[#E8D5BE] flex items-center justify-between">
-                <span className="font-bold text-slate-700">סה״כ לחיוב ספק:</span>
-                <span className="font-extrabold text-2xl text-[#C85A17] tabular-nums">
-                  {formatILS(draftOrderTotal)}
-                </span>
-              </div>
-
-              <div className="flex gap-2.5">
-                <button
-                  type="submit"
-                  disabled={savingOrder}
-                  className="flex-1 py-3 rounded-xl bg-[#C85A17] hover:bg-[#A9440F] text-white font-bold text-sm"
-                >
-                  {savingOrder ? 'שומר...' : editingOrder ? 'עדכן הזמנה' : 'שמור הזמנה'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setOrderModalOpen(false)}
-                  className="px-5 py-3 rounded-xl border border-[#E8D5BE] text-slate-600 font-semibold text-sm"
-                >
-                  ביטול
-                </button>
-              </div>
-            </form>
+              );
+            })}
           </div>
-        </div>
-      )}
 
-      {/* מודאל רישום תשלום מספק */}
-      {payModalOpen && ledger && (
-        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl max-w-sm w-full p-6 shadow-2xl border border-[#E8D5BE]">
-            <h3 className="font-serif text-xl font-bold mb-1">רישום תשלום — {ledger.user.name}</h3>
-            <p className="text-xs text-slate-500 mb-4">
-              התשלום יעדכן אוטומטית את יתרת הספק ויירשם כהכנסה ביומן התנועות (`transactions`).
-            </p>
-            <form onSubmit={handleRecordPayment} className="space-y-3.5">
+          {!editingOrder && (
+            <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1">סכום שהתקבל (₪)</label>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">שולם במעמד ההזמנה (₪)</label>
                 <input
                   type="number"
-                  step="0.01"
-                  min="0.01"
-                  required
+                  inputMode="decimal"
+                  min="0"
+                  step="0.5"
                   dir="ltr"
-                  value={payAmount}
-                  onChange={(e) => setPayAmount(e.target.value)}
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-[#E8D5BE] text-left tabular-nums font-bold"
+                  value={orderPaid}
+                  onChange={(e) => setOrderPaid(e.target.value)}
+                  className="w-full px-3 py-2.5 rounded-xl border border-[#E8D5BE] text-left tabular-nums font-bold"
                 />
               </div>
               <div>
                 <label className="block text-xs font-semibold text-slate-600 mb-1">אמצעי תשלום</label>
                 <select
-                  value={payMethod}
-                  onChange={(e) => setPayMethod(e.target.value as PaymentMethod)}
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-[#E8D5BE] text-sm"
+                  value={orderPayMethod}
+                  onChange={(e) => setOrderPayMethod(e.target.value as PaymentMethod)}
+                  className="w-full px-3 py-2.5 rounded-xl border border-[#E8D5BE]"
                 >
-                  {(['transfer', 'bit', 'cash'] as const).map((pm) => (
+                  {(['transfer', 'cash', 'bit'] as const).map((pm) => (
                     <option key={pm} value={pm}>
                       {PAYMENT_METHOD_LABELS[pm]}
                     </option>
                   ))}
                 </select>
               </div>
-              <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1">הערה / אסמכתא</label>
-                <input
-                  type="text"
-                  value={payNotes}
-                  onChange={(e) => setPayNotes(e.target.value)}
-                  className="w-full px-3.5 py-2 rounded-xl border border-[#E8D5BE] text-sm"
-                />
-              </div>
-              <div className="flex gap-2 pt-1">
-                <button
-                  type="submit"
-                  className="flex-1 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm"
-                >
-                  רשום תשלום
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPayModalOpen(false)}
-                  className="px-4 py-2.5 rounded-xl border border-[#E8D5BE] text-slate-600 text-sm font-semibold"
-                >
-                  ביטול
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+            </div>
+          )}
 
-      {/* מודאל זכות / החזרה */}
-      {creditModalOpen && ledger && (
-        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl max-w-sm w-full p-6 shadow-2xl border border-[#E8D5BE]">
-            <h3 className="font-serif text-xl font-bold mb-1">רישום זכות / החזרה — {ledger.user.name}</h3>
-            <p className="text-xs text-slate-500 mb-4">
-              מפחית את החוב הפתוח של הספק ללא רישום הכנסה כספית.
-            </p>
-            <form onSubmit={handleRecordCredit} className="space-y-3.5">
-              <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1">סכום הזיכוי (₪)</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0.01"
-                  required
-                  dir="ltr"
-                  value={creditAmount}
-                  onChange={(e) => setCreditAmount(e.target.value)}
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-[#E8D5BE] text-left tabular-nums font-bold"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1">
-                  שיוך להזמנה ספציפית (אופציונלי)
-                </label>
-                <select
-                  value={creditOrderId}
-                  onChange={(e) => setCreditOrderId(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl border border-[#E8D5BE] text-sm"
-                >
-                  <option value="">זיכוי כללי לחשבון הספק</option>
-                  {ledger.orders.map((o) => (
-                    <option key={o.id} value={o.id}>
-                      #{o.id} — {o.friday_date} ({formatILS(o.total_amount)})
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1">סיבת ההחזרה / זיכוי</label>
-                <input
-                  type="text"
-                  required
-                  value={creditNotes}
-                  onChange={(e) => setCreditNotes(e.target.value)}
-                  placeholder="לדוגמה: החזרת 5 יח׳ לחוח"
-                  className="w-full px-3.5 py-2 rounded-xl border border-[#E8D5BE] text-sm"
-                />
-              </div>
-              <div className="flex gap-2 pt-1">
-                <button
-                  type="submit"
-                  className="flex-1 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-sm"
-                >
-                  רשום זיכוי
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setCreditModalOpen(false)}
-                  className="px-4 py-2.5 rounded-xl border border-[#E8D5BE] text-slate-600 text-sm font-semibold"
-                >
-                  ביטול
-                </button>
-              </div>
-            </form>
+          <input
+            type="text"
+            value={orderNotes}
+            onChange={(e) => setOrderNotes(e.target.value)}
+            placeholder="הערות להזמנה"
+            className="w-full px-3.5 py-2.5 rounded-xl border border-[#E8D5BE]"
+          />
+
+          <div className="bg-[#FAF6F0] rounded-2xl p-4 border border-[#E8D5BE] flex items-center justify-between">
+            <span className="font-bold text-slate-700">סה״כ לחיוב ספק:</span>
+            <span className="font-extrabold text-2xl text-[#C85A17] tabular-nums">
+              {formatILS(draftOrderTotal)}
+            </span>
           </div>
-        </div>
-      )}
+
+          <button
+            type="submit"
+            disabled={savingOrder}
+            className="w-full min-h-[50px] rounded-2xl bg-[#C85A17] hover:bg-[#A9440F] text-white font-extrabold text-base"
+          >
+            {savingOrder ? 'שומר...' : editingOrder ? 'עדכן הזמנה' : 'שמור הזמנה'}
+          </button>
+        </form>
+      </BottomSheet>
+
+      {/* חלונית תשלום ספק */}
+      <BottomSheet
+        open={payModalOpen && Boolean(ledger)}
+        onClose={() => setPayModalOpen(false)}
+        title={`תשלום ששולם — ${ledger?.user.name || ''}`}
+        subtitle="מעדכן אוטומטית את היתרה ונרשם כהכנסה ביומן התנועות"
+        maxWidthClass="md:max-w-md"
+      >
+        <form onSubmit={handleRecordPayment} className="space-y-4">
+          <div>
+            <label className="block text-xs font-bold text-slate-600 mb-1.5">סכום שהתקבל (₪)</label>
+            <input
+              type="number"
+              inputMode="decimal"
+              step="0.01"
+              min="0.01"
+              required
+              dir="ltr"
+              value={payAmount}
+              onChange={(e) => setPayAmount(e.target.value)}
+              className="w-full px-4 py-3 rounded-2xl border border-[#E8D5BE] text-left tabular-nums font-extrabold text-xl"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-slate-600 mb-1.5">אמצעי תשלום</label>
+            <div className="grid grid-cols-3 gap-2">
+              {(['transfer', 'bit', 'cash'] as const).map((pm) => (
+                <button
+                  key={pm}
+                  type="button"
+                  onClick={() => setPayMethod(pm)}
+                  className={`min-h-[48px] rounded-xl border-2 text-xs font-bold ${
+                    payMethod === pm
+                      ? 'border-[#C85A17] bg-[#FFF7ED] text-[#8A330B]'
+                      : 'border-[#E8D5BE] bg-[#FDFBF7] text-slate-600'
+                  }`}
+                >
+                  {PAYMENT_METHOD_LABELS[pm]}
+                </button>
+              ))}
+            </div>
+          </div>
+          <input
+            type="text"
+            value={payNotes}
+            onChange={(e) => setPayNotes(e.target.value)}
+            placeholder="אסמכתא / הערה"
+            className="w-full px-3.5 py-2.5 rounded-xl border border-[#E8D5BE]"
+          />
+          <button
+            type="submit"
+            className="w-full min-h-[50px] rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-base"
+          >
+            אשר ורשום תשלום
+          </button>
+        </form>
+      </BottomSheet>
+
+      {/* חלונית זכות / החזרה */}
+      <BottomSheet
+        open={creditModalOpen && Boolean(ledger)}
+        onClose={() => setCreditModalOpen(false)}
+        title={`זכות / החזרה — ${ledger?.user.name || ''}`}
+        subtitle="מפחית את החוב הפתוח ללא רישום הכנסה בקופה"
+        maxWidthClass="md:max-w-md"
+      >
+        <form onSubmit={handleRecordCredit} className="space-y-4">
+          <div>
+            <label className="block text-xs font-bold text-slate-600 mb-1">סכום הזיכוי (₪)</label>
+            <input
+              type="number"
+              inputMode="decimal"
+              step="0.01"
+              min="0.01"
+              required
+              dir="ltr"
+              value={creditAmount}
+              onChange={(e) => setCreditAmount(e.target.value)}
+              className="w-full px-4 py-3 rounded-2xl border border-[#E8D5BE] text-left tabular-nums font-extrabold text-xl"
+            />
+          </div>
+          {ledger && (
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 mb-1">שיוך להזמנה (אופציונלי)</label>
+              <select
+                value={creditOrderId}
+                onChange={(e) => setCreditOrderId(e.target.value)}
+                className="w-full px-3 py-2.5 rounded-xl border border-[#E8D5BE]"
+              >
+                <option value="">זיכוי כללי לחשבון הספק</option>
+                {ledger.orders.map((o) => (
+                  <option key={o.id} value={o.id}>
+                    #{o.id} — {o.friday_date} ({formatILS(o.total_amount)})
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+          <input
+            type="text"
+            required
+            value={creditNotes}
+            onChange={(e) => setCreditNotes(e.target.value)}
+            placeholder="סיבת ההחזרה / זיכוי"
+            className="w-full px-3.5 py-2.5 rounded-xl border border-[#E8D5BE]"
+          />
+          <button
+            type="submit"
+            className="w-full min-h-[50px] rounded-2xl bg-amber-600 hover:bg-amber-700 text-white font-extrabold text-base"
+          >
+            רשום זיכוי
+          </button>
+        </form>
+      </BottomSheet>
     </div>
   );
 }

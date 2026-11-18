@@ -53,6 +53,13 @@ export function formatFridayLabel(iso: string): string {
   return `שישי, ${formatted}`;
 }
 
+export function formatShortFriday(iso: string): string {
+  if (!iso) return '';
+  const parts = iso.slice(0, 10).split('-');
+  if (parts.length !== 3) return iso;
+  return `יום שישי ${parts[2]}/${parts[1]}`;
+}
+
 export const ROLE_LABELS: Record<UserRole, string> = {
   admin: 'מנהל',
   supplier: 'ספק',

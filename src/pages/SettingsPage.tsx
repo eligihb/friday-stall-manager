@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { apiFetch } from '../lib/api';
 import { formatILS, PAYMENT_METHOD_LABELS, ROLE_LABELS } from '../lib/format';
+import { APP_VERSION } from '../lib/version';
 import type { BusinessSettings, PaymentMethod, User, UserRole } from '../types';
 
 export function SettingsPage() {
@@ -215,7 +216,12 @@ export function SettingsPage() {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h2 className="font-serif text-3xl font-bold text-slateink-800">הגדרות וניהול משתמשים</h2>
+          <div className="flex items-center gap-2.5">
+            <h2 className="font-serif text-3xl font-bold text-slateink-800">הגדרות וניהול משתמשים</h2>
+            <span className="px-2.5 py-0.5 rounded-full bg-[#FFF7ED] border border-[#E8D5BE] text-[#8A330B] text-xs font-extrabold tabular-nums">
+              גרסה {APP_VERSION}
+            </span>
+          </div>
           <p className="text-sm text-slate-600 mt-1">
             הגדרות העסק, תבנית חתימה לוואטסאפ, וניהול מלא של חשבונות ספקים ולקוחות (הרשאות, סיסמאות ויתרות פתיחה).
           </p>
@@ -290,6 +296,7 @@ export function SettingsPage() {
               </label>
               <input
                 type="number"
+                inputMode="decimal"
                 min="0"
                 step="0.5"
                 dir="ltr"

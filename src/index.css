@@ -6,12 +6,26 @@
   html {
     direction: rtl;
     font-family: 'Heebo', system-ui, sans-serif;
+    overflow-x: hidden;
+    max-width: 100%;
+    -webkit-tap-highlight-color: transparent;
   }
 
-  body {
+  body,
+  #root {
     background-color: #FAF6F0;
     color: #1E242B;
     overflow-x: hidden;
+    max-width: 100%;
+  }
+
+  /* מניעת זום אוטומטי ב-iOS/Android בעת הקשה על שדות טופס במובייל */
+  @media (max-width: 767px) {
+    input,
+    select,
+    textarea {
+      font-size: 16px !important;
+    }
   }
 }
 
@@ -19,10 +33,38 @@
   font-variant-numeric: tabular-nums;
 }
 
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes sheetUp {
+  from {
+    transform: translateY(100%);
+    opacity: 0.7;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.animate-fade-in {
+  animation: fadeIn 180ms ease-out;
+}
+
+.animate-sheet-up {
+  animation: sheetUp 240ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
 /* Custom subtle scrollbars */
 ::-webkit-scrollbar {
-  width: 7px;
-  height: 7px;
+  width: 6px;
+  height: 6px;
 }
 
 ::-webkit-scrollbar-track {
@@ -38,7 +80,6 @@
   background: #B88B5D;
 }
 
-/* Hide number input arrows for cleaner inline price editing */
 input[type='number']::-webkit-inner-spin-button,
 input[type='number']::-webkit-outer-spin-button {
   opacity: 0.5;

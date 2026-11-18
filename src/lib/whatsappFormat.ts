@@ -64,6 +64,18 @@ export function formatOrderWhatsApp(order: Order, settings?: Partial<BusinessSet
   return lines.join('\n');
 }
 
+export function buildWhatsAppShareUrl(text: string, phone?: string): string {
+  const encoded = encodeURIComponent(text);
+  if (phone) {
+    const digits = phone.replace(/\D/g, '');
+    if (digits.length >= 9) {
+      const intl = digits.startsWith('0') ? `972${digits.slice(1)}` : digits;
+      return `https://wa.me/${intl}?text=${encoded}`;
+    }
+  }
+  return `https://wa.me/?text=${encoded}`;
+}
+
 export function formatSupplierLedgerWhatsApp(user: User, orders: Order[]): string {
   const balanceText =
     user.balance < 0

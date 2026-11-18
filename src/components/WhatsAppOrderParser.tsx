@@ -4,6 +4,7 @@ import {
   Sparkles,
   UserPlus,
   Plus,
+  Minus,
   Trash2,
   CheckCircle2,
   AlertTriangle,
@@ -18,6 +19,7 @@ interface WhatsAppOrderParserProps {
   fridayDate: string;
   products: AdminProduct[];
   users: User[];
+  compact?: boolean;
   onOrderCreated: () => Promise<void>;
 }
 
@@ -27,6 +29,7 @@ export function WhatsAppOrderParser({
   fridayDate,
   products,
   users,
+  compact = false,
   onOrderCreated,
 }: WhatsAppOrderParserProps) {
   const [rawText, setRawText] = useState('');
@@ -182,32 +185,54 @@ export function WhatsAppOrderParser({
   };
 
   return (
-    <div className="bg-white rounded-3xl border border-[#E8D5BE] shadow-soft overflow-hidden">
-      <div className="bg-gradient-to-l from-[#1E242B] to-[#3A2419] px-5 py-4 flex flex-wrap items-center justify-between gap-3 text-white">
-        <div className="flex items-center gap-2.5">
-          <div className="w-9 h-9 rounded-xl bg-emerald-500/20 border border-emerald-400/30 flex items-center justify-center text-emerald-300">
-            <MessageSquareText className="w-5 h-5" />
+    <div
+      className={
+        compact
+          ? 'space-y-4'
+          : 'bg-white rounded-3xl border border-[#E8D5BE] shadow-soft overflow-hidden'
+      }
+    >
+      {!compact && (
+        <div className="bg-gradient-to-l from-[#1E242B] to-[#3A2419] px-5 py-4 flex flex-wrap items-center justify-between gap-3 text-white">
+          <div className="flex items-center gap-2.5">
+            <div className="w-9 h-9 rounded-xl bg-emerald-500/20 border border-emerald-400/30 flex items-center justify-center text-emerald-300">
+              <MessageSquareText className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="font-serif text-xl font-bold leading-tight">קליטת הזמנה חכמה מוואטסאפ</h3>
+              <p className="text-xs text-amber-200/85">
+                הדבק הודעה חופשית בעברית — המערכת מזהה מוצרים, ריבוי, כינויים וכמויות אוטומטית.
+              </p>
+            </div>
           </div>
-          <div>
-            <h3 className="font-serif text-xl font-bold leading-tight">קליטת הזמנה חכמה מוואטסאפ</h3>
-            <p className="text-xs text-amber-200/85">
-              הדבק הודעה חופשית בעברית — המערכת מזהה מוצרים, ריבוי, כינויים וכמויות אוטומטית.
-            </p>
-          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setRawText(SAMPLE_MESSAGE);
+              runParse(SAMPLE_MESSAGE);
+            }}
+            className="text-xs font-bold px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-amber-200 border border-white/15 transition-colors"
+          >
+            טען הודעה לדוגמה
+          </button>
         </div>
-        <button
-          type="button"
-          onClick={() => {
-            setRawText(SAMPLE_MESSAGE);
-            runParse(SAMPLE_MESSAGE);
-          }}
-          className="text-xs font-bold px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-amber-200 border border-white/15 transition-colors"
-        >
-          טען הודעה לדוגמה
-        </button>
-      </div>
+      )}
 
-      <form onSubmit={handleSaveOrder} className="p-5 space-y-5">
+      <form onSubmit={handleSaveOrder} className={compact ? 'space-y-4' : 'p-5 space-y-5'}>
+        {compact && (
+          <div className="flex justify-end">
+            <button
+              type="button"
+              onClick={() => {
+                setRawText(SAMPLE_MESSAGE);
+                runParse(SAMPLE_MESSAGE);
+              }}
+              className="text-xs font-bold px-3 py-1.5 rounded-xl bg-[#FFF7ED] border border-[#E8D5BE] text-[#C85A17]"
+            >
+              טען הודעה לדוגמה
+            </button>
+          </div>
+        )}
         {success && (
           <div className="p-3.5 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm font-bold flex items-center gap-2">
             <CheckCircle2 className="w-4 h-4 shrink-0" />
@@ -505,8 +530,25 @@ export function WhatsAppOrderParser({
                       </div>
                     </div>
                     <div className="flex items-center gap-1.5 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setParsedItems((prev) =>
+                            prev.map((row) =>
+                              row.product_id === it.product_id
+                                ? { ...row, quantity: Math.max(1, row.quantity - 1) }
+                                : row
+                            )
+                          )
+                        }
+                        className="w-10 h-10 rounded-xl bg-white border border-[#E8D5BE] flex items-center justify-center active:scale-95"
+                        aria-label="הפחת"
+                      >
+                        <Minus className="w-4 h-4" />
+                      </button>
                       <input
                         type="number"
+                        inputMode="numeric"
                         min="1"
                         value={it.quantity}
                         onChange={(e) => {
@@ -517,14 +559,30 @@ export function WhatsAppOrderParser({
                             )
                           );
                         }}
-                        className="w-16 py-1 text-center rounded-lg border border-[#E8D5BE] bg-white font-bold text-sm tabular-nums"
+                        className="w-14 h-10 text-center rounded-xl border border-[#E8D5BE] bg-white font-bold text-sm tabular-nums"
                       />
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setParsedItems((prev) =>
+                            prev.map((row) =>
+                              row.product_id === it.product_id
+                                ? { ...row, quantity: row.quantity + 1 }
+                                : row
+                            )
+                          )
+                        }
+                        className="w-10 h-10 rounded-xl bg-[#C85A17] text-white flex items-center justify-center active:scale-95"
+                        aria-label="הוסף"
+                      >
+                        <Plus className="w-4 h-4" />
+                      </button>
                       <button
                         type="button"
                         onClick={() =>
                           setParsedItems((prev) => prev.filter((row) => row.product_id !== it.product_id))
                         }
-                        className="p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50"
+                        className="w-9 h-10 rounded-xl text-slate-400 hover:text-red-600 hover:bg-red-50 flex items-center justify-center"
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>

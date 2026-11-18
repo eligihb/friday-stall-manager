@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { apiFetch } from '../lib/api';
 import { formatILS, formatPercent } from '../lib/format';
+import { BottomSheet } from '../components/BottomSheet';
 import type { AdminProduct } from '../types';
 
 interface DraftPrices {
@@ -515,12 +516,13 @@ export function ProductsCatalog() {
                         </label>
                         <input
                           type="number"
+                          inputMode="decimal"
                           step="0.01"
                           min="0"
                           dir="ltr"
                           value={d[field]}
                           onChange={(e) => updateDraft(p.id, field, e.target.value)}
-                          className="w-full px-3 py-2 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] text-left tabular-nums font-bold text-sm focus:bg-white focus:border-[#C85A17] focus:outline-none"
+                          className="w-full px-3 py-2.5 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] text-left tabular-nums font-bold text-sm focus:bg-white focus:border-[#C85A17] focus:outline-none"
                         />
                       </div>
                     ))}
@@ -568,133 +570,119 @@ export function ProductsCatalog() {
         </>
       )}
 
-      {/* חלונית הוספת מוצר חדש */}
-      {showAddModal && (
-        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-[#E8D5BE]">
-            <div className="flex items-center justify-between mb-5">
-              <h3 className="font-serif text-2xl font-bold text-slate-900">הוספת מוצר חדש</h3>
-              <button
-                type="button"
-                onClick={() => setShowAddModal(false)}
-                className="p-2 rounded-xl text-slate-400 hover:bg-slate-100"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <form onSubmit={handleCreateProduct} className="space-y-4">
-              <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-1">שם המוצר</label>
-                <input
-                  type="text"
-                  required
-                  value={newProd.name}
-                  onChange={(e) => setNewProd({ ...newProd, name: e.target.value })}
-                  placeholder="לדוגמה: מלאווח ביתי"
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] focus:bg-white focus:border-[#C85A17] focus:outline-none"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1">עלות ייצור (₪)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    required
-                    dir="ltr"
-                    value={newProd.cost_price}
-                    onChange={(e) => setNewProd({ ...newProd, cost_price: e.target.value })}
-                    className="w-full px-3 py-2 rounded-xl border border-[#E8D5BE] text-left tabular-nums font-semibold"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1">מחיר ספק (₪)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    required
-                    dir="ltr"
-                    value={newProd.supplier_price}
-                    onChange={(e) => setNewProd({ ...newProd, supplier_price: e.target.value })}
-                    className="w-full px-3 py-2 rounded-xl border border-[#E8D5BE] text-left tabular-nums font-semibold"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1">הזמנה מוקדמת (₪)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    required
-                    dir="ltr"
-                    value={newProd.preorder_price}
-                    onChange={(e) => setNewProd({ ...newProd, preorder_price: e.target.value })}
-                    className="w-full px-3 py-2 rounded-xl border border-[#E8D5BE] text-left tabular-nums font-semibold"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1">מחיר דוכן / לקוח (₪)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    required
-                    dir="ltr"
-                    value={newProd.customer_price}
-                    onChange={(e) => setNewProd({ ...newProd, customer_price: e.target.value })}
-                    className="w-full px-3 py-2 rounded-xl border border-[#E8D5BE] text-left tabular-nums font-semibold"
-                  />
-                </div>
-              </div>
-
-              {(newProd.cost_price || newProd.supplier_price || newProd.customer_price) && (
-                <div className="bg-[#FAF6F0] rounded-2xl p-3.5 border border-[#E8D5BE] grid grid-cols-2 gap-3 text-xs tabular-nums">
-                  {(() => {
-                    const m = calcMargins(newProd.cost_price, newProd.supplier_price, newProd.customer_price);
-                    return (
-                      <>
-                        <div>
-                          <div className="text-slate-500">ריווח ממכירה לספק</div>
-                          <div className="font-bold text-amber-800 text-sm mt-0.5">
-                            {formatILS(m.supProfit)} ({formatPercent(m.supPct)})
-                          </div>
-                        </div>
-                        <div>
-                          <div className="text-slate-500">ריווח ממכירה ללקוח</div>
-                          <div className="font-bold text-emerald-800 text-sm mt-0.5">
-                            {formatILS(m.custProfit)} ({formatPercent(m.custPct)})
-                          </div>
-                        </div>
-                      </>
-                    );
-                  })()}
-                </div>
-              )}
-
-              <div className="flex gap-2.5 pt-2">
-                <button
-                  type="submit"
-                  disabled={creating}
-                  className="flex-1 py-2.5 rounded-xl bg-[#C85A17] hover:bg-[#A9440F] text-white font-bold text-sm"
-                >
-                  {creating ? 'מוסיף...' : 'הוסף למחירון'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowAddModal(false)}
-                  className="px-4 py-2.5 rounded-xl border border-[#E8D5BE] text-slate-600 font-semibold text-sm"
-                >
-                  ביטול
-                </button>
-              </div>
-            </form>
+      {/* חלונית Bottom Sheet להוספת מוצר חדש */}
+      <BottomSheet
+        open={showAddModal}
+        onClose={() => setShowAddModal(false)}
+        title="הוספת מוצר חדש למחירון"
+        subtitle="הזן 4 מדרגות מחיר — הרווחיות מחושבת אוטומטית"
+        maxWidthClass="md:max-w-md"
+      >
+        <form onSubmit={handleCreateProduct} className="space-y-4">
+          <div>
+            <label className="block text-sm font-semibold text-slate-700 mb-1">שם המוצר</label>
+            <input
+              type="text"
+              required
+              value={newProd.name}
+              onChange={(e) => setNewProd({ ...newProd, name: e.target.value })}
+              placeholder="לדוגמה: מלאווח ביתי"
+              className="w-full px-3.5 py-2.5 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] focus:bg-white focus:border-[#C85A17] focus:outline-none"
+            />
           </div>
-        </div>
-      )}
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 mb-1">עלות ייצור (₪)</label>
+              <input
+                type="number"
+                inputMode="decimal"
+                step="0.01"
+                min="0"
+                required
+                dir="ltr"
+                value={newProd.cost_price}
+                onChange={(e) => setNewProd({ ...newProd, cost_price: e.target.value })}
+                className="w-full px-3 py-2.5 rounded-xl border border-[#E8D5BE] text-left tabular-nums font-semibold"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 mb-1">מחיר ספק (₪)</label>
+              <input
+                type="number"
+                inputMode="decimal"
+                step="0.01"
+                min="0"
+                required
+                dir="ltr"
+                value={newProd.supplier_price}
+                onChange={(e) => setNewProd({ ...newProd, supplier_price: e.target.value })}
+                className="w-full px-3 py-2.5 rounded-xl border border-[#E8D5BE] text-left tabular-nums font-semibold"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 mb-1">הזמנה מוקדמת (₪)</label>
+              <input
+                type="number"
+                inputMode="decimal"
+                step="0.01"
+                min="0"
+                required
+                dir="ltr"
+                value={newProd.preorder_price}
+                onChange={(e) => setNewProd({ ...newProd, preorder_price: e.target.value })}
+                className="w-full px-3 py-2.5 rounded-xl border border-[#E8D5BE] text-left tabular-nums font-semibold"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 mb-1">מחיר דוכן / לקוח (₪)</label>
+              <input
+                type="number"
+                inputMode="decimal"
+                step="0.01"
+                min="0"
+                required
+                dir="ltr"
+                value={newProd.customer_price}
+                onChange={(e) => setNewProd({ ...newProd, customer_price: e.target.value })}
+                className="w-full px-3 py-2.5 rounded-xl border border-[#E8D5BE] text-left tabular-nums font-semibold"
+              />
+            </div>
+          </div>
+
+          {(newProd.cost_price || newProd.supplier_price || newProd.customer_price) && (
+            <div className="bg-[#FAF6F0] rounded-2xl p-3.5 border border-[#E8D5BE] grid grid-cols-2 gap-3 text-xs tabular-nums">
+              {(() => {
+                const m = calcMargins(newProd.cost_price, newProd.supplier_price, newProd.customer_price);
+                return (
+                  <>
+                    <div>
+                      <div className="text-slate-500">ריווח ממכירה לספק</div>
+                      <div className="font-bold text-amber-800 text-sm mt-0.5">
+                        {formatILS(m.supProfit)} ({formatPercent(m.supPct)})
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-slate-500">ריווח ממכירה ללקוח</div>
+                      <div className="font-bold text-emerald-800 text-sm mt-0.5">
+                        {formatILS(m.custProfit)} ({formatPercent(m.custPct)})
+                      </div>
+                    </div>
+                  </>
+                );
+              })()}
+            </div>
+          )}
+
+          <button
+            type="submit"
+            disabled={creating}
+            className="w-full min-h-[50px] rounded-2xl bg-[#C85A17] hover:bg-[#A9440F] text-white font-extrabold text-base"
+          >
+            {creating ? 'מוסיף...' : 'הוסף למחירון'}
+          </button>
+        </form>
+      </BottomSheet>
     </div>
   );
 }

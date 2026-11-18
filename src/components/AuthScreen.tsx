@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Flame, Lock, Mail, Phone, User as UserIcon, ShieldCheck, Store, ShoppingBag, ArrowLeft } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { APP_VERSION } from '../lib/version';
 import type { UserRole } from '../types';
 
 export function AuthScreen() {
@@ -54,6 +55,9 @@ export function AuthScreen() {
           <div className="inline-flex items-center gap-3 bg-white/10 backdrop-blur-sm border border-white/15 px-4 py-2 rounded-full mb-8">
             <Flame className="w-5 h-5 text-amber-400" />
             <span className="text-sm font-medium text-amber-100">מאפייה סיטונאית ודוכן שישי</span>
+            <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-amber-400/20 text-amber-200 tabular-nums">
+              {APP_VERSION}
+            </span>
           </div>
 
           <h1 className="font-serif text-4xl lg:text-5xl font-bold tracking-tight text-white mb-4">

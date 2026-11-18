@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import { FridayProvider } from './context/FridayContext';
 import { AuthScreen } from './components/AuthScreen';
 import { Layout, type AdminTab } from './components/Layout';
 import { AdminDashboard } from './pages/AdminDashboard';
@@ -57,7 +58,9 @@ function AppRouter() {
 export default function App() {
   return (
     <AuthProvider>
-      <AppRouter />
+      <FridayProvider>
+        <AppRouter />
+      </FridayProvider>
     </AuthProvider>
   );
 }
