@@ -32,6 +32,7 @@ interface StorefrontProduct {
   name: string;
   preorder_price: number;
   customer_price: number;
+  image_url?: string | null;
   is_active: boolean;
 }
 
@@ -351,22 +352,31 @@ export function PublicStorefront({ onOpenStaffLogin }: PublicStorefrontProps) {
                       : 'bg-white border-[#E8D5BE]/85 shadow-soft'
                   }`}
                 >
-                  <div className="min-w-0 flex-1">
-                    <div className="font-extrabold text-base text-slate-900 truncate">{p.name}</div>
-                    <div className="flex items-center gap-2 mt-1 flex-wrap tabular-nums">
-                      <span className="text-lg font-extrabold text-[#C85A17]">
-                        {formatILS(activePrice)}
-                      </span>
-                      {discountAmount > 0 && (
-                        <>
-                          <span className="text-xs text-slate-400 line-through">
-                            {formatILS(p.customer_price)}
-                          </span>
-                          <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-extrabold">
-                            הנחת הזמנה מוקדמת
-                          </span>
-                        </>
-                      )}
+                  <div className="flex items-center gap-3 min-w-0 flex-1">
+                    {p.image_url && (
+                      <img
+                        src={p.image_url}
+                        alt={p.name}
+                        className="w-12 h-12 rounded-xl object-cover border border-[#E8D5BE] shrink-0"
+                      />
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <div className="font-extrabold text-base text-slate-900 truncate">{p.name}</div>
+                      <div className="flex items-center gap-2 mt-1 flex-wrap tabular-nums">
+                        <span className="text-lg font-extrabold text-[#C85A17]">
+                          {formatILS(activePrice)}
+                        </span>
+                        {discountAmount > 0 && (
+                          <>
+                            <span className="text-xs text-slate-400 line-through">
+                              {formatILS(p.customer_price)}
+                            </span>
+                            <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-extrabold">
+                              הנחת הזמנה מוקדמת
+                            </span>
+                          </>
+                        )}
+                      </div>
                     </div>
                   </div>
 

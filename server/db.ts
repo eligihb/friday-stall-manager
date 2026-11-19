@@ -121,7 +121,14 @@ export const INITIAL_PRODUCTS: Array<{
   { name: 'סחוג', cost_price: 8.0, supplier_price: 11.5, preorder_price: 13.0, customer_price: 15.0 },
   { name: "חילבה 250 ג'", cost_price: 5.0, supplier_price: 8.0, preorder_price: 10.0, customer_price: 12.0 },
   { name: "חילבה 500 ג'", cost_price: 8.0, supplier_price: 14.0, preorder_price: 16.0, customer_price: 20.0 },
+  // מארזי שלישייה (3 יח׳ ב-12 ₪)
+  { name: 'מארז זלביה', cost_price: 7.0, supplier_price: 9.5, preorder_price: 12.0, customer_price: 12.0 },
+  { name: 'מארז לחם שום', cost_price: 6.5, supplier_price: 9.5, preorder_price: 12.0, customer_price: 12.0 },
+  { name: 'מארז פיתה זעתר', cost_price: 6.6, supplier_price: 9.99, preorder_price: 12.0, customer_price: 12.0 },
+  { name: 'מארז פיתה שומשום', cost_price: 6.6, supplier_price: 9.99, preorder_price: 12.0, customer_price: 12.0 },
 ];
+
+export const TRIO_PACK_PRODUCTS = INITIAL_PRODUCTS.filter((p) => p.name.startsWith('מארז '));
 
 export function getNextFridayDate(baseDate = new Date()): string {
   const d = new Date(baseDate);
@@ -146,6 +153,8 @@ async function initializeSchemaAndSeed(db: DbClient): Promise<void> {
         password_hash TEXT NOT NULL,
         role TEXT NOT NULL CHECK (role IN ('admin', 'supplier', 'customer')) DEFAULT 'customer',
         balance REAL NOT NULL DEFAULT 0,
+        discount_percent REAL NOT NULL DEFAULT 0,
+        custom_prices_json TEXT NOT NULL DEFAULT '{}',
         notes TEXT DEFAULT '',
         created_at TEXT NOT NULL DEFAULT (datetime('now'))
       );
@@ -157,7 +166,20 @@ async function initializeSchemaAndSeed(db: DbClient): Promise<void> {
         supplier_price REAL NOT NULL DEFAULT 0,
         preorder_price REAL NOT NULL DEFAULT 0,
         customer_price REAL NOT NULL DEFAULT 0,
+        image_url TEXT DEFAULT NULL,
         is_active INTEGER NOT NULL DEFAULT 1
+      );
+
+      CREATE TABLE IF NOT EXISTS product_price_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+        effective_date TEXT NOT NULL,
+        cost_price REAL NOT NULL DEFAULT 0,
+        supplier_price REAL NOT NULL DEFAULT 0,
+        preorder_price REAL NOT NULL DEFAULT 0,
+        customer_price REAL NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        UNIQUE (product_id, effective_date)
       );
 
       CREATE TABLE IF NOT EXISTS orders (
@@ -168,6 +190,9 @@ async function initializeSchemaAndSeed(db: DbClient): Promise<void> {
         order_type TEXT NOT NULL CHECK (order_type IN ('customer', 'supplier', 'charity')),
         delivery_fee REAL NOT NULL DEFAULT 0,
         credit_discount REAL NOT NULL DEFAULT 0,
+        discount_percent REAL NOT NULL DEFAULT 0,
+        include_vat INTEGER NOT NULL DEFAULT 0,
+        vat_amount REAL NOT NULL DEFAULT 0,
         total_amount REAL NOT NULL DEFAULT 0,
         paid_amount REAL NOT NULL DEFAULT 0,
         status TEXT NOT NULL CHECK (status IN ('awaiting_approval', 'pending', 'ready', 'delivered')) DEFAULT 'pending',
@@ -271,6 +296,31 @@ async function initializeSchemaAndSeed(db: DbClient): Promise<void> {
     await db.run(
       "UPDATE business_settings SET business_name = 'דוכן שישי תימני' WHERE id = 1 AND business_name = 'המטבח התימני'"
     );
+
+    // מיגרציות עמודות v1.6.0 (image_url, הנחה/תמחור מותאם, מע״מ)
+    const prodCols = await db.query<{ name: string }>('PRAGMA table_info(products)');
+    if (!prodCols.some((c) => c.name === 'image_url')) {
+      await db.exec('ALTER TABLE products ADD COLUMN image_url TEXT DEFAULT NULL;');
+    }
+
+    const userCols = await db.query<{ name: string }>('PRAGMA table_info(users)');
+    if (!userCols.some((c) => c.name === 'discount_percent')) {
+      await db.exec('ALTER TABLE users ADD COLUMN discount_percent REAL NOT NULL DEFAULT 0;');
+    }
+    if (!userCols.some((c) => c.name === 'custom_prices_json')) {
+      await db.exec("ALTER TABLE users ADD COLUMN custom_prices_json TEXT NOT NULL DEFAULT '{}';");
+    }
+
+    const ordCols = await db.query<{ name: string }>('PRAGMA table_info(orders)');
+    if (!ordCols.some((c) => c.name === 'discount_percent')) {
+      await db.exec('ALTER TABLE orders ADD COLUMN discount_percent REAL NOT NULL DEFAULT 0;');
+    }
+    if (!ordCols.some((c) => c.name === 'include_vat')) {
+      await db.exec('ALTER TABLE orders ADD COLUMN include_vat INTEGER NOT NULL DEFAULT 0;');
+    }
+    if (!ordCols.some((c) => c.name === 'vat_amount')) {
+      await db.exec('ALTER TABLE orders ADD COLUMN vat_amount REAL NOT NULL DEFAULT 0;');
+    }
   }
 
   // Seed products if table is empty
@@ -281,6 +331,40 @@ async function initializeSchemaAndSeed(db: DbClient): Promise<void> {
         `INSERT INTO products (name, cost_price, supplier_price, preorder_price, customer_price, is_active)
          VALUES (?, ?, ?, ?, ?, ?)`,
         [p.name, p.cost_price, p.supplier_price, p.preorder_price, p.customer_price, db.isPostgres ? true : 1]
+      );
+    }
+  } else {
+    // ודא שכל 4 מארזי השלישייה (12 ₪) קיימים גם במסדי נתונים קיימים
+    for (const tp of TRIO_PACK_PRODUCTS) {
+      const exists = await db.get<{ id: number }>('SELECT id FROM products WHERE name = ?', [tp.name]);
+      if (!exists) {
+        await db.run(
+          `INSERT INTO products (name, cost_price, supplier_price, preorder_price, customer_price, is_active)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+          [tp.name, tp.cost_price, tp.supplier_price, tp.preorder_price, tp.customer_price, db.isPostgres ? true : 1]
+        );
+      }
+    }
+  }
+
+  // ודא שלכל מוצר קיימת רשומת היסטוריית מחיר בסיסית ('2020-01-01')
+  const allProds = await db.query<{
+    id: number;
+    cost_price: number;
+    supplier_price: number;
+    preorder_price: number;
+    customer_price: number;
+  }>('SELECT id, cost_price, supplier_price, preorder_price, customer_price FROM products');
+  for (const p of allProds) {
+    const hasHist = await db.get<{ id: number }>(
+      'SELECT id FROM product_price_history WHERE product_id = ? LIMIT 1',
+      [p.id]
+    );
+    if (!hasHist) {
+      await db.run(
+        `INSERT INTO product_price_history (product_id, effective_date, cost_price, supplier_price, preorder_price, customer_price)
+         VALUES (?, '2020-01-01', ?, ?, ?, ?)`,
+        [p.id, p.cost_price, p.supplier_price, p.preorder_price, p.customer_price]
       );
     }
   }

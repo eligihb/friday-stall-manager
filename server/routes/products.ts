@@ -11,7 +11,19 @@ interface DbProduct {
   supplier_price: number;
   preorder_price: number;
   customer_price: number;
+  image_url?: string | null;
   is_active: number | boolean;
+}
+
+interface DbPriceHistory {
+  id: number;
+  product_id: number;
+  effective_date: string;
+  cost_price: number;
+  supplier_price: number;
+  preorder_price: number;
+  customer_price: number;
+  created_at: string;
 }
 
 function normalizeProduct(p: DbProduct) {
@@ -22,6 +34,7 @@ function normalizeProduct(p: DbProduct) {
     supplier_price: Number(p.supplier_price),
     preorder_price: Number(p.preorder_price),
     customer_price: Number(p.customer_price),
+    image_url: p.image_url || null,
     is_active: Boolean(p.is_active),
   };
 }
@@ -46,25 +59,52 @@ router.get('/', requireAuth, async (req: AuthenticatedRequest, res) => {
           id: Number(p.id),
           name: p.name,
           supplier_price: Number(p.supplier_price),
+          image_url: p.image_url || null,
           is_active: Boolean(p.is_active),
         })),
       });
       return;
     }
 
-    // customer role
     res.json({
       products: rows.map((p) => ({
         id: Number(p.id),
         name: p.name,
         preorder_price: Number(p.preorder_price),
         customer_price: Number(p.customer_price),
+        image_url: p.image_url || null,
         is_active: Boolean(p.is_active),
       })),
     });
   } catch (err) {
     console.error('List products error:', err);
     res.status(500).json({ error: 'שגיאה בטעינת מחירון המוצרים' });
+  }
+});
+
+router.get('/:id/history', requireAuth, requireRole('admin'), async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const db = await getDb();
+    const rows = await db.query<DbPriceHistory>(
+      'SELECT * FROM product_price_history WHERE product_id = ? ORDER BY effective_date DESC, id DESC',
+      [id]
+    );
+    res.json({
+      history: rows.map((h) => ({
+        id: Number(h.id),
+        product_id: Number(h.product_id),
+        effective_date: String(h.effective_date).slice(0, 10),
+        cost_price: Number(h.cost_price),
+        supplier_price: Number(h.supplier_price),
+        preorder_price: Number(h.preorder_price),
+        customer_price: Number(h.customer_price),
+        created_at: h.created_at,
+      })),
+    });
+  } catch (err) {
+    console.error('Product history error:', err);
+    res.status(500).json({ error: 'שגיאה בטעינת היסטוריית המחירים' });
   }
 });
 
@@ -75,7 +115,9 @@ router.post('/', requireAuth, requireRole('admin'), async (req, res) => {
     const supplier_price = Number(req.body?.supplier_price);
     const preorder_price = Number(req.body?.preorder_price);
     const customer_price = Number(req.body?.customer_price);
+    const image_url = req.body?.image_url ? String(req.body.image_url).trim() : null;
     const is_active = req.body?.is_active !== undefined ? Boolean(req.body.is_active) : true;
+    const effective_date = String(req.body?.effective_date || new Date().toISOString().slice(0, 10)).slice(0, 10);
 
     if (!name) {
       res.status(400).json({ error: 'יש להזין שם מוצר' });
@@ -94,10 +136,18 @@ router.post('/', requireAuth, requireRole('admin'), async (req, res) => {
     }
 
     const inserted = await db.run(
-      `INSERT INTO products (name, cost_price, supplier_price, preorder_price, customer_price, is_active)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [name, cost_price, supplier_price, preorder_price, customer_price, db.isPostgres ? is_active : is_active ? 1 : 0]
+      `INSERT INTO products (name, cost_price, supplier_price, preorder_price, customer_price, image_url, is_active)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [name, cost_price, supplier_price, preorder_price, customer_price, image_url, db.isPostgres ? is_active : is_active ? 1 : 0]
     );
+
+    if (inserted.lastInsertId) {
+      await db.run(
+        `INSERT INTO product_price_history (product_id, effective_date, cost_price, supplier_price, preorder_price, customer_price)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [inserted.lastInsertId, effective_date, cost_price, supplier_price, preorder_price, customer_price]
+      );
+    }
 
     const product = await db.get<DbProduct>('SELECT * FROM products WHERE id = ?', [inserted.lastInsertId]);
     res.status(201).json({ product: product ? normalizeProduct(product) : null });
@@ -130,23 +180,78 @@ router.put('/:id', requireAuth, requireRole('admin'), async (req, res) => {
       req.body?.preorder_price !== undefined ? Number(req.body.preorder_price) : Number(existing.preorder_price);
     const customer_price =
       req.body?.customer_price !== undefined ? Number(req.body.customer_price) : Number(existing.customer_price);
+    const image_url =
+      req.body?.image_url !== undefined
+        ? String(req.body.image_url || '').trim() || null
+        : existing.image_url || null;
     const is_active =
       req.body?.is_active !== undefined ? Boolean(req.body.is_active) : Boolean(existing.is_active);
+    const today = new Date().toISOString().slice(0, 10);
+    const effective_date = String(req.body?.effective_date || today).slice(0, 10);
 
     if (!name || [cost_price, supplier_price, preorder_price, customer_price].some((v) => Number.isNaN(v) || v < 0)) {
       res.status(400).json({ error: 'נתוני המוצר אינם תקינים' });
       return;
     }
 
-    await db.run(
-      `UPDATE products
-       SET name = ?, cost_price = ?, supplier_price = ?, preorder_price = ?, customer_price = ?, is_active = ?
-       WHERE id = ?`,
-      [name, cost_price, supplier_price, preorder_price, customer_price, db.isPostgres ? is_active : is_active ? 1 : 0, id]
-    );
+    const pricesChanged =
+      cost_price !== Number(existing.cost_price) ||
+      supplier_price !== Number(existing.supplier_price) ||
+      preorder_price !== Number(existing.preorder_price) ||
+      customer_price !== Number(existing.customer_price);
+
+    if (pricesChanged) {
+      const existingHist = await db.get<{ id: number }>(
+        'SELECT id FROM product_price_history WHERE product_id = ? AND effective_date = ?',
+        [id, effective_date]
+      );
+      if (existingHist) {
+        await db.run(
+          `UPDATE product_price_history
+           SET cost_price = ?, supplier_price = ?, preorder_price = ?, customer_price = ?
+           WHERE id = ?`,
+          [cost_price, supplier_price, preorder_price, customer_price, existingHist.id]
+        );
+      } else {
+        await db.run(
+          `INSERT INTO product_price_history (product_id, effective_date, cost_price, supplier_price, preorder_price, customer_price)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+          [id, effective_date, cost_price, supplier_price, preorder_price, customer_price]
+        );
+      }
+    }
+
+    // אם תאריך התחולה הוא היום או בעבר — מעדכנים מיד גם את המחיר הפעיל בטבלת המוצרים
+    const applyNow = effective_date <= today || !pricesChanged;
+    if (applyNow) {
+      await db.run(
+        `UPDATE products
+         SET name = ?, cost_price = ?, supplier_price = ?, preorder_price = ?, customer_price = ?, image_url = ?, is_active = ?
+         WHERE id = ?`,
+        [
+          name,
+          cost_price,
+          supplier_price,
+          preorder_price,
+          customer_price,
+          image_url,
+          db.isPostgres ? is_active : is_active ? 1 : 0,
+          id,
+        ]
+      );
+    } else {
+      await db.run(
+        `UPDATE products SET name = ?, image_url = ?, is_active = ? WHERE id = ?`,
+        [name, image_url, db.isPostgres ? is_active : is_active ? 1 : 0, id]
+      );
+    }
 
     const updated = await db.get<DbProduct>('SELECT * FROM products WHERE id = ?', [id]);
-    res.json({ product: updated ? normalizeProduct(updated) : null });
+    res.json({
+      product: updated ? normalizeProduct(updated) : null,
+      scheduled: !applyNow,
+      effective_date,
+    });
   } catch (err) {
     console.error('Update product error:', err);
     res.status(500).json({ error: 'שגיאה בעדכון המוצר' });

@@ -7,6 +7,7 @@ import type {
   OrderStatus,
   OrderType,
   PaymentMethod,
+  ProductPriceHistoryEntry,
   Transaction,
   User,
   UserRole,
@@ -33,6 +34,7 @@ interface LocalDb {
   nextIds: {
     users: number;
     products: number;
+    price_history?: number;
     orders: number;
     order_items: number;
     transactions: number;
@@ -40,6 +42,7 @@ interface LocalDb {
   };
   users: StoredUser[];
   products: AdminProduct[];
+  product_price_history?: ProductPriceHistoryEntry[];
   orders: StoredOrder[];
   order_items: Array<Omit<OrderItem, 'product_name'> & { cost_price_snapshot: number }>;
   transactions: Array<Omit<Transaction, 'user_name'>>;
@@ -72,6 +75,10 @@ function createInitialDb(): LocalDb {
     { id: 13, name: 'סחוג', cost_price: 8.0, supplier_price: 11.5, preorder_price: 13.0, customer_price: 15.0, is_active: true },
     { id: 14, name: "חילבה 250 ג'", cost_price: 5.0, supplier_price: 8.0, preorder_price: 10.0, customer_price: 12.0, is_active: true },
     { id: 15, name: "חילבה 500 ג'", cost_price: 8.0, supplier_price: 14.0, preorder_price: 16.0, customer_price: 20.0, is_active: true },
+    { id: 16, name: 'מארז זלביה', cost_price: 7.0, supplier_price: 9.5, preorder_price: 12.0, customer_price: 12.0, is_active: true },
+    { id: 17, name: 'מארז לחם שום', cost_price: 6.5, supplier_price: 9.5, preorder_price: 12.0, customer_price: 12.0, is_active: true },
+    { id: 18, name: 'מארז פיתה זעתר', cost_price: 6.6, supplier_price: 9.99, preorder_price: 12.0, customer_price: 12.0, is_active: true },
+    { id: 19, name: 'מארז פיתה שומשום', cost_price: 6.6, supplier_price: 9.99, preorder_price: 12.0, customer_price: 12.0, is_active: true },
   ];
 
   const users: StoredUser[] = [
@@ -85,9 +92,19 @@ function createInitialDb(): LocalDb {
   const custTotal = 6 * 4 + 2 * 30 + 1 * 13 + 1 * 10; // 107
 
   return {
-    nextIds: { users: 5, products: 16, orders: 4, order_items: 10, transactions: 4, fixed_expenses: 4 },
+    nextIds: { users: 5, products: 20, price_history: 20, orders: 4, order_items: 10, transactions: 4, fixed_expenses: 4 },
     users,
     products,
+    product_price_history: products.map((p, idx) => ({
+      id: idx + 1,
+      product_id: p.id,
+      effective_date: '2020-01-01',
+      cost_price: p.cost_price,
+      supplier_price: p.supplier_price,
+      preorder_price: p.preorder_price,
+      customer_price: p.customer_price,
+      created_at: today,
+    })),
     orders: [
       { id: 1, user_id: 2, recipient_name: 'מעדניית ראש העין', friday_date: upcomingFriday, order_type: 'supplier', delivery_fee: 0, credit_discount: 0, total_amount: supTotal, paid_amount: 0, status: 'pending', notes: 'ארוז בארגזי חלוקה', created_at: today },
       { id: 2, user_id: 4, recipient_name: 'דנה כהן', friday_date: upcomingFriday, order_type: 'customer', delivery_fee: 0, credit_discount: 0, total_amount: custTotal, paid_amount: custTotal, status: 'ready', notes: 'שולם בביט מראש', created_at: today },
@@ -216,12 +233,44 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
   const path = parsedUrl.pathname;
   const q = parsedUrl.searchParams;
 
-  // תמיכה במיגרציה אוטומטית להגדרות ישנות ב-localStorage
+  // תמיכה במיגרציה אוטומטית להגדרות, מארזי שלישייה והיסטוריית מחירים ב-localStorage
   if (!db.settings.admin_whatsapp_phone) {
     db.settings.admin_whatsapp_phone = '050-5551000';
   }
   if (db.settings.business_name === 'המטבח התימני') {
     db.settings.business_name = 'דוכן שישי תימני';
+  }
+  const trioDefs: Array<Omit<AdminProduct, 'id' | 'is_active'>> = [
+    { name: 'מארז זלביה', cost_price: 7.0, supplier_price: 9.5, preorder_price: 12.0, customer_price: 12.0 },
+    { name: 'מארז לחם שום', cost_price: 6.5, supplier_price: 9.5, preorder_price: 12.0, customer_price: 12.0 },
+    { name: 'מארז פיתה זעתר', cost_price: 6.6, supplier_price: 9.99, preorder_price: 12.0, customer_price: 12.0 },
+    { name: 'מארז פיתה שומשום', cost_price: 6.6, supplier_price: 9.99, preorder_price: 12.0, customer_price: 12.0 },
+  ];
+  for (const tp of trioDefs) {
+    if (!db.products.some((p) => p.name === tp.name)) {
+      db.products.push({ id: db.nextIds.products++, ...tp, is_active: true });
+    }
+  }
+  if (!db.product_price_history) {
+    db.product_price_history = [];
+    db.nextIds.price_history = 1;
+  }
+  if (!db.nextIds.price_history) {
+    db.nextIds.price_history = db.product_price_history.length + 1;
+  }
+  for (const p of db.products) {
+    if (!db.product_price_history.some((h) => h.product_id === p.id)) {
+      db.product_price_history.push({
+        id: db.nextIds.price_history++,
+        product_id: p.id,
+        effective_date: '2020-01-01',
+        cost_price: p.cost_price,
+        supplier_price: p.supplier_price,
+        preorder_price: p.preorder_price,
+        customer_price: p.customer_price,
+        created_at: new Date().toISOString().slice(0, 10),
+      });
+    }
   }
 
   // --- PUBLIC STOREFRONT (ללא התחברות) ---
@@ -412,6 +461,7 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
 
   if (path === '/api/products' && method === 'POST') {
     requireAdmin();
+    const effective_date = String(body.effective_date || new Date().toISOString().slice(0, 10)).slice(0, 10);
     const prod: AdminProduct = {
       id: db.nextIds.products++,
       name: String(body.name || '').trim(),
@@ -419,33 +469,89 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
       supplier_price: Number(body.supplier_price || 0),
       preorder_price: Number(body.preorder_price || 0),
       customer_price: Number(body.customer_price || 0),
+      image_url: body.image_url ? String(body.image_url).trim() : null,
       is_active: body.is_active !== undefined ? Boolean(body.is_active) : true,
     };
     db.products.push(prod);
+    db.product_price_history!.push({
+      id: db.nextIds.price_history!++,
+      product_id: prod.id,
+      effective_date,
+      cost_price: prod.cost_price,
+      supplier_price: prod.supplier_price,
+      preorder_price: prod.preorder_price,
+      customer_price: prod.customer_price,
+      created_at: new Date().toISOString().slice(0, 10),
+    });
     saveDb(db);
     return { product: prod } as T;
   }
 
-  const prodMatch = path.match(/^\/api\/products\/(\d+)(\/toggle)?$/);
+  const prodMatch = path.match(/^\/api\/products\/(\d+)(\/toggle|\/history)?$/);
   if (prodMatch) {
     requireAdmin();
     const pid = Number(prodMatch[1]);
     const prod = db.products.find((p) => p.id === pid);
     if (!prod) throwErr('המוצר לא נמצא', 404);
+    if (prodMatch[2] === '/history' && method === 'GET') {
+      const history = db.product_price_history!
+        .filter((h) => h.product_id === pid)
+        .sort((a, b) => b.effective_date.localeCompare(a.effective_date) || b.id - a.id);
+      return { history } as T;
+    }
     if (prodMatch[2] === '/toggle' && method === 'PATCH') {
       prod.is_active = !prod.is_active;
       saveDb(db);
       return { product: prod } as T;
     }
     if (method === 'PUT') {
-      prod.name = body.name !== undefined ? String(body.name).trim() : prod.name;
-      prod.cost_price = body.cost_price !== undefined ? Number(body.cost_price) : prod.cost_price;
-      prod.supplier_price = body.supplier_price !== undefined ? Number(body.supplier_price) : prod.supplier_price;
-      prod.preorder_price = body.preorder_price !== undefined ? Number(body.preorder_price) : prod.preorder_price;
-      prod.customer_price = body.customer_price !== undefined ? Number(body.customer_price) : prod.customer_price;
-      prod.is_active = body.is_active !== undefined ? Boolean(body.is_active) : prod.is_active;
+      const today = new Date().toISOString().slice(0, 10);
+      const effective_date = String(body.effective_date || today).slice(0, 10);
+      const nextCost = body.cost_price !== undefined ? Number(body.cost_price) : prod.cost_price;
+      const nextSup = body.supplier_price !== undefined ? Number(body.supplier_price) : prod.supplier_price;
+      const nextPre = body.preorder_price !== undefined ? Number(body.preorder_price) : prod.preorder_price;
+      const nextCust = body.customer_price !== undefined ? Number(body.customer_price) : prod.customer_price;
+      const pricesChanged =
+        nextCost !== prod.cost_price ||
+        nextSup !== prod.supplier_price ||
+        nextPre !== prod.preorder_price ||
+        nextCust !== prod.customer_price;
+
+      if (pricesChanged) {
+        const existingHist = db.product_price_history!.find(
+          (h) => h.product_id === pid && h.effective_date === effective_date
+        );
+        if (existingHist) {
+          existingHist.cost_price = nextCost;
+          existingHist.supplier_price = nextSup;
+          existingHist.preorder_price = nextPre;
+          existingHist.customer_price = nextCust;
+        } else {
+          db.product_price_history!.push({
+            id: db.nextIds.price_history!++,
+            product_id: pid,
+            effective_date,
+            cost_price: nextCost,
+            supplier_price: nextSup,
+            preorder_price: nextPre,
+            customer_price: nextCust,
+            created_at: today,
+          });
+        }
+      }
+
+      if (body.name !== undefined) prod.name = String(body.name).trim();
+      if (body.image_url !== undefined) prod.image_url = String(body.image_url || '').trim() || null;
+      if (body.is_active !== undefined) prod.is_active = Boolean(body.is_active);
+      const applyNow = effective_date <= today || !pricesChanged;
+      if (applyNow) {
+        prod.cost_price = nextCost;
+        prod.supplier_price = nextSup;
+        prod.preorder_price = nextPre;
+        prod.customer_price = nextCust;
+      }
       saveDb(db);
-      return { product: prod } as T;
+      return { product: prod, scheduled: !applyNow, effective_date } as T;
     }
   }
 
@@ -535,10 +641,29 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
 
     let subtotal = 0;
     const orderId = db.nextIds.orders++;
+    const userCustomPrices = user_id ? userMap.get(user_id)?.custom_prices || {} : {};
+    const discountPercent =
+      order_type === 'charity'
+        ? 0
+        : me.role === 'admin'
+        ? Math.max(0, Math.min(100, Number(body.discount_percent || 0)))
+        : Number(me.discount_percent || 0);
+    const includeVat = order_type === 'charity' ? false : Boolean(body.include_vat);
+
     for (const it of validItems) {
       const p = prodMap.get(Number(it.product_id));
       if (!p) throwErr('מוצר לא נמצא', 400);
-      const unitPrice = tier === 'charity' ? 0 : p[tier];
+      const hist = (db.product_price_history || [])
+        .filter((h) => h.product_id === p.id && h.effective_date <= friday_date)
+        .sort((a, b) => b.effective_date.localeCompare(a.effective_date) || b.id - a.id)[0];
+      const eff = hist || p;
+      const override = userCustomPrices[p.id];
+      const unitPrice =
+        tier === 'charity'
+          ? 0
+          : override !== undefined && override >= 0
+          ? Number(override)
+          : eff[tier];
       subtotal += unitPrice * it.quantity;
       db.order_items.push({
         id: db.nextIds.order_items++,
@@ -546,11 +671,15 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
         product_id: p.id,
         quantity: it.quantity,
         unit_price_snapshot: unitPrice,
-        cost_price_snapshot: p.cost_price,
+        cost_price_snapshot: eff.cost_price,
       });
     }
 
-    const total_amount = order_type === 'charity' ? 0 : Math.max(0, round2(subtotal + delivery_fee - credit_discount));
+    const pctDisc = discountPercent > 0 ? round2((subtotal * discountPercent) / 100) : 0;
+    const finalDiscount = order_type === 'charity' ? 0 : round2(credit_discount + pctDisc);
+    const preVat = order_type === 'charity' ? 0 : Math.max(0, round2(subtotal + delivery_fee - finalDiscount));
+    const vat_amount = includeVat ? round2(preVat * 0.18) : 0;
+    const total_amount = order_type === 'charity' ? 0 : round2(preVat + vat_amount);
     db.orders.push({
       id: orderId,
       user_id,
@@ -558,7 +687,10 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
       friday_date,
       order_type,
       delivery_fee,
-      credit_discount,
+      credit_discount: finalDiscount,
+      discount_percent: discountPercent,
+      include_vat: includeVat,
+      vat_amount,
       total_amount,
       paid_amount,
       status: 'pending',
@@ -636,7 +768,10 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
       if (ord.order_type !== 'charity') {
         if (body.delivery_fee !== undefined) ord.delivery_fee = Math.max(0, Number(body.delivery_fee) || 0);
         if (body.credit_discount !== undefined) ord.credit_discount = Math.max(0, Number(body.credit_discount) || 0);
+        if (body.discount_percent !== undefined) ord.discount_percent = Math.max(0, Math.min(100, Number(body.discount_percent) || 0));
+        if (body.include_vat !== undefined) ord.include_vat = Boolean(body.include_vat);
       }
+      let sub = 0;
       if (Array.isArray(body.items)) {
         const tier =
           ord.order_type === 'charity'
@@ -646,12 +781,17 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
             : body.price_tier === 'customer_price'
             ? 'customer_price'
             : 'preorder_price';
+        const userCustomPrices = ord.user_id ? userMap.get(ord.user_id)?.custom_prices || {} : {};
         db.order_items = db.order_items.filter((i) => i.order_id !== oid);
-        let sub = 0;
         for (const it of body.items as Array<{ product_id: number; quantity: number }>) {
           const p = prodMap.get(Number(it.product_id));
           if (!p || it.quantity <= 0) continue;
-          const up = tier === 'charity' ? 0 : p[tier];
+          const hist = (db.product_price_history || [])
+            .filter((h) => h.product_id === p.id && h.effective_date <= ord.friday_date)
+            .sort((a, b) => b.effective_date.localeCompare(a.effective_date) || b.id - a.id)[0];
+          const eff = hist || p;
+          const override = userCustomPrices[p.id];
+          const up = tier === 'charity' ? 0 : override !== undefined && override >= 0 ? Number(override) : eff[tier];
           sub += up * it.quantity;
           db.order_items.push({
             id: db.nextIds.order_items++,
@@ -659,10 +799,23 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
             product_id: p.id,
             quantity: it.quantity,
             unit_price_snapshot: up,
-            cost_price_snapshot: p.cost_price,
+            cost_price_snapshot: eff.cost_price,
           });
         }
-        ord.total_amount = ord.order_type === 'charity' ? 0 : Math.max(0, round2(sub + ord.delivery_fee - ord.credit_discount));
+      } else {
+        sub = db.order_items
+          .filter((i) => i.order_id === oid)
+          .reduce((s, i) => s + i.quantity * i.unit_price_snapshot, 0);
+      }
+      if (ord.order_type !== 'charity') {
+        const pctDisc = (ord.discount_percent || 0) > 0 ? round2((sub * (ord.discount_percent || 0)) / 100) : 0;
+        const fixedDisc = body.credit_discount !== undefined ? Math.max(0, Number(body.credit_discount) || 0) : 0;
+        ord.credit_discount = round2(fixedDisc + pctDisc);
+        const preVat = Math.max(0, round2(sub + ord.delivery_fee - ord.credit_discount));
+        ord.vat_amount = ord.include_vat ? round2(preVat * 0.18) : 0;
+        ord.total_amount = round2(preVat + ord.vat_amount);
+      } else {
+        ord.total_amount = 0;
       }
       const diff = round2(ord.total_amount - oldTotal);
       if (ord.user_id && ord.order_type !== 'charity' && diff !== 0) {
@@ -705,6 +858,8 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
       password: String(body.password || '123456'),
       role: body.role === 'admin' || body.role === 'supplier' ? body.role : 'customer',
       balance: Number(body.balance || 0),
+      discount_percent: Math.max(0, Math.min(100, Number(body.discount_percent || 0))),
+      custom_prices: body.custom_prices && typeof body.custom_prices === 'object' ? body.custom_prices : {},
       notes: String(body.notes || '').trim(),
       created_at: new Date().toISOString().slice(0, 10),
     };
@@ -726,7 +881,21 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
       if (body.phone !== undefined) u.phone = String(body.phone).trim();
       if (body.role) u.role = body.role;
       if (body.balance !== undefined) u.balance = Number(body.balance);
+      if (body.discount_percent !== undefined) u.discount_percent = Math.max(0, Math.min(100, Number(body.discount_percent)));
+      if (body.custom_prices !== undefined && typeof body.custom_prices === 'object') u.custom_prices = body.custom_prices;
       if (body.notes !== undefined) u.notes = String(body.notes).trim();
+      saveDb(db);
+      return { ok: true } as T;
+    }
+    if (!action && method === 'DELETE') {
+      if (uid === me.id) throwErr('לא ניתן למחוק את המשתמש המחובר כרגע', 400);
+      db.orders.forEach((o) => {
+        if (o.user_id === uid) o.user_id = null;
+      });
+      db.transactions.forEach((t) => {
+        if (t.user_id === uid) t.user_id = null;
+      });
+      db.users = db.users.filter((x) => x.id !== uid);
       saveDb(db);
       return { ok: true } as T;
     }

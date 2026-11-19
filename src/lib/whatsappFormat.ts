@@ -12,7 +12,7 @@ export function formatProductionWhatsApp(
   const totalCost = activeItems.reduce((s, i) => s + i.total_to_bake * i.cost_price, 0);
 
   const lines: string[] = [
-    `🔥 *${bizName} — ריכוז ייצור ואפייה*`,
+    `🔥 *${bizName} — סיכום רכש מהמאפייה*`,
     `📅 ${formatFridayLabel(fridayDate)}`,
     `━━━━━━━━━━━━━━━━`,
   ];
@@ -28,8 +28,9 @@ export function formatProductionWhatsApp(
   }
 
   lines.push(`━━━━━━━━━━━━━━━━`);
-  lines.push(`📦 סה״כ יחידות לייצור: *${totalUnits}*`);
-  lines.push(`💰 עלות ייצור משוערת: *${formatILS(totalCost)}*`);
+  lines.push(`📦 סה״כ יחידות לרכש מהמאפייה: *${totalUnits}*`);
+  lines.push(`💵 עלות משוערת במזומן למאפייה: *${formatILS(totalCost)}*`);
+  lines.push(`ℹ️ הערה: למעט פריטים בהכנה עצמית קלה (כגון רוטב סלסה / כבד קצוץ).`);
   return lines.join('\n');
 }
 

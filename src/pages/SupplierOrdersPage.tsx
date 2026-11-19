@@ -10,8 +10,10 @@ import {
   Edit3,
   Trash2,
   Share2,
+  Search,
 } from 'lucide-react';
 import { apiFetch } from '../lib/api';
+import { filterUsersByNameOrPhone, getPhoneLast4 } from '../lib/whatsappParser';
 import {
   formatFridayLabel,
   formatHebrewDate,
@@ -35,6 +37,7 @@ const NEXT_STATUS: Record<OrderStatus, OrderStatus> = {
 export function SupplierOrdersPage() {
   const { fridayDate: globalFriday, refreshTick } = useFriday();
   const [suppliers, setSuppliers] = useState<User[]>([]);
+  const [supplierSearch, setSupplierSearch] = useState('');
   const [selectedSupplierId, setSelectedSupplierId] = useState<number | null>(null);
   const [products, setProducts] = useState<AdminProduct[]>([]);
   const [ledger, setLedger] = useState<{
@@ -50,7 +53,10 @@ export function SupplierOrdersPage() {
   const [orderModalOpen, setOrderModalOpen] = useState(false);
   const [editingOrder, setEditingOrder] = useState<Order | null>(null);
   const [orderFriday, setOrderFriday] = useState(getNextFridayISO());
+  const [orderDeliveryFee, setOrderDeliveryFee] = useState('0');
+  const [orderDiscountMode, setOrderDiscountMode] = useState<'fixed' | 'percent'>('fixed');
   const [orderCredit, setOrderCredit] = useState('0');
+  const [orderIncludeVat, setOrderIncludeVat] = useState(false);
   const [orderPaid, setOrderPaid] = useState('0');
   const [orderPayMethod, setOrderPayMethod] = useState<PaymentMethod>('transfer');
   const [orderNotes, setOrderNotes] = useState('');
@@ -123,19 +129,47 @@ export function SupplierOrdersPage() {
     return computed.reverse();
   }, [ledger]);
 
-  const draftOrderTotal = useMemo(() => {
+  const filteredSuppliers = useMemo(
+    () => filterUsersByNameOrPhone(supplierSearch, suppliers),
+    [supplierSearch, suppliers]
+  );
+
+  const selectedSupplier = useMemo(
+    () => suppliers.find((s) => s.id === selectedSupplierId) || null,
+    [suppliers, selectedSupplierId]
+  );
+
+  const getSupplierUnitPrice = (p: AdminProduct) => {
+    const ov = selectedSupplier?.custom_prices?.[p.id];
+    return ov !== undefined && !Number.isNaN(Number(ov)) && Number(ov) >= 0 ? Number(ov) : p.supplier_price;
+  };
+
+  const draftTotals = useMemo(() => {
     let sub = 0;
     for (const p of products) {
       const q = quantities[p.id] || 0;
-      if (q > 0) sub += q * p.supplier_price;
+      if (q > 0) sub += q * getSupplierUnitPrice(p);
     }
-    return Math.max(0, sub - (Number(orderCredit) || 0));
-  }, [products, quantities, orderCredit]);
+    const dv = Math.max(0, Number(orderCredit) || 0);
+    const discILS =
+      orderDiscountMode === 'percent' ? Math.round(((sub * Math.min(100, dv)) / 100) * 100) / 100 : dv;
+    const preVat = Math.max(0, Math.round((sub + (Number(orderDeliveryFee) || 0) - discILS) * 100) / 100);
+    const vat = orderIncludeVat ? Math.round(preVat * 0.18 * 100) / 100 : 0;
+    return { total: Math.round((preVat + vat) * 100) / 100, vat, discILS };
+  }, [products, quantities, orderCredit, orderDiscountMode, orderDeliveryFee, orderIncludeVat, selectedSupplier]);
 
   const openNewSupplierOrder = () => {
     setEditingOrder(null);
     setOrderFriday(globalFriday || getNextFridayISO());
-    setOrderCredit('0');
+    setOrderDeliveryFee('0');
+    if ((selectedSupplier?.discount_percent ?? 0) > 0) {
+      setOrderDiscountMode('percent');
+      setOrderCredit(String(selectedSupplier?.discount_percent));
+    } else {
+      setOrderDiscountMode('fixed');
+      setOrderCredit('0');
+    }
+    setOrderIncludeVat(false);
     setOrderPaid('0');
     setOrderPayMethod('transfer');
     setOrderNotes('');
@@ -146,7 +180,15 @@ export function SupplierOrdersPage() {
   const openEditSupplierOrder = (o: Order) => {
     setEditingOrder(o);
     setOrderFriday(o.friday_date);
-    setOrderCredit(String(o.credit_discount));
+    setOrderDeliveryFee(String(o.delivery_fee || 0));
+    if ((o.discount_percent ?? 0) > 0) {
+      setOrderDiscountMode('percent');
+      setOrderCredit(String(o.discount_percent));
+    } else {
+      setOrderDiscountMode('fixed');
+      setOrderCredit(String(o.credit_discount));
+    }
+    setOrderIncludeVat(Boolean(o.include_vat));
     setOrderPaid(String(o.paid_amount));
     setOrderNotes(o.notes);
     const qMap: Record<number, number> = {};
@@ -170,13 +212,20 @@ export function SupplierOrdersPage() {
 
     setSavingOrder(true);
     try {
+      const dv = Math.max(0, Number(orderCredit) || 0);
+      const pricingExtras = {
+        delivery_fee: Number(orderDeliveryFee) || 0,
+        credit_discount: orderDiscountMode === 'fixed' ? dv : 0,
+        discount_percent: orderDiscountMode === 'percent' ? Math.min(100, dv) : 0,
+        include_vat: orderIncludeVat,
+      };
       if (editingOrder) {
         await apiFetch(`/api/orders/${editingOrder.id}`, {
           method: 'PUT',
           body: JSON.stringify({
             friday_date: orderFriday,
             recipient_name: ledger.user.name,
-            credit_discount: Number(orderCredit) || 0,
+            ...pricingExtras,
             notes: orderNotes.trim(),
             items,
           }),
@@ -189,7 +238,7 @@ export function SupplierOrdersPage() {
             order_type: 'supplier',
             user_id: selectedSupplierId,
             recipient_name: ledger.user.name,
-            credit_discount: Number(orderCredit) || 0,
+            ...pricingExtras,
             paid_amount: Number(orderPaid) || 0,
             payment_method: orderPayMethod,
             notes: orderNotes.trim(),
@@ -298,9 +347,21 @@ export function SupplierOrdersPage() {
         </div>
       ) : (
         <>
+          {/* חיפוש ספק מהיר לפי שם או 4 ספרות אחרונות */}
+          <div className="relative max-w-sm">
+            <Search className="w-4 h-4 text-slate-400 absolute right-3.5 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              value={supplierSearch}
+              onChange={(e) => setSupplierSearch(e.target.value)}
+              placeholder="חיפוש ספק לפי שם או 4 ספרות אחרונות..."
+              className="w-full pr-10 pl-4 py-2 rounded-xl border border-[#E8D5BE] bg-white text-sm"
+            />
+          </div>
+
           {/* רצועת ספקים נגללת בנוחות במובייל ורשת בדסקטופ */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
-            {suppliers.map((sup) => {
+            {filteredSuppliers.map((sup) => {
               const selected = sup.id === selectedSupplierId;
               const isDebt = sup.balance < 0;
               return (
@@ -615,7 +676,7 @@ export function SupplierOrdersPage() {
         maxWidthClass="md:max-w-2xl"
       >
         <form onSubmit={handleSaveSupplierOrder} className="space-y-4">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
               <label className="block text-xs font-semibold text-slate-600 mb-1">תאריך שישי</label>
               <input
@@ -627,7 +688,29 @@ export function SupplierOrdersPage() {
               />
             </div>
             <div>
-              <label className="block text-xs font-semibold text-slate-600 mb-1">זכות / החזרה (₪)</label>
+              <label className="block text-xs font-semibold text-slate-600 mb-1">משלוח (₪)</label>
+              <input
+                type="number"
+                inputMode="decimal"
+                min="0"
+                step="0.5"
+                dir="ltr"
+                value={orderDeliveryFee}
+                onChange={(e) => setOrderDeliveryFee(e.target.value)}
+                className="w-full px-3 py-2.5 rounded-xl border border-[#E8D5BE] text-left tabular-nums font-bold"
+              />
+            </div>
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-xs font-semibold text-slate-600">הנחה / זיכוי</label>
+                <button
+                  type="button"
+                  onClick={() => setOrderDiscountMode((m) => (m === 'fixed' ? 'percent' : 'fixed'))}
+                  className="text-[10px] font-extrabold px-1.5 py-0.5 rounded bg-amber-100 text-amber-900"
+                >
+                  {orderDiscountMode === 'fixed' ? '₪' : '%'}
+                </button>
+              </div>
               <input
                 type="number"
                 inputMode="decimal"
@@ -640,6 +723,21 @@ export function SupplierOrdersPage() {
               />
             </div>
           </div>
+
+          <label className="inline-flex items-center gap-2.5 px-3 py-2 rounded-xl bg-[#FAF6F0] border border-[#E8D5BE] cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={orderIncludeVat}
+              onChange={(e) => setOrderIncludeVat(e.target.checked)}
+              className="w-4 h-4 rounded accent-[#C85A17]"
+            />
+            <span className="text-xs font-bold text-slate-800">+ מע״מ 18%</span>
+            {orderIncludeVat && (
+              <span className="text-xs font-extrabold text-[#C85A17] tabular-nums">
+                ({formatILS(draftTotals.vat)})
+              </span>
+            )}
+          </label>
 
           <div className="max-h-60 overflow-y-auto border border-[#E8D5BE] rounded-2xl divide-y divide-[#F3E9DC]">
             {products.map((p) => {
@@ -654,7 +752,7 @@ export function SupplierOrdersPage() {
                   <div>
                     <div className="font-bold text-sm">{p.name}</div>
                     <div className="text-xs text-[#8A330B] font-semibold tabular-nums">
-                      {formatILS(p.supplier_price)}
+                      {formatILS(getSupplierUnitPrice(p))}
                     </div>
                   </div>
                   <div className="flex items-center gap-1.5">
@@ -741,7 +839,7 @@ export function SupplierOrdersPage() {
           <div className="bg-[#FAF6F0] rounded-2xl p-4 border border-[#E8D5BE] flex items-center justify-between">
             <span className="font-bold text-slate-700">סה״כ לחיוב ספק:</span>
             <span className="font-extrabold text-2xl text-[#C85A17] tabular-nums">
-              {formatILS(draftOrderTotal)}
+              {formatILS(draftTotals.total)}
             </span>
           </div>
 

@@ -8,6 +8,8 @@ export interface User {
   role: UserRole;
   balance: number;
   notes: string;
+  discount_percent?: number;
+  custom_prices?: Record<number, number>;
   created_at?: string;
 }
 
@@ -18,6 +20,7 @@ export interface Product {
   supplier_price?: number;
   preorder_price?: number;
   customer_price?: number;
+  image_url?: string | null;
   is_active: boolean;
 }
 
@@ -28,7 +31,19 @@ export interface AdminProduct {
   supplier_price: number;
   preorder_price: number;
   customer_price: number;
+  image_url?: string | null;
   is_active: boolean;
+}
+
+export interface ProductPriceHistoryEntry {
+  id: number;
+  product_id: number;
+  effective_date: string;
+  cost_price: number;
+  supplier_price: number;
+  preorder_price: number;
+  customer_price: number;
+  created_at: string;
 }
 
 export interface OrderItem {
@@ -53,6 +68,9 @@ export interface Order {
   order_type: OrderType;
   delivery_fee: number;
   credit_discount: number;
+  discount_percent?: number;
+  include_vat?: boolean;
+  vat_amount?: number;
   total_amount: number;
   paid_amount: number;
   status: OrderStatus;

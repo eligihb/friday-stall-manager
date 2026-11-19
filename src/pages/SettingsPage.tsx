@@ -14,10 +14,15 @@ import {
   Cloud,
   Database,
   RotateCcw,
+  Trash2,
+  Search,
+  Tag,
 } from 'lucide-react';
 import { apiFetch } from '../lib/api';
 import { formatILS, PAYMENT_METHOD_LABELS, ROLE_LABELS } from '../lib/format';
+import { filterUsersByNameOrPhone, getPhoneLast4 } from '../lib/whatsappParser';
 import { APP_VERSION } from '../lib/version';
+import { BottomSheet } from '../components/BottomSheet';
 import {
   clearCloudConfig,
   getSavedCloudConfig,
@@ -25,7 +30,7 @@ import {
   saveCloudConfig,
   type CloudConfig,
 } from '../lib/cloudConfig';
-import type { BusinessSettings, PaymentMethod, User, UserRole } from '../types';
+import type { AdminProduct, BusinessSettings, PaymentMethod, User, UserRole } from '../types';
 
 export function SettingsPage() {
   const [activeSection, setActiveSection] = useState<'business' | 'users'>('business');
@@ -47,7 +52,9 @@ export function SettingsPage() {
 
   // ניהול משתמשים
   const [users, setUsers] = useState<User[]>([]);
+  const [products, setProducts] = useState<AdminProduct[]>([]);
   const [roleFilter, setRoleFilter] = useState('');
+  const [userSearch, setUserSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [toast, setToast] = useState('');
@@ -55,6 +62,7 @@ export function SettingsPage() {
   // מודאל יצירה / עריכת משתמש
   const [showUserModal, setShowUserModal] = useState(false);
   const [editUser, setEditUser] = useState<User | null>(null);
+  const [showCustomPrices, setShowCustomPrices] = useState(false);
   const [userForm, setUserForm] = useState({
     name: '',
     phone: '',
@@ -62,6 +70,8 @@ export function SettingsPage() {
     password: '',
     role: 'supplier' as UserRole,
     balance: '0',
+    discount_percent: '0',
+    custom_prices: {} as Record<number, string>,
     notes: '',
   });
 
@@ -83,12 +93,14 @@ export function SettingsPage() {
   const loadAll = async () => {
     setLoading(true);
     try {
-      const [setRes, usrRes] = await Promise.all([
+      const [setRes, usrRes, prodRes] = await Promise.all([
         apiFetch<{ settings: BusinessSettings }>('/api/settings'),
         apiFetch<{ users: User[] }>('/api/users'),
+        apiFetch<{ products: AdminProduct[] }>('/api/products'),
       ]);
       setSettings(setRes.settings);
       setUsers(usrRes.users);
+      setProducts(prodRes.products.filter((p) => p.is_active));
       setError('');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'שגיאה בטעינת ההגדרות');
@@ -123,6 +135,7 @@ export function SettingsPage() {
 
   const openCreateUser = () => {
     setEditUser(null);
+    setShowCustomPrices(false);
     setUserForm({
       name: '',
       phone: '',
@@ -130,6 +143,8 @@ export function SettingsPage() {
       password: '',
       role: 'supplier',
       balance: '0',
+      discount_percent: '0',
+      custom_prices: {},
       notes: '',
     });
     setShowUserModal(true);
@@ -137,6 +152,13 @@ export function SettingsPage() {
 
   const openEditUser = (u: User) => {
     setEditUser(u);
+    const cpStrings: Record<number, string> = {};
+    if (u.custom_prices) {
+      for (const [k, v] of Object.entries(u.custom_prices)) {
+        cpStrings[Number(k)] = String(v);
+      }
+    }
+    setShowCustomPrices(Object.keys(cpStrings).length > 0);
     setUserForm({
       name: u.name,
       phone: u.phone,
@@ -144,6 +166,8 @@ export function SettingsPage() {
       password: '',
       role: u.role,
       balance: String(u.balance),
+      discount_percent: String(u.discount_percent ?? 0),
+      custom_prices: cpStrings,
       notes: u.notes,
     });
     setShowUserModal(true);
@@ -152,6 +176,12 @@ export function SettingsPage() {
   const handleSaveUser = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    const parsedCustomPrices: Record<number, number> = {};
+    for (const [pid, val] of Object.entries(userForm.custom_prices)) {
+      if (val.trim() !== '' && !Number.isNaN(Number(val)) && Number(val) >= 0) {
+        parsedCustomPrices[Number(pid)] = Number(val);
+      }
+    }
     try {
       if (editUser) {
         await apiFetch(`/api/users/${editUser.id}`, {
@@ -161,10 +191,12 @@ export function SettingsPage() {
             phone: userForm.phone.trim(),
             role: userForm.role,
             balance: Number(userForm.balance),
+            discount_percent: Number(userForm.discount_percent) || 0,
+            custom_prices: parsedCustomPrices,
             notes: userForm.notes.trim(),
           }),
         });
-        notify('פרטי המשתמש ויתרת החשבון עודכנו בהצלחה!');
+        notify('פרטי המשתמש, ההנחה והמחירים המותאמים עודכנו בהצלחה!');
       } else {
         await apiFetch('/api/users', {
           method: 'POST',
@@ -175,6 +207,8 @@ export function SettingsPage() {
             password: userForm.password || '123456',
             role: userForm.role,
             balance: Number(userForm.balance) || 0,
+            discount_percent: Number(userForm.discount_percent) || 0,
+            custom_prices: parsedCustomPrices,
             notes: userForm.notes.trim(),
           }),
         });
@@ -184,6 +218,18 @@ export function SettingsPage() {
       await loadAll();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'שגיאה בשמירת המשתמש');
+    }
+  };
+
+  const handleDeleteUser = async (u: User) => {
+    if (!window.confirm(`למחוק לצמיתות את "${u.name}"? (היסטוריית ההזמנות תישמר ללא שיוך)`)) return;
+    setError('');
+    try {
+      await apiFetch(`/api/users/${u.id}`, { method: 'DELETE' });
+      notify(`המשתמש "${u.name}" נמחק.`);
+      await loadAll();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'שגיאה במחיקת המשתמש');
     }
   };
 
@@ -226,7 +272,10 @@ export function SettingsPage() {
     }
   };
 
-  const filteredUsers = users.filter((u) => (!roleFilter ? true : u.role === roleFilter));
+  const filteredUsers = filterUsersByNameOrPhone(
+    userSearch,
+    users.filter((u) => (!roleFilter ? true : u.role === roleFilter))
+  );
 
   return (
     <div className="space-y-6">
@@ -509,8 +558,18 @@ export function SettingsPage() {
         </div>
       ) : (
         <div className="space-y-5">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex flex-wrap gap-2">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="relative">
+                <Search className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={userSearch}
+                  onChange={(e) => setUserSearch(e.target.value)}
+                  placeholder="חיפוש שם או 4 ספרות אחרונות..."
+                  className="pr-9 pl-3 py-2 rounded-xl border border-[#E8D5BE] bg-white text-xs w-56"
+                />
+              </div>
               {[
                 { key: '', label: 'כולם' },
                 { key: 'supplier', label: 'ספקים' },
@@ -535,10 +594,10 @@ export function SettingsPage() {
             <button
               type="button"
               onClick={openCreateUser}
-              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#C85A17] hover:bg-[#A9440F] text-white font-bold text-xs shadow-sm"
+              className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-[#C85A17] hover:bg-[#A9440F] text-white font-bold text-xs shadow-sm"
             >
               <Plus className="w-4 h-4" />
-              <span>הוספת משתמש חדש</span>
+              <span>הוספת לקוח / ספק</span>
             </button>
           </div>
 
@@ -575,10 +634,20 @@ export function SettingsPage() {
                           type="button"
                           onClick={() => openEditUser(u)}
                           className="p-2 rounded-xl text-slate-400 hover:text-slate-800 hover:bg-[#FAF6F0]"
-                          title="עריכת פרטים ויתרת פתיחה"
+                          title="עריכת פרטים, הנחה ותמחור אישי"
                         >
                           <Edit3 className="w-4 h-4" />
                         </button>
+                        {u.role !== 'admin' && (
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteUser(u)}
+                            className="p-2 rounded-xl text-slate-400 hover:text-red-600 hover:bg-red-50"
+                            title="מחק משתמש"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        )}
                       </div>
                     </div>
 
@@ -587,12 +656,30 @@ export function SettingsPage() {
                         <div className="flex items-center gap-2 tabular-nums">
                           <Phone className="w-3.5 h-3.5 text-slate-400" />
                           <span>{u.phone}</span>
+                          <span className="px-1.5 py-0.5 rounded bg-[#FAF6F0] border border-[#E8D5BE] text-[10px] font-extrabold text-[#8A330B]">
+                            #{getPhoneLast4(u.phone)}
+                          </span>
                         </div>
                       )}
                       <div className="flex items-center gap-2">
                         <Mail className="w-3.5 h-3.5 text-slate-400" />
                         <span dir="ltr">{u.email}</span>
                       </div>
+                      {((u.discount_percent ?? 0) > 0 ||
+                        (u.custom_prices && Object.keys(u.custom_prices).length > 0)) && (
+                        <div className="flex flex-wrap gap-1.5 pt-1">
+                          {(u.discount_percent ?? 0) > 0 && (
+                            <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-800 text-[11px] font-bold">
+                              הנחה קבועה: {u.discount_percent}%
+                            </span>
+                          )}
+                          {u.custom_prices && Object.keys(u.custom_prices).length > 0 && (
+                            <span className="px-2 py-0.5 rounded-full bg-amber-50 text-amber-900 text-[11px] font-bold">
+                              {Object.keys(u.custom_prices).length} מחירים אישיים
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </div>
 
                     {u.notes && (
@@ -637,110 +724,172 @@ export function SettingsPage() {
         </div>
       )}
 
-      {/* מודאל יצירה / עריכת משתמש והתאמת יתרת פתיחה */}
-      {showUserModal && (
-        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-[#E8D5BE]">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="font-serif text-xl font-bold">
-                {editUser ? `עריכת משתמש — ${editUser.name}` : 'הוספת משתמש חדש'}
-              </h3>
-              <button type="button" onClick={() => setShowUserModal(false)} className="p-1 text-slate-400">
-                <X className="w-5 h-5" />
-              </button>
+      {/* חלונית Bottom Sheet יצירה / עריכת משתמש + הנחה קבועה + מחירים מותאמים */}
+      <BottomSheet
+        open={showUserModal}
+        onClose={() => setShowUserModal(false)}
+        title={editUser ? `עריכת משתמש — ${editUser.name}` : 'הוספת לקוח / ספק חדש'}
+        subtitle="תומך בחיפוש 4 ספרות אחרונות, הנחה קבועה ומחירים מותאמים אישית"
+        maxWidthClass="md:max-w-lg"
+      >
+        <form onSubmit={handleSaveUser} className="space-y-3.5">
+          <div>
+            <label className="block text-xs font-semibold text-slate-600 mb-1">שם מלא / שם עסק</label>
+            <input
+              type="text"
+              required
+              value={userForm.name}
+              onChange={(e) => setUserForm({ ...userForm, name: e.target.value })}
+              className="w-full px-3.5 py-2.5 rounded-xl border border-[#E8D5BE] text-sm"
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 mb-1">טלפון נייד</label>
+              <input
+                type="tel"
+                inputMode="tel"
+                value={userForm.phone}
+                onChange={(e) => setUserForm({ ...userForm, phone: e.target.value })}
+                placeholder="050-0001015"
+                className="w-full px-3 py-2.5 rounded-xl border border-[#E8D5BE] text-sm tabular-nums"
+              />
             </div>
-            <form onSubmit={handleSaveUser} className="space-y-3.5">
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 mb-1">הרשאה (תפקיד)</label>
+              <select
+                value={userForm.role}
+                onChange={(e) => setUserForm({ ...userForm, role: e.target.value as UserRole })}
+                className="w-full px-3 py-2.5 rounded-xl border border-[#E8D5BE] text-sm"
+              >
+                <option value="supplier">ספק</option>
+                <option value="customer">לקוח</option>
+                <option value="admin">מנהל</option>
+              </select>
+            </div>
+          </div>
+          {!editUser && (
+            <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1">שם מלא / שם עסק</label>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">אימייל (אופציונלי)</label>
                 <input
-                  type="text"
-                  required
-                  value={userForm.name}
-                  onChange={(e) => setUserForm({ ...userForm, name: e.target.value })}
-                  className="w-full px-3.5 py-2 rounded-xl border border-[#E8D5BE] text-sm"
+                  type="email"
+                  dir="ltr"
+                  value={userForm.email}
+                  onChange={(e) => setUserForm({ ...userForm, email: e.target.value })}
+                  placeholder="נוצר אוטומטית אם ריק"
+                  className="w-full px-3 py-2.5 rounded-xl border border-[#E8D5BE] text-sm text-left"
                 />
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1">טלפון</label>
-                  <input
-                    type="tel"
-                    value={userForm.phone}
-                    onChange={(e) => setUserForm({ ...userForm, phone: e.target.value })}
-                    className="w-full px-3 py-2 rounded-xl border border-[#E8D5BE] text-sm tabular-nums"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1">הרשאה (תפקיד)</label>
-                  <select
-                    value={userForm.role}
-                    onChange={(e) => setUserForm({ ...userForm, role: e.target.value as UserRole })}
-                    className="w-full px-3 py-2 rounded-xl border border-[#E8D5BE] text-sm"
-                  >
-                    <option value="supplier">ספק</option>
-                    <option value="customer">לקוח</option>
-                    <option value="admin">מנהל</option>
-                  </select>
-                </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">סיסמה ראשונית</label>
+                <input
+                  type="password"
+                  minLength={6}
+                  placeholder="123456"
+                  value={userForm.password}
+                  onChange={(e) => setUserForm({ ...userForm, password: e.target.value })}
+                  className="w-full px-3 py-2.5 rounded-xl border border-[#E8D5BE] text-sm"
+                />
               </div>
-              {!editUser && (
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-600 mb-1">אימייל</label>
-                    <input
-                      type="email"
-                      required
-                      dir="ltr"
-                      value={userForm.email}
-                      onChange={(e) => setUserForm({ ...userForm, email: e.target.value })}
-                      className="w-full px-3 py-2 rounded-xl border border-[#E8D5BE] text-sm text-left"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-600 mb-1">סיסמה ראשונית</label>
-                    <input
-                      type="password"
-                      minLength={6}
-                      placeholder="123456"
-                      value={userForm.password}
-                      onChange={(e) => setUserForm({ ...userForm, password: e.target.value })}
-                      className="w-full px-3 py-2 rounded-xl border border-[#E8D5BE] text-sm"
-                    />
-                  </div>
+            </div>
+          )}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 mb-1">
+                יתרת חוב/זכות (מינוס=חוב)
+              </label>
+              <input
+                type="number"
+                inputMode="decimal"
+                step="0.01"
+                dir="ltr"
+                value={userForm.balance}
+                onChange={(e) => setUserForm({ ...userForm, balance: e.target.value })}
+                className="w-full px-3 py-2.5 rounded-xl border border-[#E8D5BE] text-left tabular-nums font-bold"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 mb-1">
+                אחוז הנחה קבוע (%)
+              </label>
+              <input
+                type="number"
+                inputMode="decimal"
+                min="0"
+                max="100"
+                step="0.5"
+                dir="ltr"
+                value={userForm.discount_percent}
+                onChange={(e) => setUserForm({ ...userForm, discount_percent: e.target.value })}
+                className="w-full px-3 py-2.5 rounded-xl border border-[#E8D5BE] text-left tabular-nums font-bold"
+              />
+            </div>
+          </div>
+
+          {/* מחירים מותאמים אישית למוצרים */}
+          {userForm.role !== 'admin' && (
+            <div className="rounded-2xl border border-[#E8D5BE] bg-[#FAF6F0] p-3 space-y-2.5">
+              <button
+                type="button"
+                onClick={() => setShowCustomPrices((v) => !v)}
+                className="w-full flex items-center justify-between text-xs font-bold text-[#8A330B]"
+              >
+                <span className="inline-flex items-center gap-1.5">
+                  <Tag className="w-3.5 h-3.5" />
+                  <span>מחירים מותאמים אישית למוצרים (אופציונלי)</span>
+                </span>
+                <span>{showCustomPrices ? 'הסתר' : 'פתח עריכה'}</span>
+              </button>
+              {showCustomPrices && (
+                <div className="max-h-44 overflow-y-auto divide-y divide-[#E8D5BE]/60 bg-white rounded-xl border border-[#E8D5BE] px-2.5">
+                  {products.map((p) => (
+                    <div key={p.id} className="py-2 flex items-center justify-between gap-2 text-xs">
+                      <span className="font-semibold text-slate-800 truncate">{p.name}</span>
+                      <input
+                        type="number"
+                        inputMode="decimal"
+                        step="0.01"
+                        min="0"
+                        dir="ltr"
+                        placeholder={
+                          userForm.role === 'supplier'
+                            ? p.supplier_price.toFixed(2)
+                            : p.preorder_price.toFixed(2)
+                        }
+                        value={userForm.custom_prices[p.id] ?? ''}
+                        onChange={(e) =>
+                          setUserForm((prev) => ({
+                            ...prev,
+                            custom_prices: { ...prev.custom_prices, [p.id]: e.target.value },
+                          }))
+                        }
+                        className="w-20 px-2 py-1 rounded-lg border border-[#E8D5BE] text-left tabular-nums font-bold"
+                      />
+                    </div>
+                  ))}
                 </div>
               )}
-              <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1">
-                  יתרת פתיחה / התאמת יתרה (מינוס = חוב, פלוס = זכות)
-                </label>
-                <input
-                  type="number"
-                  step="0.01"
-                  dir="ltr"
-                  value={userForm.balance}
-                  onChange={(e) => setUserForm({ ...userForm, balance: e.target.value })}
-                  className="w-full px-3 py-2 rounded-xl border border-[#E8D5BE] text-left tabular-nums font-bold"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1">הערות</label>
-                <input
-                  type="text"
-                  value={userForm.notes}
-                  onChange={(e) => setUserForm({ ...userForm, notes: e.target.value })}
-                  className="w-full px-3 py-2 rounded-xl border border-[#E8D5BE] text-sm"
-                />
-              </div>
-              <button
-                type="submit"
-                className="w-full py-2.5 rounded-xl bg-[#C85A17] hover:bg-[#A9440F] text-white font-bold text-sm"
-              >
-                שמור
-              </button>
-            </form>
+            </div>
+          )}
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-600 mb-1">הערות</label>
+            <input
+              type="text"
+              value={userForm.notes}
+              onChange={(e) => setUserForm({ ...userForm, notes: e.target.value })}
+              className="w-full px-3 py-2.5 rounded-xl border border-[#E8D5BE] text-sm"
+            />
           </div>
-        </div>
-      )}
+          <button
+            type="submit"
+            className="w-full min-h-[48px] rounded-xl bg-[#C85A17] hover:bg-[#A9440F] text-white font-bold text-sm"
+          >
+            שמור
+          </button>
+        </form>
+      </BottomSheet>
 
       {/* מודאל איפוס סיסמה */}
       {resetUser && (

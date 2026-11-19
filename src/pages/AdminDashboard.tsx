@@ -217,7 +217,7 @@ export function AdminDashboard({ onNavigate }: AdminDashboardProps) {
         <div>
           <h2 className="font-serif text-3xl font-bold text-slateink-800">מסך ראשי ותפעול שישי</h2>
           <p className="text-sm text-slate-600 mt-1">
-            קליטת הזמנות מוואטסאפ, ריכוז ייצור ואפייה ולוח ליקוט ומסירה חי ליום שישי הנבחר.
+            קליטת הזמנות מוואטסאפ, סיכום רכש מהמאפייה ולוח ליקוט ומסירה חי ליום שישי הנבחר.
           </p>
         </div>
         <FridaySelector value={fridayDate} onChange={setFridayDate} label="תאריך שישי:" />
@@ -324,7 +324,7 @@ export function AdminDashboard({ onNavigate }: AdminDashboardProps) {
 
         <div className="bg-white rounded-2xl p-3.5 sm:p-5 border border-[#E8D5BE]/80 shadow-soft">
           <div className="flex items-center justify-between gap-1">
-            <span className="text-[11px] sm:text-xs font-bold text-slate-500">יחידות להכנה</span>
+            <span className="text-[11px] sm:text-xs font-bold text-slate-500">יחידות לרכש מאפייה</span>
             <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-amber-50 text-amber-700 flex items-center justify-center shrink-0">
               <ChefHat className="w-4 h-4" />
             </div>
@@ -333,7 +333,7 @@ export function AdminDashboard({ onNavigate }: AdminDashboardProps) {
             {kpis.totalUnitsToPrepare.toLocaleString('he-IL')}
           </div>
           <div className="text-[11px] text-slate-500 mt-0.5">
-            עלות: {formatILS(kpis.totalProductionCost)}
+            מזומן למאפייה: {formatILS(kpis.totalProductionCost)}
           </div>
         </div>
 
@@ -387,11 +387,14 @@ export function AdminDashboard({ onNavigate }: AdminDashboardProps) {
             <ChefHat className="w-5 h-5 text-[#C85A17] shrink-0" />
             <div>
               <h3 className="font-serif text-xl sm:text-2xl font-bold text-slate-900">
-                ריכוז ייצור והכנה לשישי
+                סיכום רכש מהמאפייה לשישי
               </h3>
               <p className="text-xs text-slate-500 tabular-nums">
-                סה״כ לייצור: <strong className="text-[#8A330B]">{kpis.totalUnitsToPrepare}</strong> יח׳ · עלות:{' '}
+                סה״כ לרכש: <strong className="text-[#8A330B]">{kpis.totalUnitsToPrepare}</strong> יח׳ · עלות מזומן למאפייה:{' '}
                 <strong>{formatILS(kpis.totalProductionCost)}</strong>
+                <span className="block sm:inline sm:mr-1.5 text-[11px] text-slate-400">
+                  (הפריטים נרכשים מהמאפייה במזומן, למעט הכנה עצמית קלה כגון רוטב סלסה / כבד קצוץ)
+                </span>
               </p>
             </div>
           </div>
@@ -532,8 +535,8 @@ export function AdminDashboard({ onNavigate }: AdminDashboardProps) {
                     <th className="text-center py-3 px-2.5 font-bold">ספקים</th>
                     <th className="text-center py-3 px-2.5 font-bold">נזקקים</th>
                     <th className="text-center py-3 px-3 font-bold">מלאי חופשי לדוכן</th>
-                    <th className="text-center py-3 px-3 font-bold bg-[#FFF7ED]">סה״כ לייצור</th>
-                    <th className="text-left py-3 px-4 font-bold">עלות ייצור</th>
+                    <th className="text-center py-3 px-3 font-bold bg-[#FFF7ED]">סה״כ לרכש</th>
+                    <th className="text-left py-3 px-4 font-bold">עלות מאפייה (מזומן)</th>
                     <th className="text-center py-3 px-3 font-bold">שמירה</th>
                   </tr>
                 </thead>

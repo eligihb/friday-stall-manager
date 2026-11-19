@@ -1,4 +1,4 @@
-import type { AdminProduct } from '../types';
+import type { AdminProduct, User } from '../types';
 
 export interface ParsedOrderLine {
   product: AdminProduct;
@@ -9,15 +9,54 @@ export interface ParsedOrderLine {
 export interface WhatsAppParseResult {
   items: ParsedOrderLine[];
   unmatched: string[];
+  matchedUser?: User | null;
 }
 
-// מילון כינויים, ריבוי ושגיאות כתיב נפוצות בעברית
+// מילון כינויים ומיפויים מדויקים (כינויים ארוכים וספציפיים נבדקים תמיד לפני קצרים!)
 const PRODUCT_ALIASES: Record<string, string[]> = {
+  // מארזי שלישייה (12 ₪)
+  'מארז פיתה זעתר': [
+    'מארז פיתה זעתר',
+    'מארזי פיתה זעתר',
+    'מארז פיתות זעתר',
+    'פיתה זעתר',
+    'פיתות זעתר',
+    'פיתת זעתר',
+    'זעתר',
+  ],
+  'מארז פיתה שומשום': [
+    'מארז פיתה שומשום',
+    'מארזי פיתה שומשום',
+    'מארז פיתות שומשום',
+    'פיתה שומשום',
+    'פיתות שומשום',
+    'פיתת שומשום',
+    'שומשום',
+  ],
+  'מארז לחם שום': [
+    'מארז לחם שום',
+    'מארזי לחם שום',
+    'לחם שום',
+    'לחמי שום',
+  ],
+  'מארז זלביה': [
+    'מארז זלביה',
+    'מארזי זלביה',
+    'מארז זלביות',
+    'זלביה',
+    'זלביות',
+    'זלאביה',
+    'זלאביות',
+  ],
+
+  // פרנות — ספציפיים לפני פרנה רגילה
   'פרנה שום': ['פרנה שום', 'פרנות שום', 'פרנת שום', 'פראנה שום', 'פרנה עם שום'],
   'פרנה גדולה': ['פרנה גדולה', 'פרנות גדולות', 'פראנה גדולה', 'פרנה גדול'],
-  'פרנה': ['פרנה', 'פרנות', 'פראנה', 'פראנות'],
-  'פיתה פלאפל 10 יח\'': [
-    'פיתה פלאפל 10 יח\'',
+  'פרנה': ['פרנה', 'פרנות', 'פראנה', 'פראנות', 'פרנה קטנה', 'פרנה רגילה'],
+
+  // פיתות פלאפל (רק כשצוין פלאפל במפורש!)
+  "פיתה פלאפל 10 יח'": [
+    "פיתה פלאפל 10 יח'",
     'פיתה פלאפל 10',
     'פיתות פלאפל 10',
     'פיתה פלאפל',
@@ -25,9 +64,13 @@ const PRODUCT_ALIASES: Record<string, string[]> = {
     'חבילת פיתות פלאפל',
     'פלאפל',
   ],
-  'פיתה זעתר': ['פיתה זעתר', 'פיתות זעתר', 'פיתת זעתר', 'זעתר'],
-  'חילבה 500 ג\'': [
-    'חילבה 500 ג\'',
+
+  // סאלוף — כולל מיפוי מדויק של "פיתות" / "פיתה" בודדות לסאלוף (לא לפיתת פלאפל!)
+  'סאלוף': ['סאלוף', 'סאלופים', 'סלוף', 'סלופים', 'סלופ', 'סאלופ', 'פיתות', 'פיתה'],
+
+  // חילבה
+  "חילבה 500 ג'": [
+    "חילבה 500 ג'",
     'חילבה 500 גרם',
     'חילבה 500',
     'חצי קילו חילבה',
@@ -35,8 +78,8 @@ const PRODUCT_ALIASES: Record<string, string[]> = {
     'חילבה גדולה',
     'חילבה גדול',
   ],
-  'חילבה 250 ג\'': [
-    'חילבה 250 ג\'',
+  "חילבה 250 ג'": [
+    "חילבה 250 ג'",
     'חילבה 250 גרם',
     'חילבה 250',
     'רבע קילו חילבה',
@@ -44,14 +87,19 @@ const PRODUCT_ALIASES: Record<string, string[]> = {
     'חילבה קטן',
     'חילבה',
   ],
+
   'לחוח': ['לחוח', 'לחוחים', 'לחוך', 'לאחוח', 'לחוחה'],
-  'סאלוף': ['סאלוף', 'סאלופים', 'סלוף', 'סלופים', 'סלופ', 'סאלופ'],
   'לאפה': ['לאפה', 'לאפות', 'לפה', 'לפות'],
   'כובנית': ['כובנית', 'כובניות', 'כובנות', 'כובנה קטנה', 'קובנית', 'קובניות', 'כובנה'],
   'קובנה': ['קובנה', 'קובנות', 'קובנאות', 'קובנה גדולה', 'קובנת'],
-  'זלביה': ['זלביה', 'זלביות', 'זלאביה', 'זלאביות'],
   "ג'חנון": ["ג'חנון", "ג'חנונים", 'ג׳חנון', 'ג׳חנונים', 'גחנון', 'גחנונים'],
   'סחוג': ['סחוג', 'סחוגים', 'זחוג', 'סחוג ירוק', 'סחוג אדום'],
+};
+
+// מוצרים ישנים שהוחלפו במארזי השלישייה — לא ניתן להם לגנוב את כינויי המארזים אם המארז קיים
+const LEGACY_REPLACED_BY_TRIO: Record<string, string> = {
+  זלביה: 'מארז זלביה',
+  'פיתה זעתר': 'מארז פיתה זעתר',
 };
 
 const HEBREW_NUMBERS: Record<string, number> = {
@@ -82,30 +130,104 @@ const HEBREW_NUMBERS: Record<string, number> = {
 function normalizeHebrew(text: string): string {
   return text
     .replace(/[״"׳'`]/g, "'")
-    .replace(/[•▪◦*]/g, ' ')
+    .replace(/[•▪◦*!?.]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 }
 
-function stripNoise(segment: string): string {
-  return segment
-    .replace(/^(היי|הי|שלום|אהלן|בוקר טוב|צהריים טובים|ערב טוב|תודה|בבקשה|אפשר|רוצה|להזמין|הזמנה ל?שישי|לשישי|וגם|גם|ועוד|עוד|אני צריך|אני צריכה|אשמח ל?)\b/gi, '')
-    .replace(/\b(בבקשה|תודה רבה|תודה|שבת שלום|יח'|יחידות|יח|חתיכות|מארזים|קופסאות|קופסה|מארז)\b/gi, '')
-    .trim();
+function stripGreetingsAndFillers(segment: string): string {
+  let s = segment;
+  const fillerPatterns = [
+    /(^|\s)(היי|הי|שלום|אהלן)\s+אליאב(?=\s|$)/gi,
+    /(^|\s)אליאב\s+(היי|הי|שלום|בוקר טוב|ערב טוב|אהלן|תודה)(?=\s|$)/gi,
+    /(^|\s)(בוקר טוב|צהריים טובים|ערב טוב|שבת שלום|שבוע טוב|תודה רבה|חג שמח|מה נשמע|מה קורה|מה שלומך)(?=\s|$)/gi,
+    /(^|\s)(אליאב|היי|הי|שלום|אהלן|תודה|בבקשה|אפשר|רוצה|להזמין|הזמנה ל?שישי|לשישי|וגם|גם|ועוד|עוד|אני צריך|אני צריכה|אשמח ל?|תכין לי|תשמור לי)(?=\s|$)/gi,
+    /(^|\s)(יח'|יחידות|יח|חתיכות|מארזים|קופסאות|קופסה|מארז)(?=\s|$)/gi,
+  ];
+  for (let pass = 0; pass < 2; pass++) {
+    for (const pat of fillerPatterns) {
+      s = s.replace(pat, ' ');
+    }
+    s = s.replace(/\s+/g, ' ').trim();
+  }
+  return s;
 }
 
-export function parseWhatsAppMessage(rawText: string, products: AdminProduct[]): WhatsAppParseResult {
+export function getPhoneLast4(phone?: string): string {
+  const digits = String(phone || '').replace(/\D/g, '');
+  return digits.length >= 4 ? digits.slice(-4) : digits;
+}
+
+/**
+ * התאמת לקוח או ספק לפי שם מלא/חלקי או 4 ספרות אחרונות של הטלפון (למשל 1015, 9917, 9613)
+ */
+export function filterUsersByNameOrPhone(query: string, users: User[]): User[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return users;
+  const qDigits = q.replace(/\D/g, '');
+
+  return users.filter((u) => {
+    if (u.name.toLowerCase().includes(q)) return true;
+    const phoneDigits = String(u.phone || '').replace(/\D/g, '');
+    if (qDigits.length >= 2 && phoneDigits) {
+      if (phoneDigits.endsWith(qDigits) || phoneDigits.includes(qDigits)) return true;
+    }
+    if (u.email.toLowerCase().includes(q)) return true;
+    return false;
+  });
+}
+
+export function detectUserInMessage(rawText: string, users: User[]): User | null {
+  if (!users.length || !rawText.trim()) return null;
+
+  // 1. חיפוש לפי 4 ספרות אחרונות של מספר טלפון שמופיעות בהודעה (4+ ספרות רצופות שאינן כמות מוצר)
+  const phoneTokens = rawText.match(/\b\d{4,10}\b/g) || [];
+  for (const token of phoneTokens) {
+    const last4 = token.slice(-4);
+    const matched = users.find((u) => {
+      const pDigits = String(u.phone || '').replace(/\D/g, '');
+      return pDigits.length >= 4 && pDigits.endsWith(last4);
+    });
+    if (matched) return matched;
+  }
+
+  // 2. חיפוש לפי שם לקוח/ספק המופיע בהודעה (מהשם הארוך לקצר)
+  const lower = rawText.toLowerCase();
+  const sortedByName = [...users].sort((a, b) => b.name.length - a.name.length);
+  for (const u of sortedByName) {
+    if (u.name.trim().length >= 3 && lower.includes(u.name.trim().toLowerCase())) {
+      return u;
+    }
+  }
+
+  return null;
+}
+
+export function parseWhatsAppMessage(
+  rawText: string,
+  products: AdminProduct[],
+  users: User[] = []
+): WhatsAppParseResult {
   const cleaned = rawText
     .replace(/\r/g, '\n')
-    .replace(/\s+ו(?=\d)/g, ', ') // "2 קובנה ו3 לחוח" -> "2 קובנה, 3 לחוח"
+    .replace(/\s+ו(?=\d)/g, ', ')
     .trim();
 
-  if (!cleaned) return { items: [], unmatched: [] };
+  if (!cleaned) return { items: [], unmatched: [], matchedUser: null };
 
-  // Build ordered alias candidates (longest aliases first to prevent "פרנה" matching before "פרנה שום")
-  const candidates: Array<{ alias: string; normalizedAlias: string; product: AdminProduct }> = [];
+  const matchedUser = detectUserInMessage(rawText, users);
+  const productNames = new Set(products.map((p) => p.name));
+
+  // בניית מועמדי כינויים (מהארוך לקצר כך ש"פיתה זעתר" ו"פיתה פלאפל" יותאמו לפני "פיתה" -> סאלוף, ו"פרנה גדולה" לפני "פרנה")
+  const candidates: Array<{ alias: string; normalizedAlias: string; product: AdminProduct; priority: number }> = [];
 
   for (const prod of products) {
+    const replacedBy = LEGACY_REPLACED_BY_TRIO[prod.name];
+    // אם המוצר הוא הגרסה הישנה של מארז שלישייה והמארז קיים, דלג עליו כדי שהכינויים יתמפו למארז ה-12 ₪
+    if (replacedBy && productNames.has(replacedBy)) {
+      continue;
+    }
+
     const customAliases = PRODUCT_ALIASES[prod.name] || [];
     const allAliases = Array.from(new Set([prod.name, ...customAliases]));
     for (const alias of allAliases) {
@@ -113,13 +235,16 @@ export function parseWhatsAppMessage(rawText: string, products: AdminProduct[]):
         alias,
         normalizedAlias: normalizeHebrew(alias).toLowerCase(),
         product: prod,
+        priority: prod.name.startsWith('מארז ') ? 2 : 1,
       });
     }
   }
 
-  candidates.sort((a, b) => b.normalizedAlias.length - a.normalizedAlias.length);
+  candidates.sort(
+    (a, b) =>
+      b.normalizedAlias.length - a.normalizedAlias.length || b.priority - a.priority
+  );
 
-  // Split by newlines, commas, semicolons, plus signs
   const rawSegments = cleaned
     .split(/[\n,;+]+/)
     .map((s) => s.trim())
@@ -129,10 +254,20 @@ export function parseWhatsAppMessage(rawText: string, products: AdminProduct[]):
   const unmatched: string[] = [];
 
   for (const rawSeg of rawSegments) {
-    const seg = stripNoise(normalizeHebrew(rawSeg));
+    const seg = stripGreetingsAndFillers(normalizeHebrew(rawSeg));
     if (!seg) continue;
 
-    // Skip pure greetings without numbers or products
+    // אם המקטע כולו הוא רק מספר טלפון/4 ספרות של הלקוח שזוהה — אל תדווח כשגיאה
+    if (matchedUser) {
+      const last4 = getPhoneLast4(matchedUser.phone);
+      if (last4 && seg.replace(/\D/g, '').endsWith(last4) && !/[א-ת]/.test(seg)) {
+        continue;
+      }
+      if (seg.toLowerCase() === matchedUser.name.toLowerCase()) {
+        continue;
+      }
+    }
+
     const segLower = seg.toLowerCase();
 
     let matchedCandidate: (typeof candidates)[number] | null = null;
@@ -144,14 +279,12 @@ export function parseWhatsAppMessage(rawText: string, products: AdminProduct[]):
     }
 
     if (!matchedCandidate) {
-      // Only report as unmatched if it actually looks like an item attempt (contains a digit or >= 3 chars not greeting)
       if (/\d/.test(seg) || seg.length >= 4) {
         unmatched.push(rawSeg);
       }
       continue;
     }
 
-    // Remove matched alias from segment so embedded numbers like "500" in "חילבה 500" or "10" in "פיתה פלאפל 10" are NOT read as quantity!
     const remainder = segLower.replace(matchedCandidate.normalizedAlias, ' ').trim();
 
     let quantity = 1;
@@ -159,7 +292,6 @@ export function parseWhatsAppMessage(rawText: string, products: AdminProduct[]):
     if (digitMatch) {
       quantity = Math.max(1, parseInt(digitMatch[1], 10));
     } else {
-      // Check Hebrew number words in remainder
       for (const [word, val] of Object.entries(HEBREW_NUMBERS)) {
         if (new RegExp(`(^|\\s)${word}($|\\s)`).test(remainder)) {
           quantity = val;
@@ -188,5 +320,6 @@ export function parseWhatsAppMessage(rawText: string, products: AdminProduct[]):
       rawSegment: entry.rawSegments.join(' | '),
     })),
     unmatched,
+    matchedUser,
   };
 }

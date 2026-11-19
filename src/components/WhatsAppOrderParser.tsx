@@ -9,10 +9,11 @@ import {
   CheckCircle2,
   AlertTriangle,
   Send,
+  Search,
 } from 'lucide-react';
 import { apiFetch } from '../lib/api';
 import { formatILS, ORDER_TYPE_LABELS, PAYMENT_METHOD_LABELS } from '../lib/format';
-import { parseWhatsAppMessage } from '../lib/whatsappParser';
+import { filterUsersByNameOrPhone, getPhoneLast4, parseWhatsAppMessage } from '../lib/whatsappParser';
 import type { AdminProduct, OrderType, PaymentMethod, User } from '../types';
 
 interface WhatsAppOrderParserProps {
@@ -23,7 +24,7 @@ interface WhatsAppOrderParserProps {
   onOrderCreated: () => Promise<void>;
 }
 
-const SAMPLE_MESSAGE = 'היי, 2 כובנות, 2 פרנה שום, 180 סלוף, 130 לחוח';
+const SAMPLE_MESSAGE = 'אליאב שלום, 2 פיתות, 3 פרנה, 2 זלביה, 1 לחם שום, 130 לחוח, תודה שבת שלום';
 
 export function WhatsAppOrderParser({
   fridayDate,
@@ -40,11 +41,15 @@ export function WhatsAppOrderParser({
   const [orderType, setOrderType] = useState<OrderType>('customer');
   const [customerTier, setCustomerTier] = useState<'preorder_price' | 'customer_price'>('preorder_price');
   const [userMode, setUserMode] = useState<'existing' | 'new'>('existing');
+  const [userSearch, setUserSearch] = useState('');
   const [selectedUserId, setSelectedUserId] = useState('');
   const [recipientName, setRecipientName] = useState('');
   const [newUserPhone, setNewUserPhone] = useState('');
+
   const [deliveryFee, setDeliveryFee] = useState('0');
-  const [creditDiscount, setCreditDiscount] = useState('0');
+  const [discountMode, setDiscountMode] = useState<'fixed' | 'percent'>('fixed');
+  const [discountValue, setDiscountValue] = useState('0');
+  const [includeVat, setIncludeVat] = useState(false);
   const [paidAmount, setPaidAmount] = useState('0');
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('bit');
   const [notes, setNotes] = useState('');
@@ -56,11 +61,33 @@ export function WhatsAppOrderParser({
 
   const activeProducts = useMemo(() => products.filter((p) => p.is_active), [products]);
   const productMap = useMemo(() => new Map(products.map((p) => [p.id, p])), [products]);
+  const selectedUser = useMemo(
+    () => users.find((u) => String(u.id) === selectedUserId) || null,
+    [users, selectedUserId]
+  );
+
+  const applySelectedUser = (u: User | null) => {
+    if (!u) {
+      setSelectedUserId('');
+      return;
+    }
+    setSelectedUserId(String(u.id));
+    setRecipientName(u.name);
+    if (u.role === 'supplier') setOrderType('supplier');
+    else if (u.role === 'customer' && orderType === 'supplier') setOrderType('customer');
+    if ((u.discount_percent ?? 0) > 0) {
+      setDiscountMode('percent');
+      setDiscountValue(String(u.discount_percent));
+    }
+  };
 
   const runParse = (textToParse: string) => {
-    const res = parseWhatsAppMessage(textToParse, activeProducts);
+    const res = parseWhatsAppMessage(textToParse, activeProducts, users);
     setParsedItems(res.items.map((i) => ({ product_id: i.product.id, quantity: i.quantity })));
     setUnmatched(res.unmatched);
+    if (res.matchedUser && !selectedUserId) {
+      applySelectedUser(res.matchedUser);
+    }
     setHasParsed(true);
     setError('');
     setSuccess('');
@@ -68,6 +95,10 @@ export function WhatsAppOrderParser({
 
   const getUnitPrice = (prod: AdminProduct) => {
     if (orderType === 'charity') return 0;
+    const override = selectedUser?.custom_prices?.[prod.id];
+    if (override !== undefined && !Number.isNaN(Number(override)) && Number(override) >= 0) {
+      return Number(override);
+    }
     if (orderType === 'supplier') return prod.supplier_price;
     return prod[customerTier];
   };
@@ -78,12 +109,23 @@ export function WhatsAppOrderParser({
       if (!p) return sum;
       return sum + item.quantity * getUnitPrice(p);
     }, 0);
-  }, [parsedItems, productMap, orderType, customerTier]);
+  }, [parsedItems, productMap, orderType, customerTier, selectedUser]);
 
-  const totalAmount = useMemo(() => {
-    if (orderType === 'charity') return 0;
-    return Math.max(0, subtotal + (Number(deliveryFee) || 0) - (Number(creditDiscount) || 0));
-  }, [subtotal, deliveryFee, creditDiscount, orderType]);
+  const totals = useMemo(() => {
+    if (orderType === 'charity') {
+      return { discountILS: 0, vatAmount: 0, total: 0 };
+    }
+    const val = Math.max(0, Number(discountValue) || 0);
+    const discountILS =
+      discountMode === 'percent' ? Math.round(((subtotal * Math.min(100, val)) / 100) * 100) / 100 : val;
+    const preVat = Math.max(0, Math.round((subtotal + (Number(deliveryFee) || 0) - discountILS) * 100) / 100);
+    const vatAmount = includeVat ? Math.round(preVat * 0.18 * 100) / 100 : 0;
+    return {
+      discountILS,
+      vatAmount,
+      total: Math.round((preVat + vatAmount) * 100) / 100,
+    };
+  }, [subtotal, deliveryFee, discountMode, discountValue, includeVat, orderType]);
 
   const estimatedCost = useMemo(() => {
     return parsedItems.reduce((sum, item) => {
@@ -93,10 +135,14 @@ export function WhatsAppOrderParser({
   }, [parsedItems, productMap]);
 
   const filteredUsers = useMemo(() => {
-    if (orderType === 'supplier') return users.filter((u) => u.role === 'supplier');
-    if (orderType === 'customer') return users.filter((u) => u.role !== 'admin');
-    return [];
-  }, [users, orderType]);
+    const roleScoped =
+      orderType === 'supplier'
+        ? users.filter((u) => u.role === 'supplier')
+        : orderType === 'customer'
+        ? users.filter((u) => u.role !== 'admin')
+        : [];
+    return filterUsersByNameOrPhone(userSearch, roleScoped);
+  }, [users, orderType, userSearch]);
 
   const handleAddManualProduct = () => {
     const pid = Number(addProductId);
@@ -132,7 +178,6 @@ export function WhatsAppOrderParser({
     try {
       let userId: number | null = selectedUserId ? Number(selectedUserId) : null;
 
-      // יצירת משתמש חדש inline במידת הצורך
       if (orderType !== 'charity' && userMode === 'new' && finalRecipient) {
         const createdUser = await apiFetch<{ id: number; user: User }>('/api/users', {
           method: 'POST',
@@ -146,6 +191,7 @@ export function WhatsAppOrderParser({
         userId = createdUser.id;
       }
 
+      const discVal = Math.max(0, Number(discountValue) || 0);
       await apiFetch('/api/orders', {
         method: 'POST',
         body: JSON.stringify({
@@ -155,7 +201,9 @@ export function WhatsAppOrderParser({
           user_id: orderType === 'charity' ? null : userId,
           recipient_name: finalRecipient || users.find((u) => u.id === userId)?.name || 'הזמנה',
           delivery_fee: orderType === 'charity' ? 0 : Number(deliveryFee) || 0,
-          credit_discount: orderType === 'charity' ? 0 : Number(creditDiscount) || 0,
+          credit_discount: orderType === 'charity' ? 0 : discountMode === 'fixed' ? discVal : 0,
+          discount_percent: orderType === 'charity' ? 0 : discountMode === 'percent' ? Math.min(100, discVal) : 0,
+          include_vat: orderType === 'charity' ? false : includeVat,
           paid_amount: orderType === 'charity' ? 0 : Number(paidAmount) || 0,
           payment_method: paymentMethod,
           notes: notes.trim(),
@@ -168,14 +216,16 @@ export function WhatsAppOrderParser({
       setUnmatched([]);
       setHasParsed(false);
       setSelectedUserId('');
+      setUserSearch('');
       setRecipientName('');
       setNewUserPhone('');
       setDeliveryFee('0');
-      setCreditDiscount('0');
+      setDiscountValue('0');
+      setIncludeVat(false);
       setPaidAmount('0');
       setNotes('');
       setUserMode('existing');
-      setSuccess('ההזמנה נקלטה בהצלחה ועודכנה בריכוז הייצור ובלוח הליקוט!');
+      setSuccess('ההזמנה נקלטה בהצלחה ועודכנה בסיכום הרכש מהמאפייה ובלוח הליקוט!');
       await onOrderCreated();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'שגיאה בשמירת ההזמנה');
@@ -201,7 +251,7 @@ export function WhatsAppOrderParser({
             <div>
               <h3 className="font-serif text-xl font-bold leading-tight">קליטת הזמנה חכמה מוואטסאפ</h3>
               <p className="text-xs text-amber-200/85">
-                הדבק הודעה חופשית בעברית — המערכת מזהה מוצרים, ריבוי, כינויים וכמויות אוטומטית.
+                מסנן ברכות אוטומטית, ממפה פיתות←סאלוף ומארזי 12 ₪, ומזהה לקוחות/ספקים לפי שם או 4 ספרות אחרונות.
               </p>
             </div>
           </div>
@@ -233,6 +283,7 @@ export function WhatsAppOrderParser({
             </button>
           </div>
         )}
+
         {success && (
           <div className="p-3.5 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm font-bold flex items-center gap-2">
             <CheckCircle2 className="w-4 h-4 shrink-0" />
@@ -255,7 +306,7 @@ export function WhatsAppOrderParser({
               rows={4}
               value={rawText}
               onChange={(e) => setRawText(e.target.value)}
-              placeholder='לדוגמה: "היי, 2 כובנות, 2 פרנה שום, 180 סלוף, 130 לחוח"'
+              placeholder='לדוגמה: "אליאב שלום, 2 פיתות, 3 פרנה, 2 זלביה, 1 לחם שום, 130 לחוח"'
               className="w-full p-3.5 rounded-2xl border border-[#E8D5BE] bg-[#FDFBF7] focus:bg-white focus:border-[#C85A17] focus:ring-2 focus:ring-[#C85A17]/20 focus:outline-none text-sm leading-relaxed"
             />
             <button
@@ -278,7 +329,7 @@ export function WhatsAppOrderParser({
             )}
           </div>
 
-          {/* פרטי שיוך ההזמנה ותמחור */}
+          {/* פרטי שיוך ההזמנה, הנחה, משלוח ומע״מ */}
           <div className="lg:col-span-7 space-y-3.5">
             <div>
               <label className="block text-xs font-bold text-slate-700 mb-1.5">סוג ההזמנה ומדרגת מחיר</label>
@@ -290,9 +341,7 @@ export function WhatsAppOrderParser({
                     onClick={() => {
                       setOrderType(t);
                       setSelectedUserId('');
-                      if (t === 'charity') {
-                        setUserMode('existing');
-                      }
+                      if (t === 'charity') setUserMode('existing');
                     }}
                     className={`py-2 px-2 rounded-xl text-xs font-bold border transition-all ${
                       orderType === t
@@ -333,12 +382,12 @@ export function WhatsAppOrderParser({
               </div>
             )}
 
-            {/* בחירת לקוח/ספק קיים או יצירת חדש */}
+            {/* שיוך ללקוח/ספק עם חיפוש לפי שם או 4 ספרות אחרונות */}
             {orderType !== 'charity' ? (
-              <div className="space-y-2.5">
+              <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <label className="text-xs font-bold text-slate-700">
-                    {orderType === 'supplier' ? 'שיוך לספק' : 'שיוך ללקוח'}
+                    {orderType === 'supplier' ? 'שיוך לספק' : 'שיוך ללקוח'} (שם או 4 ספרות אחרונות)
                   </label>
                   <button
                     type="button"
@@ -354,32 +403,54 @@ export function WhatsAppOrderParser({
                 </div>
 
                 {userMode === 'existing' ? (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                    <select
-                      value={selectedUserId}
-                      onChange={(e) => {
-                        const uid = e.target.value;
-                        setSelectedUserId(uid);
-                        const found = users.find((u) => String(u.id) === uid);
-                        if (found) setRecipientName(found.name);
-                      }}
-                      className="px-3 py-2 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] text-sm"
-                    >
-                      <option value="">ללא חשבון (לקוח מזדמן)</option>
-                      {filteredUsers.map((u) => (
-                        <option key={u.id} value={u.id}>
-                          {u.name} {u.phone ? `(${u.phone})` : ''}
-                        </option>
-                      ))}
-                    </select>
-                    <input
-                      type="text"
-                      required={!selectedUserId}
-                      value={recipientName}
-                      onChange={(e) => setRecipientName(e.target.value)}
-                      placeholder="שם מקבל ההזמנה"
-                      className="px-3 py-2 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] text-sm"
-                    />
+                  <div className="space-y-2">
+                    <div className="relative">
+                      <Search className="w-3.5 h-3.5 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="text"
+                        value={userSearch}
+                        onChange={(e) => {
+                          const q = e.target.value;
+                          setUserSearch(q);
+                          const matches = filterUsersByNameOrPhone(
+                            q,
+                            orderType === 'supplier'
+                              ? users.filter((u) => u.role === 'supplier')
+                              : users.filter((u) => u.role !== 'admin')
+                          );
+                          if (q.replace(/\D/g, '').length === 4 && matches.length === 1) {
+                            applySelectedUser(matches[0]);
+                          }
+                        }}
+                        placeholder="חפש לפי שם או 4 ספרות אחרונות (לדוגמה: 1015, 9917)"
+                        className="w-full pr-9 pl-3 py-2 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] text-xs"
+                      />
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <select
+                        value={selectedUserId}
+                        onChange={(e) => {
+                          const found = users.find((u) => String(u.id) === e.target.value) || null;
+                          applySelectedUser(found);
+                        }}
+                        className="px-3 py-2 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] text-sm"
+                      >
+                        <option value="">ללא חשבון (לקוח מזדמן)</option>
+                        {filteredUsers.map((u) => (
+                          <option key={u.id} value={u.id}>
+                            {u.name} {u.phone ? `(${getPhoneLast4(u.phone)})` : ''}
+                          </option>
+                        ))}
+                      </select>
+                      <input
+                        type="text"
+                        required={!selectedUserId}
+                        value={recipientName}
+                        onChange={(e) => setRecipientName(e.target.value)}
+                        placeholder="שם מקבל ההזמנה"
+                        className="px-3 py-2 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] text-sm"
+                      />
+                    </div>
                   </div>
                 ) : (
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 p-3 rounded-xl bg-[#FFF7ED]/70 border border-[#E8D5BE]">
@@ -393,9 +464,10 @@ export function WhatsAppOrderParser({
                     />
                     <input
                       type="tel"
+                      inputMode="tel"
                       value={newUserPhone}
                       onChange={(e) => setNewUserPhone(e.target.value)}
-                      placeholder="טלפון (אופציונלי)"
+                      placeholder="טלפון נייד"
                       className="px-3 py-2 rounded-xl border border-[#E8D5BE] bg-white text-sm tabular-nums"
                     />
                   </div>
@@ -417,59 +489,89 @@ export function WhatsAppOrderParser({
               </div>
             )}
 
-            {/* משלוח / זכות / תשלום */}
+            {/* משלוח / הנחה (₪ או %) / תשלום / מע״מ 18% */}
             {orderType !== 'charity' && (
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-                <div>
-                  <label className="block text-[11px] font-semibold text-slate-500 mb-1">משלוח (₪)</label>
+              <div className="space-y-2.5">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-500 mb-1">משלוח (₪)</label>
+                    <input
+                      type="number"
+                      inputMode="decimal"
+                      min="0"
+                      step="0.5"
+                      dir="ltr"
+                      value={deliveryFee}
+                      onChange={(e) => setDeliveryFee(e.target.value)}
+                      className="w-full px-2.5 py-1.5 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] text-left tabular-nums text-sm font-bold"
+                    />
+                  </div>
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-[11px] font-semibold text-slate-500">הנחה</label>
+                      <button
+                        type="button"
+                        onClick={() => setDiscountMode((m) => (m === 'fixed' ? 'percent' : 'fixed'))}
+                        className="text-[10px] font-extrabold px-1.5 py-0.5 rounded bg-amber-100 text-amber-900"
+                      >
+                        {discountMode === 'fixed' ? '₪' : '%'}
+                      </button>
+                    </div>
+                    <input
+                      type="number"
+                      inputMode="decimal"
+                      min="0"
+                      step="0.5"
+                      dir="ltr"
+                      value={discountValue}
+                      onChange={(e) => setDiscountValue(e.target.value)}
+                      className="w-full px-2.5 py-1.5 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] text-left tabular-nums text-sm font-bold"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-500 mb-1">שולם מראש (₪)</label>
+                    <input
+                      type="number"
+                      inputMode="decimal"
+                      min="0"
+                      step="0.5"
+                      dir="ltr"
+                      value={paidAmount}
+                      onChange={(e) => setPaidAmount(e.target.value)}
+                      className="w-full px-2.5 py-1.5 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] text-left tabular-nums text-sm font-bold"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-500 mb-1">אמצעי תשלום</label>
+                    <select
+                      value={paymentMethod}
+                      onChange={(e) => setPaymentMethod(e.target.value as PaymentMethod)}
+                      className="w-full px-2.5 py-1.5 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] text-sm"
+                    >
+                      {(['cash', 'bit', 'transfer'] as const).map((pm) => (
+                        <option key={pm} value={pm}>
+                          {PAYMENT_METHOD_LABELS[pm]}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                {/* מתג מע״מ 18% */}
+                <label className="inline-flex items-center gap-2.5 px-3 py-2 rounded-xl bg-[#FAF6F0] border border-[#E8D5BE] cursor-pointer select-none">
                   <input
-                    type="number"
-                    min="0"
-                    step="0.5"
-                    dir="ltr"
-                    value={deliveryFee}
-                    onChange={(e) => setDeliveryFee(e.target.value)}
-                    className="w-full px-2.5 py-1.5 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] text-left tabular-nums text-sm font-bold"
+                    type="checkbox"
+                    checked={includeVat}
+                    onChange={(e) => setIncludeVat(e.target.checked)}
+                    className="w-4 h-4 rounded accent-[#C85A17]"
                   />
-                </div>
-                <div>
-                  <label className="block text-[11px] font-semibold text-slate-500 mb-1">זכות / הנחה (₪)</label>
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.5"
-                    dir="ltr"
-                    value={creditDiscount}
-                    onChange={(e) => setCreditDiscount(e.target.value)}
-                    className="w-full px-2.5 py-1.5 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] text-left tabular-nums text-sm font-bold"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[11px] font-semibold text-slate-500 mb-1">שולם מראש (₪)</label>
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.5"
-                    dir="ltr"
-                    value={paidAmount}
-                    onChange={(e) => setPaidAmount(e.target.value)}
-                    className="w-full px-2.5 py-1.5 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] text-left tabular-nums text-sm font-bold"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[11px] font-semibold text-slate-500 mb-1">אמצעי תשלום</label>
-                  <select
-                    value={paymentMethod}
-                    onChange={(e) => setPaymentMethod(e.target.value as PaymentMethod)}
-                    className="w-full px-2.5 py-1.5 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] text-sm"
-                  >
-                    {(['cash', 'bit', 'transfer'] as const).map((pm) => (
-                      <option key={pm} value={pm}>
-                        {PAYMENT_METHOD_LABELS[pm]}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                  <span className="text-xs font-bold text-slate-800">+ מע״מ 18%</span>
+                  {includeVat && (
+                    <span className="text-xs font-extrabold text-[#C85A17] tabular-nums">
+                      ({formatILS(totals.vatAmount)})
+                    </span>
+                  )}
+                </label>
               </div>
             )}
           </div>
@@ -609,9 +711,11 @@ export function WhatsAppOrderParser({
               <div className="text-[11px] text-slate-500">
                 {orderType === 'charity'
                   ? `עלות תרומה: ${formatILS(estimatedCost)}`
-                  : `סה״כ לחיוב (עלות: ${formatILS(estimatedCost)})`}
+                  : `${totals.discountILS > 0 ? `הנחה: -${formatILS(totals.discountILS)} · ` : ''}${
+                      includeVat ? `מע״מ 18%: ${formatILS(totals.vatAmount)} · ` : ''
+                    }עלות: ${formatILS(estimatedCost)}`}
               </div>
-              <div className="text-xl font-extrabold text-[#C85A17]">{formatILS(totalAmount)}</div>
+              <div className="text-xl font-extrabold text-[#C85A17]">{formatILS(totals.total)}</div>
             </div>
             <button
               type="submit"

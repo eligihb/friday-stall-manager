@@ -7,13 +7,16 @@ import {
   TrendingUp,
   Package,
   AlertCircle,
-  X,
+  AlertTriangle,
   RotateCcw,
+  History,
+  Image as ImageIcon,
+  Calendar,
 } from 'lucide-react';
 import { apiFetch } from '../lib/api';
-import { formatILS, formatPercent } from '../lib/format';
+import { formatHebrewDate, formatILS, formatPercent } from '../lib/format';
 import { BottomSheet } from '../components/BottomSheet';
-import type { AdminProduct } from '../types';
+import type { AdminProduct, ProductPriceHistoryEntry } from '../types';
 
 interface DraftPrices {
   name: string;
@@ -21,6 +24,38 @@ interface DraftPrices {
   supplier_price: string;
   preorder_price: string;
   customer_price: string;
+  image_url: string;
+}
+
+function getPriceWarnings(
+  draft: { cost_price: string; supplier_price: string; preorder_price: string; customer_price: string },
+  original?: AdminProduct
+): string[] {
+  const warnings: string[] = [];
+  const cost = Number(draft.cost_price) || 0;
+  const sup = Number(draft.supplier_price) || 0;
+  const pre = Number(draft.preorder_price) || 0;
+  const cust = Number(draft.customer_price) || 0;
+
+  if (sup < cost) warnings.push(`מחיר ספק (${formatILS(sup)}) נמוך ממחיר העלות (${formatILS(cost)})!`);
+  if (pre < cost) warnings.push(`מחיר הזמנה מוקדמת (${formatILS(pre)}) נמוך ממחיר העלות (${formatILS(cost)})!`);
+  if (cust < cost) warnings.push(`מחיר לקוח/דוכן (${formatILS(cust)}) נמוך ממחיר העלות (${formatILS(cost)})!`);
+
+  if (original) {
+    const checks: Array<[string, number, number]> = [
+      ['עלות', original.cost_price, cost],
+      ['מחיר ספק', original.supplier_price, sup],
+      ['הזמנה מוקדמת', original.preorder_price, pre],
+      ['מחיר לקוח', original.customer_price, cust],
+    ];
+    for (const [label, prevVal, nextVal] of checks) {
+      if (prevVal > 0 && Math.abs(nextVal - prevVal) / prevVal > 0.3) {
+        const pct = Math.round((Math.abs(nextVal - prevVal) / prevVal) * 100);
+        warnings.push(`שינוי חריג של ${pct}% ב${label} (מ-${formatILS(prevVal)} ל-${formatILS(nextVal)})`);
+      }
+    }
+  }
+  return warnings;
 }
 
 export function ProductsCatalog() {
@@ -30,8 +65,18 @@ export function ProductsCatalog() {
   const [savedId, setSavedId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [toast, setToast] = useState('');
   const [search, setSearch] = useState('');
   const [showOnlyActive, setShowOnlyActive] = useState(false);
+
+  // חלונית תאריך תחולה ואישור אזהרות בעת שמירת מחירים
+  const [pendingSaveProduct, setPendingSaveProduct] = useState<AdminProduct | null>(null);
+  const [effectiveDate, setEffectiveDate] = useState(new Date().toISOString().slice(0, 10));
+
+  // חלונית היסטוריית מחירים
+  const [historyProduct, setHistoryProduct] = useState<AdminProduct | null>(null);
+  const [historyRows, setHistoryRows] = useState<ProductPriceHistoryEntry[]>([]);
+  const [loadingHistory, setLoadingHistory] = useState(false);
 
   // טופס הוספת מוצר חדש
   const [showAddModal, setShowAddModal] = useState(false);
@@ -41,6 +86,8 @@ export function ProductsCatalog() {
     supplier_price: '',
     preorder_price: '',
     customer_price: '',
+    image_url: '',
+    effective_date: new Date().toISOString().slice(0, 10),
   });
   const [creating, setCreating] = useState(false);
 
@@ -57,6 +104,7 @@ export function ProductsCatalog() {
           supplier_price: p.supplier_price.toFixed(2),
           preorder_price: p.preorder_price.toFixed(2),
           customer_price: p.customer_price.toFixed(2),
+          image_url: p.image_url || '',
         };
       }
       setDrafts(map);
@@ -80,6 +128,18 @@ export function ProductsCatalog() {
       Number(d.cost_price) !== p.cost_price ||
       Number(d.supplier_price) !== p.supplier_price ||
       Number(d.preorder_price) !== p.preorder_price ||
+      Number(d.customer_price) !== p.customer_price ||
+      (d.image_url.trim() || '') !== (p.image_url || '')
+    );
+  };
+
+  const didPricesChange = (p: AdminProduct): boolean => {
+    const d = drafts[p.id];
+    if (!d) return false;
+    return (
+      Number(d.cost_price) !== p.cost_price ||
+      Number(d.supplier_price) !== p.supplier_price ||
+      Number(d.preorder_price) !== p.preorder_price ||
       Number(d.customer_price) !== p.customer_price
     );
   };
@@ -100,27 +160,42 @@ export function ProductsCatalog() {
         supplier_price: p.supplier_price.toFixed(2),
         preorder_price: p.preorder_price.toFixed(2),
         customer_price: p.customer_price.toFixed(2),
+        image_url: p.image_url || '',
       },
     }));
   };
 
-  const saveRow = async (p: AdminProduct) => {
+  const initiateSaveRow = (p: AdminProduct) => {
+    if (didPricesChange(p)) {
+      setEffectiveDate(new Date().toISOString().slice(0, 10));
+      setPendingSaveProduct(p);
+    } else {
+      commitSaveRow(p, new Date().toISOString().slice(0, 10));
+    }
+  };
+
+  const commitSaveRow = async (p: AdminProduct, effDate: string) => {
     const d = drafts[p.id];
     if (!d) return;
     setSavingId(p.id);
     setError('');
     try {
-      const res = await apiFetch<{ product: AdminProduct }>(`/api/products/${p.id}`, {
-        method: 'PUT',
-        body: JSON.stringify({
-          name: d.name.trim(),
-          cost_price: Number(d.cost_price),
-          supplier_price: Number(d.supplier_price),
-          preorder_price: Number(d.preorder_price),
-          customer_price: Number(d.customer_price),
-          is_active: p.is_active,
-        }),
-      });
+      const res = await apiFetch<{ product: AdminProduct; scheduled?: boolean; effective_date?: string }>(
+        `/api/products/${p.id}`,
+        {
+          method: 'PUT',
+          body: JSON.stringify({
+            name: d.name.trim(),
+            cost_price: Number(d.cost_price),
+            supplier_price: Number(d.supplier_price),
+            preorder_price: Number(d.preorder_price),
+            customer_price: Number(d.customer_price),
+            image_url: d.image_url.trim() || null,
+            is_active: p.is_active,
+            effective_date: effDate,
+          }),
+        }
+      );
       setProducts((prev) => prev.map((item) => (item.id === p.id ? res.product : item)));
       setDrafts((prev) => ({
         ...prev,
@@ -130,14 +205,31 @@ export function ProductsCatalog() {
           supplier_price: res.product.supplier_price.toFixed(2),
           preorder_price: res.product.preorder_price.toFixed(2),
           customer_price: res.product.customer_price.toFixed(2),
+          image_url: res.product.image_url || '',
         },
       }));
+      setPendingSaveProduct(null);
       setSavedId(p.id);
+      if (res.scheduled) {
+        setToast(`המחיר החדש ל״${p.name}״ תוזמן להיסטוריית המחירים החל מתאריך ${formatHebrewDate(effDate)}.`);
+        setTimeout(() => setToast(''), 4000);
+      }
       setTimeout(() => setSavedId((cur) => (cur === p.id ? null : cur)), 1800);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'שגיאה בשמירת המוצר');
     } finally {
       setSavingId(null);
+    }
+  };
+
+  const openHistory = async (p: AdminProduct) => {
+    setHistoryProduct(p);
+    setLoadingHistory(true);
+    try {
+      const res = await apiFetch<{ history: ProductPriceHistoryEntry[] }>(`/api/products/${p.id}/history`);
+      setHistoryRows(res.history);
+    } finally {
+      setLoadingHistory(false);
     }
   };
 
@@ -165,6 +257,8 @@ export function ProductsCatalog() {
           supplier_price: Number(newProd.supplier_price),
           preorder_price: Number(newProd.preorder_price),
           customer_price: Number(newProd.customer_price),
+          image_url: newProd.image_url.trim() || null,
+          effective_date: newProd.effective_date,
           is_active: true,
         }),
       });
@@ -177,9 +271,18 @@ export function ProductsCatalog() {
           supplier_price: res.product.supplier_price.toFixed(2),
           preorder_price: res.product.preorder_price.toFixed(2),
           customer_price: res.product.customer_price.toFixed(2),
+          image_url: res.product.image_url || '',
         },
       }));
-      setNewProd({ name: '', cost_price: '', supplier_price: '', preorder_price: '', customer_price: '' });
+      setNewProd({
+        name: '',
+        cost_price: '',
+        supplier_price: '',
+        preorder_price: '',
+        customer_price: '',
+        image_url: '',
+        effective_date: new Date().toISOString().slice(0, 10),
+      });
       setShowAddModal(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'שגיאה בהוספת המוצר');
@@ -199,10 +302,18 @@ export function ProductsCatalog() {
   const stats = useMemo(() => {
     const active = products.filter((p) => p.is_active);
     const avgSupPct = active.length
-      ? active.reduce((acc, p) => acc + (p.supplier_price > 0 ? ((p.supplier_price - p.cost_price) / p.supplier_price) * 100 : 0), 0) / active.length
+      ? active.reduce(
+          (acc, p) =>
+            acc + (p.supplier_price > 0 ? ((p.supplier_price - p.cost_price) / p.supplier_price) * 100 : 0),
+          0
+        ) / active.length
       : 0;
     const avgCustPct = active.length
-      ? active.reduce((acc, p) => acc + (p.customer_price > 0 ? ((p.customer_price - p.cost_price) / p.customer_price) * 100 : 0), 0) / active.length
+      ? active.reduce(
+          (acc, p) =>
+            acc + (p.customer_price > 0 ? ((p.customer_price - p.cost_price) / p.customer_price) * 100 : 0),
+          0
+        ) / active.length
       : 0;
     return {
       total: products.length,
@@ -223,14 +334,25 @@ export function ProductsCatalog() {
     return { supProfit, supPct, custProfit, custPct };
   };
 
+  const newProdWarnings = useMemo(() => {
+    if (!newProd.cost_price && !newProd.supplier_price && !newProd.customer_price) return [];
+    return getPriceWarnings(newProd);
+  }, [newProd]);
+
+  const pendingSaveWarnings = useMemo(() => {
+    if (!pendingSaveProduct) return [];
+    const d = drafts[pendingSaveProduct.id];
+    if (!d) return [];
+    return getPriceWarnings(d, pendingSaveProduct);
+  }, [pendingSaveProduct, drafts]);
+
   return (
     <div className="space-y-6">
-      {/* כותרת ופעולה ראשית */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h2 className="font-serif text-3xl font-bold text-slateink-800">מחירון מוצרים</h2>
+          <h2 className="font-serif text-3xl font-bold text-slateink-800">מחירון מוצרים חכם והיסטוריית מחירים</h2>
           <p className="text-sm text-slate-600 mt-1">
-            עריכה ישירה של 4 מדרגות מחיר, מעקב רווחיות בזמן אמת והפעלה/השבתה של מוצרים בקטלוג.
+            עריכת 4 מדרגות מחיר, תמונות מוצר, התראות חריגה (מתחת לעלות או שינוי מעל 30%), ותאריך תחולה לשימור הזמנות עבר.
           </p>
         </div>
         <button
@@ -247,7 +369,7 @@ export function ProductsCatalog() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         <div className="bg-white rounded-2xl p-4 border border-[#E8D5BE]/70 shadow-soft">
           <div className="flex items-center justify-between text-slate-500 text-xs font-semibold">
-            <span>סה״כ מוצרים במחירון</span>
+            <span>סה״כ מוצרים ומארזים</span>
             <Package className="w-4 h-4 text-[#C85A17]" />
           </div>
           <div className="text-2xl font-extrabold text-slate-900 mt-2 tabular-nums">{stats.total}</div>
@@ -302,6 +424,12 @@ export function ProductsCatalog() {
         </label>
       </div>
 
+      {toast && (
+        <div className="p-3.5 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm font-bold flex items-center gap-2">
+          <Check className="w-4 h-4 shrink-0" />
+          <span>{toast}</span>
+        </div>
+      )}
       {error && (
         <div className="p-4 rounded-2xl bg-red-50 border border-red-200 text-red-700 text-sm font-semibold flex items-center gap-2">
           <AlertCircle className="w-4 h-4 shrink-0" />
@@ -321,15 +449,15 @@ export function ProductsCatalog() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-[#F3E9DC]/70 text-slate-700 border-b border-[#E8D5BE]">
-                    <th className="text-right py-3.5 px-4 font-bold">שם המוצר</th>
-                    <th className="text-right py-3.5 px-2.5 font-bold">עלות (₪)</th>
-                    <th className="text-right py-3.5 px-2.5 font-bold">ספק (₪)</th>
-                    <th className="text-right py-3.5 px-2.5 font-bold">הזמנה מוקדמת (₪)</th>
-                    <th className="text-right py-3.5 px-2.5 font-bold">דוכן / לקוח (₪)</th>
-                    <th className="text-right py-3.5 px-3 font-bold">ריווח ממכירה לספק</th>
-                    <th className="text-right py-3.5 px-3 font-bold">ריווח ממכירה ללקוח</th>
-                    <th className="text-center py-3.5 px-3 font-bold">פעיל</th>
-                    <th className="text-center py-3.5 px-3 font-bold">שמירה</th>
+                    <th className="text-right py-3.5 px-4 font-bold">שם המוצר ותמונה</th>
+                    <th className="text-right py-3.5 px-2 font-bold">עלות (₪)</th>
+                    <th className="text-right py-3.5 px-2 font-bold">ספק (₪)</th>
+                    <th className="text-right py-3.5 px-2 font-bold">מוקדמת (₪)</th>
+                    <th className="text-right py-3.5 px-2 font-bold">דוכן (₪)</th>
+                    <th className="text-right py-3.5 px-2.5 font-bold">ריווח ספק</th>
+                    <th className="text-right py-3.5 px-2.5 font-bold">ריווח לקוח</th>
+                    <th className="text-center py-3.5 px-2 font-bold">פעיל</th>
+                    <th className="text-center py-3.5 px-3 font-bold">פעולות</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#F3E9DC]">
@@ -337,6 +465,7 @@ export function ProductsCatalog() {
                     const d = drafts[p.id];
                     if (!d) return null;
                     const dirty = isRowDirty(p);
+                    const rowWarnings = dirty ? getPriceWarnings(d, p) : [];
                     const { supProfit, supPct, custProfit, custPct } = calcMargins(
                       d.cost_price,
                       d.supplier_price,
@@ -349,69 +478,92 @@ export function ProductsCatalog() {
                         className={`transition-colors ${
                           !p.is_active
                             ? 'bg-slate-50/70 opacity-65'
+                            : rowWarnings.length > 0
+                            ? 'bg-red-50/50'
                             : dirty
                             ? 'bg-[#FFF7ED]/70'
                             : 'hover:bg-[#FDFBF7]'
                         }`}
                       >
-                        <td className="py-2.5 px-4 font-bold text-slate-900 min-w-[160px]">
-                          <input
-                            type="text"
-                            value={d.name}
-                            onChange={(e) => updateDraft(p.id, 'name', e.target.value)}
-                            className="w-full bg-transparent border border-transparent hover:border-[#E8D5BE] focus:border-[#C85A17] focus:bg-white rounded-lg px-2 py-1 font-bold text-slate-900 focus:outline-none"
-                          />
+                        <td className="py-2.5 px-4 font-bold text-slate-900 min-w-[200px]">
+                          <div className="flex items-center gap-2">
+                            {d.image_url ? (
+                              <img
+                                src={d.image_url}
+                                alt={d.name}
+                                className="w-8 h-8 rounded-lg object-cover border border-[#E8D5BE] shrink-0"
+                              />
+                            ) : (
+                              <div className="w-8 h-8 rounded-lg bg-[#FAF6F0] border border-[#E8D5BE] flex items-center justify-center text-slate-400 shrink-0">
+                                <ImageIcon className="w-4 h-4" />
+                              </div>
+                            )}
+                            <div className="flex-1 min-w-0">
+                              <input
+                                type="text"
+                                value={d.name}
+                                onChange={(e) => updateDraft(p.id, 'name', e.target.value)}
+                                className="w-full bg-transparent border border-transparent hover:border-[#E8D5BE] focus:border-[#C85A17] focus:bg-white rounded-lg px-2 py-0.5 font-bold text-slate-900 focus:outline-none"
+                              />
+                              <input
+                                type="url"
+                                dir="ltr"
+                                value={d.image_url}
+                                onChange={(e) => updateDraft(p.id, 'image_url', e.target.value)}
+                                placeholder="קישור לתמונה (image_url)"
+                                className="w-full text-[11px] text-slate-400 bg-transparent px-2 py-0.5 focus:bg-white focus:text-slate-700 rounded focus:outline-none text-left"
+                              />
+                            </div>
+                          </div>
+                          {rowWarnings.length > 0 && (
+                            <div className="mt-1.5 text-[11px] text-red-700 font-bold flex items-start gap-1">
+                              <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                              <span>{rowWarnings[0]}</span>
+                            </div>
+                          )}
                         </td>
                         {(['cost_price', 'supplier_price', 'preorder_price', 'customer_price'] as const).map(
                           (field) => (
-                            <td key={field} className="py-2.5 px-2">
+                            <td key={field} className="py-2.5 px-1.5">
                               <input
                                 type="number"
+                                inputMode="decimal"
                                 step="0.01"
                                 min="0"
                                 value={d[field]}
                                 onChange={(e) => updateDraft(p.id, field, e.target.value)}
                                 onKeyDown={(e) => {
-                                  if (e.key === 'Enter' && dirty) saveRow(p);
+                                  if (e.key === 'Enter' && dirty) initiateSaveRow(p);
                                 }}
-                                className="w-24 px-2.5 py-1.5 rounded-lg border border-[#E8D5BE] bg-[#FDFBF7] focus:bg-white focus:border-[#C85A17] focus:ring-2 focus:ring-[#C85A17]/20 focus:outline-none text-left tabular-nums font-semibold"
+                                className="w-20 px-2 py-1.5 rounded-lg border border-[#E8D5BE] bg-[#FDFBF7] focus:bg-white focus:border-[#C85A17] focus:outline-none text-left tabular-nums font-semibold"
                                 dir="ltr"
                               />
                             </td>
                           )
                         )}
-                        <td className="py-2.5 px-3 tabular-nums">
-                          <div
-                            className={`font-bold ${
-                              supProfit < 0 ? 'text-red-600' : 'text-amber-700'
-                            }`}
-                          >
+                        <td className="py-2.5 px-2.5 tabular-nums">
+                          <div className={`font-bold ${supProfit < 0 ? 'text-red-600' : 'text-amber-700'}`}>
                             {formatILS(supProfit)}
                           </div>
                           <div className="text-[11px] text-slate-500 font-semibold">
-                            {formatPercent(supPct)} מרווח
+                            {formatPercent(supPct)}
                           </div>
                         </td>
-                        <td className="py-2.5 px-3 tabular-nums">
-                          <div
-                            className={`font-bold ${
-                              custProfit < 0 ? 'text-red-600' : 'text-emerald-700'
-                            }`}
-                          >
+                        <td className="py-2.5 px-2.5 tabular-nums">
+                          <div className={`font-bold ${custProfit < 0 ? 'text-red-600' : 'text-emerald-700'}`}>
                             {formatILS(custProfit)}
                           </div>
                           <div className="text-[11px] text-slate-500 font-semibold">
-                            {formatPercent(custPct)} מרווח
+                            {formatPercent(custPct)}
                           </div>
                         </td>
-                        <td className="py-2.5 px-3 text-center">
+                        <td className="py-2.5 px-2 text-center">
                           <button
                             type="button"
                             onClick={() => toggleActive(p)}
                             className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
                               p.is_active ? 'bg-emerald-600' : 'bg-slate-300'
                             }`}
-                            title={p.is_active ? 'השבת מוצר' : 'הפעל מוצר'}
                           >
                             <span
                               className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
@@ -420,35 +572,43 @@ export function ProductsCatalog() {
                             />
                           </button>
                         </td>
-                        <td className="py-2.5 px-3 text-center">
-                          {dirty ? (
-                            <div className="inline-flex items-center gap-1">
-                              <button
-                                type="button"
-                                disabled={savingId === p.id}
-                                onClick={() => saveRow(p)}
-                                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-[#C85A17] hover:bg-[#A9440F] text-white text-xs font-bold shadow-sm"
-                              >
-                                <Save className="w-3.5 h-3.5" />
-                                <span>{savingId === p.id ? '...' : 'שמור'}</span>
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => resetRow(p)}
-                                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100"
-                                title="בטל שינויים"
-                              >
-                                <RotateCcw className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
-                          ) : savedId === p.id ? (
-                            <span className="inline-flex items-center gap-1 text-emerald-700 text-xs font-bold">
-                              <Check className="w-4 h-4" />
-                              נשמר
-                            </span>
-                          ) : (
-                            <span className="text-xs text-slate-300">—</span>
-                          )}
+                        <td className="py-2.5 px-3 text-center whitespace-nowrap">
+                          <div className="inline-flex items-center gap-1">
+                            {dirty ? (
+                              <>
+                                <button
+                                  type="button"
+                                  disabled={savingId === p.id}
+                                  onClick={() => initiateSaveRow(p)}
+                                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-[#C85A17] hover:bg-[#A9440F] text-white text-xs font-bold shadow-sm"
+                                >
+                                  <Save className="w-3.5 h-3.5" />
+                                  <span>{savingId === p.id ? '...' : 'שמור'}</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => resetRow(p)}
+                                  className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100"
+                                  title="בטל שינויים"
+                                >
+                                  <RotateCcw className="w-3.5 h-3.5" />
+                                </button>
+                              </>
+                            ) : savedId === p.id ? (
+                              <span className="inline-flex items-center gap-1 text-emerald-700 text-xs font-bold">
+                                <Check className="w-4 h-4" />
+                                נשמר
+                              </span>
+                            ) : null}
+                            <button
+                              type="button"
+                              onClick={() => openHistory(p)}
+                              className="p-1.5 rounded-lg text-slate-400 hover:text-[#C85A17] hover:bg-[#FFF7ED]"
+                              title="היסטוריית מחירים"
+                            >
+                              <History className="w-4 h-4" />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );
@@ -458,12 +618,13 @@ export function ProductsCatalog() {
             </div>
           </div>
 
-          {/* תצוגת כרטיסים מובייל וטאבלט */}
+          {/* תצוגת כרטיסים מובייל */}
           <div className="lg:hidden space-y-3">
             {filtered.map((p) => {
               const d = drafts[p.id];
               if (!d) return null;
               const dirty = isRowDirty(p);
+              const rowWarnings = dirty ? getPriceWarnings(d, p) : [];
               const { supProfit, supPct, custProfit, custPct } = calcMargins(
                 d.cost_price,
                 d.supplier_price,
@@ -476,12 +637,14 @@ export function ProductsCatalog() {
                   className={`bg-white rounded-2xl p-4 border shadow-soft ${
                     !p.is_active
                       ? 'border-slate-200 opacity-70'
+                      : rowWarnings.length > 0
+                      ? 'border-red-300 bg-red-50/30'
                       : dirty
                       ? 'border-[#C85A17]'
                       : 'border-[#E8D5BE]/80'
                   }`}
                 >
-                  <div className="flex items-center justify-between gap-3 mb-3">
+                  <div className="flex items-center justify-between gap-2 mb-3">
                     <input
                       type="text"
                       value={d.name}
@@ -490,16 +653,33 @@ export function ProductsCatalog() {
                     />
                     <button
                       type="button"
+                      onClick={() => openHistory(p)}
+                      className="p-2 rounded-xl bg-[#FAF6F0] text-slate-600"
+                      title="היסטוריית מחירים"
+                    >
+                      <History className="w-4 h-4" />
+                    </button>
+                    <button
+                      type="button"
                       onClick={() => toggleActive(p)}
                       className={`px-2.5 py-1 rounded-full text-xs font-bold ${
-                        p.is_active
-                          ? 'bg-emerald-100 text-emerald-800'
-                          : 'bg-slate-200 text-slate-600'
+                        p.is_active ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-600'
                       }`}
                     >
                       {p.is_active ? 'פעיל' : 'מושבת'}
                     </button>
                   </div>
+
+                  {rowWarnings.length > 0 && (
+                    <div className="mb-3 p-2.5 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs font-bold space-y-1">
+                      {rowWarnings.map((w, idx) => (
+                        <div key={idx} className="flex items-start gap-1.5">
+                          <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                          <span>{w}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
 
                   <div className="grid grid-cols-2 gap-2.5">
                     {(
@@ -528,6 +708,20 @@ export function ProductsCatalog() {
                     ))}
                   </div>
 
+                  <div className="mt-2.5">
+                    <label className="block text-[11px] font-semibold text-slate-500 mb-1">
+                      קישור לתמונת מוצר (אופציונלי)
+                    </label>
+                    <input
+                      type="url"
+                      dir="ltr"
+                      value={d.image_url}
+                      onChange={(e) => updateDraft(p.id, 'image_url', e.target.value)}
+                      placeholder="https://..."
+                      className="w-full px-3 py-2 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] text-left text-xs"
+                    />
+                  </div>
+
                   <div className="mt-3 pt-3 border-t border-[#F3E9DC] grid grid-cols-2 gap-2 text-xs tabular-nums">
                     <div className="bg-amber-50/70 rounded-xl p-2.5">
                       <div className="text-slate-600 font-medium">ריווח ממכירה לספק</div>
@@ -548,8 +742,8 @@ export function ProductsCatalog() {
                       <button
                         type="button"
                         disabled={savingId === p.id}
-                        onClick={() => saveRow(p)}
-                        className="flex-1 py-2 rounded-xl bg-[#C85A17] text-white font-bold text-sm flex items-center justify-center gap-1.5"
+                        onClick={() => initiateSaveRow(p)}
+                        className="flex-1 min-h-[44px] rounded-xl bg-[#C85A17] text-white font-bold text-sm flex items-center justify-center gap-1.5"
                       >
                         <Save className="w-4 h-4" />
                         <span>{savingId === p.id ? 'שומר...' : 'שמור מחירים'}</span>
@@ -557,7 +751,7 @@ export function ProductsCatalog() {
                       <button
                         type="button"
                         onClick={() => resetRow(p)}
-                        className="px-3 py-2 rounded-xl border border-[#E8D5BE] text-slate-600 text-sm font-semibold"
+                        className="px-4 min-h-[44px] rounded-xl border border-[#E8D5BE] text-slate-600 text-sm font-semibold"
                       >
                         בטל
                       </button>
@@ -570,15 +764,113 @@ export function ProductsCatalog() {
         </>
       )}
 
-      {/* חלונית Bottom Sheet להוספת מוצר חדש */}
+      {/* חלונית אישור תאריך תחולה ואזהרות מחיר */}
+      <BottomSheet
+        open={Boolean(pendingSaveProduct)}
+        onClose={() => setPendingSaveProduct(null)}
+        title={pendingSaveProduct ? `עדכון מחיר — ${pendingSaveProduct.name}` : ''}
+        subtitle="הזמנות קודמות יישמרו לפי המחיר שהיה בתוקף בתאריך ההזמנה"
+        maxWidthClass="md:max-w-md"
+      >
+        {pendingSaveProduct && (
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              commitSaveRow(pendingSaveProduct, effectiveDate);
+            }}
+            className="space-y-4"
+          >
+            {pendingSaveWarnings.length > 0 && (
+              <div className="p-3.5 rounded-2xl bg-red-50 border-2 border-red-200 text-red-800 text-xs font-bold space-y-1.5">
+                <div className="flex items-center gap-1.5 text-sm">
+                  <AlertTriangle className="w-4 h-4 text-red-600 shrink-0" />
+                  <span>שימו לב — אזהרות תמחור:</span>
+                </div>
+                {pendingSaveWarnings.map((w, i) => (
+                  <div key={i}>• {w}</div>
+                ))}
+              </div>
+            )}
+
+            <div>
+              <label className="flex items-center gap-1.5 text-sm font-bold text-slate-700 mb-1.5">
+                <Calendar className="w-4 h-4 text-[#C85A17]" />
+                <span>תאריך תחולה למחיר החדש</span>
+              </label>
+              <input
+                type="date"
+                required
+                value={effectiveDate}
+                onChange={(e) => setEffectiveDate(e.target.value)}
+                className="w-full px-3.5 py-2.5 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] font-bold"
+              />
+              <p className="text-xs text-slate-500 mt-1">
+                ברירת מחדל: היום. הזמנות מתאריכים קודמים יחושבו לפי המחיר ההיסטורי.
+              </p>
+            </div>
+
+            <button
+              type="submit"
+              disabled={savingId === pendingSaveProduct.id}
+              className="w-full min-h-[50px] rounded-2xl bg-[#C85A17] hover:bg-[#A9440F] text-white font-extrabold text-base"
+            >
+              {savingId === pendingSaveProduct.id ? 'שומר...' : 'אשר ושמור מחיר'}
+            </button>
+          </form>
+        )}
+      </BottomSheet>
+
+      {/* חלונית היסטוריית מחירים למוצר */}
+      <BottomSheet
+        open={Boolean(historyProduct)}
+        onClose={() => setHistoryProduct(null)}
+        title={historyProduct ? `היסטוריית מחירים — ${historyProduct.name}` : ''}
+        subtitle="מעקב שינויי מחיר לפי תאריך תחולה"
+        maxWidthClass="md:max-w-lg"
+      >
+        {loadingHistory ? (
+          <div className="py-8 text-center text-slate-400 text-sm">טוען היסטוריה...</div>
+        ) : historyRows.length === 0 ? (
+          <div className="py-8 text-center text-slate-400 text-sm">אין היסטוריית מחירים.</div>
+        ) : (
+          <div className="divide-y divide-[#F3E9DC] border border-[#E8D5BE] rounded-2xl overflow-hidden text-xs tabular-nums">
+            {historyRows.map((h) => (
+              <div key={h.id} className="p-3.5 bg-white space-y-1">
+                <div className="font-extrabold text-slate-900">
+                  בתוקף מ-{formatHebrewDate(h.effective_date)}
+                </div>
+                <div className="grid grid-cols-4 gap-2 text-slate-600">
+                  <div>עלות: {formatILS(h.cost_price)}</div>
+                  <div>ספק: {formatILS(h.supplier_price)}</div>
+                  <div>מוקדמת: {formatILS(h.preorder_price)}</div>
+                  <div>דוכן: {formatILS(h.customer_price)}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </BottomSheet>
+
+      {/* חלונית הוספת מוצר חדש */}
       <BottomSheet
         open={showAddModal}
         onClose={() => setShowAddModal(false)}
         title="הוספת מוצר חדש למחירון"
-        subtitle="הזן 4 מדרגות מחיר — הרווחיות מחושבת אוטומטית"
+        subtitle="הזן 4 מדרגות מחיר, תאריך תחולה וקישור לתמונה (אופציונלי)"
         maxWidthClass="md:max-w-md"
       >
         <form onSubmit={handleCreateProduct} className="space-y-4">
+          {newProdWarnings.length > 0 && (
+            <div className="p-3 rounded-2xl bg-red-50 border border-red-200 text-red-700 text-xs font-bold space-y-1">
+              {newProdWarnings.map((w, i) => (
+                <div key={i} className="flex items-start gap-1.5">
+                  <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                  <span>{w}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
           <div>
             <label className="block text-sm font-semibold text-slate-700 mb-1">שם המוצר</label>
             <input
@@ -586,14 +878,14 @@ export function ProductsCatalog() {
               required
               value={newProd.name}
               onChange={(e) => setNewProd({ ...newProd, name: e.target.value })}
-              placeholder="לדוגמה: מלאווח ביתי"
+              placeholder="לדוגמה: מארז פיתה שומשום"
               className="w-full px-3.5 py-2.5 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] focus:bg-white focus:border-[#C85A17] focus:outline-none"
             />
           </div>
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs font-semibold text-slate-600 mb-1">עלות ייצור (₪)</label>
+              <label className="block text-xs font-semibold text-slate-600 mb-1">עלות ייצור/רכש (₪)</label>
               <input
                 type="number"
                 inputMode="decimal"
@@ -646,6 +938,30 @@ export function ProductsCatalog() {
                 value={newProd.customer_price}
                 onChange={(e) => setNewProd({ ...newProd, customer_price: e.target.value })}
                 className="w-full px-3 py-2.5 rounded-xl border border-[#E8D5BE] text-left tabular-nums font-semibold"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 mb-1">תאריך תחולה</label>
+              <input
+                type="date"
+                required
+                value={newProd.effective_date}
+                onChange={(e) => setNewProd({ ...newProd, effective_date: e.target.value })}
+                className="w-full px-3 py-2 rounded-xl border border-[#E8D5BE] text-sm"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 mb-1">קישור לתמונה (אופציונלי)</label>
+              <input
+                type="url"
+                dir="ltr"
+                value={newProd.image_url}
+                onChange={(e) => setNewProd({ ...newProd, image_url: e.target.value })}
+                placeholder="https://..."
+                className="w-full px-3 py-2 rounded-xl border border-[#E8D5BE] text-left text-xs"
               />
             </div>
           </div>

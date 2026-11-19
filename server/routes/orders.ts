@@ -12,6 +12,9 @@ interface DbOrder {
   order_type: 'customer' | 'supplier' | 'charity';
   delivery_fee: number;
   credit_discount: number;
+  discount_percent?: number;
+  include_vat?: number | boolean;
+  vat_amount?: number;
   total_amount: number;
   paid_amount: number;
   status: 'awaiting_approval' | 'pending' | 'ready' | 'delivered';
@@ -42,6 +45,73 @@ interface DbProduct {
 
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
+}
+
+async function resolveEffectivePrices(
+  db: Awaited<ReturnType<typeof getDb>>,
+  productMap: Map<number, DbProduct>,
+  fridayDate: string
+): Promise<Map<number, { cost_price: number; supplier_price: number; preorder_price: number; customer_price: number }>> {
+  const result = new Map<
+    number,
+    { cost_price: number; supplier_price: number; preorder_price: number; customer_price: number }
+  >();
+  for (const [pid, prod] of productMap.entries()) {
+    const hist = await db.get<{
+      cost_price: number;
+      supplier_price: number;
+      preorder_price: number;
+      customer_price: number;
+    }>(
+      `SELECT cost_price, supplier_price, preorder_price, customer_price
+       FROM product_price_history
+       WHERE product_id = ? AND effective_date <= ?
+       ORDER BY effective_date DESC, id DESC
+       LIMIT 1`,
+      [pid, fridayDate]
+    );
+    if (hist) {
+      result.set(pid, {
+        cost_price: Number(hist.cost_price),
+        supplier_price: Number(hist.supplier_price),
+        preorder_price: Number(hist.preorder_price),
+        customer_price: Number(hist.customer_price),
+      });
+    } else {
+      result.set(pid, {
+        cost_price: Number(prod.cost_price),
+        supplier_price: Number(prod.supplier_price),
+        preorder_price: Number(prod.preorder_price),
+        customer_price: Number(prod.customer_price),
+      });
+    }
+  }
+  return result;
+}
+
+function computeOrderTotals(params: {
+  orderType: 'customer' | 'supplier' | 'charity';
+  itemsSubtotal: number;
+  deliveryFee: number;
+  fixedDiscount: number;
+  discountPercent: number;
+  includeVat: boolean;
+}) {
+  if (params.orderType === 'charity') {
+    return { credit_discount: 0, discount_percent: 0, vat_amount: 0, total_amount: 0 };
+  }
+  const pctDiscount =
+    params.discountPercent > 0 ? round2((params.itemsSubtotal * params.discountPercent) / 100) : 0;
+  const effectiveDiscount = round2(params.fixedDiscount + pctDiscount);
+  const preVat = Math.max(0, round2(params.itemsSubtotal + params.deliveryFee - effectiveDiscount));
+  const vat_amount = params.includeVat ? round2(preVat * 0.18) : 0;
+  const total_amount = round2(preVat + vat_amount);
+  return {
+    credit_discount: effectiveDiscount,
+    discount_percent: round2(params.discountPercent),
+    vat_amount,
+    total_amount,
+  };
 }
 
 router.get('/', requireAuth, async (req: AuthenticatedRequest, res) => {
@@ -128,6 +198,9 @@ router.get('/', requireAuth, async (req: AuthenticatedRequest, res) => {
         order_type: o.order_type,
         delivery_fee: Number(o.delivery_fee),
         credit_discount: Number(o.credit_discount),
+        discount_percent: Number(o.discount_percent ?? 0),
+        include_vat: Boolean(o.include_vat),
+        vat_amount: Number(o.vat_amount ?? 0),
         total_amount: Number(o.total_amount),
         paid_amount: Number(o.paid_amount),
         status: o.status,
@@ -196,25 +269,28 @@ router.post('/', requireAuth, async (req: AuthenticatedRequest, res) => {
     let recipient_name = '';
     let order_type: 'customer' | 'supplier' | 'charity' = 'customer';
     let delivery_fee = 0;
-    let credit_discount = 0;
+    let fixedDiscount = 0;
+    let discountPercent = 0;
+    let includeVat = false;
     let paid_amount = 0;
     let payment_method: 'cash' | 'bit' | 'transfer' = 'cash';
     let priceTier: 'supplier_price' | 'preorder_price' | 'customer_price' | 'charity' = 'customer_price';
 
     if (role === 'supplier') {
       user_id = req.user!.id;
-      const u = await db.get<{ name: string }>('SELECT name FROM users WHERE id = ?', [user_id]);
+      const u = await db.get<{ name: string; discount_percent?: number }>('SELECT name, discount_percent FROM users WHERE id = ?', [user_id]);
       recipient_name = u?.name || req.user!.name;
+      discountPercent = Number(u?.discount_percent ?? 0);
       order_type = 'supplier';
       priceTier = 'supplier_price';
     } else if (role === 'customer') {
       user_id = req.user!.id;
-      const u = await db.get<{ name: string }>('SELECT name FROM users WHERE id = ?', [user_id]);
+      const u = await db.get<{ name: string; discount_percent?: number }>('SELECT name, discount_percent FROM users WHERE id = ?', [user_id]);
       recipient_name = u?.name || req.user!.name;
+      discountPercent = Number(u?.discount_percent ?? 0);
       order_type = 'customer';
       priceTier = 'preorder_price';
     } else {
-      // Admin order creation
       const reqType = String(req.body?.order_type || 'customer');
       order_type = reqType === 'supplier' || reqType === 'charity' ? reqType : 'customer';
       user_id = req.body?.user_id ? Number(req.body.user_id) : null;
@@ -230,7 +306,9 @@ router.post('/', requireAuth, async (req: AuthenticatedRequest, res) => {
       }
 
       delivery_fee = Math.max(0, Number(req.body?.delivery_fee || 0));
-      credit_discount = Math.max(0, Number(req.body?.credit_discount || 0));
+      fixedDiscount = Math.max(0, Number(req.body?.credit_discount || 0));
+      discountPercent = Math.max(0, Math.min(100, Number(req.body?.discount_percent || 0)));
+      includeVat = Boolean(req.body?.include_vat);
       paid_amount = Math.max(0, Number(req.body?.paid_amount || 0));
       const pm = String(req.body?.payment_method || 'cash');
       payment_method = pm === 'bit' || pm === 'transfer' ? pm : 'cash';
@@ -238,7 +316,9 @@ router.post('/', requireAuth, async (req: AuthenticatedRequest, res) => {
       if (order_type === 'charity') {
         priceTier = 'charity';
         delivery_fee = 0;
-        credit_discount = 0;
+        fixedDiscount = 0;
+        discountPercent = 0;
+        includeVat = false;
         paid_amount = 0;
       } else if (order_type === 'supplier') {
         priceTier = 'supplier_price';
@@ -248,26 +328,64 @@ router.post('/', requireAuth, async (req: AuthenticatedRequest, res) => {
       }
     }
 
+    // טעינת מחירים אפקטיביים לתאריך ההזמנה + מחירים מותאמים אישית ללקוח/ספק
+    const effectivePrices = await resolveEffectivePrices(db, productMap, friday_date);
+    let userCustomPrices: Record<string, number> = {};
+    if (user_id) {
+      const uRow = await db.get<{ custom_prices_json?: string }>('SELECT custom_prices_json FROM users WHERE id = ?', [user_id]);
+      if (uRow?.custom_prices_json) {
+        try {
+          userCustomPrices = JSON.parse(uRow.custom_prices_json);
+        } catch {}
+      }
+    }
+
     let itemsSubtotal = 0;
     const preparedItems = validItems.map((it: { product_id: number; quantity: number }) => {
-      const prod = productMap.get(it.product_id)!;
-      const unitPrice = priceTier === 'charity' ? 0 : Number(prod[priceTier]);
+      const eff = effectivePrices.get(it.product_id)!;
+      const customOverride = userCustomPrices[String(it.product_id)];
+      const unitPrice =
+        priceTier === 'charity'
+          ? 0
+          : customOverride !== undefined && !Number.isNaN(Number(customOverride)) && Number(customOverride) >= 0
+          ? Number(customOverride)
+          : eff[priceTier];
       itemsSubtotal += unitPrice * it.quantity;
       return {
         product_id: it.product_id,
         quantity: it.quantity,
         unit_price_snapshot: unitPrice,
-        cost_price_snapshot: Number(prod.cost_price),
+        cost_price_snapshot: eff.cost_price,
       };
     });
 
-    const total_amount =
-      order_type === 'charity' ? 0 : Math.max(0, round2(itemsSubtotal + delivery_fee - credit_discount));
+    const computed = computeOrderTotals({
+      orderType: order_type,
+      itemsSubtotal,
+      deliveryFee: delivery_fee,
+      fixedDiscount,
+      discountPercent,
+      includeVat,
+    });
+    const { credit_discount, vat_amount, total_amount } = computed;
 
     const inserted = await db.run(
-      `INSERT INTO orders (user_id, recipient_name, friday_date, order_type, delivery_fee, credit_discount, total_amount, paid_amount, status, notes)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
-      [user_id, recipient_name, friday_date, order_type, delivery_fee, credit_discount, total_amount, paid_amount, notes]
+      `INSERT INTO orders (user_id, recipient_name, friday_date, order_type, delivery_fee, credit_discount, discount_percent, include_vat, vat_amount, total_amount, paid_amount, status, notes)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
+      [
+        user_id,
+        recipient_name,
+        friday_date,
+        order_type,
+        delivery_fee,
+        credit_discount,
+        computed.discount_percent,
+        db.isPostgres ? includeVat : includeVat ? 1 : 0,
+        vat_amount,
+        total_amount,
+        paid_amount,
+        notes,
+      ]
     );
 
     const orderId = inserted.lastInsertId!;
@@ -341,14 +459,26 @@ router.put('/:id', requireAuth, requireRole('admin'), async (req, res) => {
         : req.body?.delivery_fee !== undefined
         ? Math.max(0, Number(req.body.delivery_fee) || 0)
         : Number(existing.delivery_fee);
-    const credit_discount =
+    const fixedDiscount =
       existing.order_type === 'charity'
         ? 0
         : req.body?.credit_discount !== undefined
         ? Math.max(0, Number(req.body.credit_discount) || 0)
         : Number(existing.credit_discount);
+    const discountPercent =
+      existing.order_type === 'charity'
+        ? 0
+        : req.body?.discount_percent !== undefined
+        ? Math.max(0, Math.min(100, Number(req.body.discount_percent) || 0))
+        : Number(existing.discount_percent ?? 0);
+    const includeVat =
+      existing.order_type === 'charity'
+        ? false
+        : req.body?.include_vat !== undefined
+        ? Boolean(req.body.include_vat)
+        : Boolean(existing.include_vat);
 
-    let newTotal = Number(existing.total_amount);
+    let itemsSubtotal = 0;
 
     if (Array.isArray(req.body?.items)) {
       const validItems = req.body.items
@@ -370,6 +500,17 @@ router.put('/:id', requireAuth, requireRole('admin'), async (req, res) => {
         productIds
       );
       const productMap = new Map(dbProducts.map((p) => [Number(p.id), p]));
+      const effectivePrices = await resolveEffectivePrices(db, productMap, friday_date);
+
+      let userCustomPrices: Record<string, number> = {};
+      if (existing.user_id) {
+        const uRow = await db.get<{ custom_prices_json?: string }>('SELECT custom_prices_json FROM users WHERE id = ?', [existing.user_id]);
+        if (uRow?.custom_prices_json) {
+          try {
+            userCustomPrices = JSON.parse(uRow.custom_prices_json);
+          } catch {}
+        }
+      }
 
       const priceTier =
         existing.order_type === 'charity'
@@ -380,22 +521,24 @@ router.put('/:id', requireAuth, requireRole('admin'), async (req, res) => {
           ? 'customer_price'
           : 'preorder_price';
 
-      let subtotal = 0;
       const prepared = validItems.map((it: { product_id: number; quantity: number }) => {
-        const prod = productMap.get(it.product_id);
-        if (!prod) throw new Error(`מוצר #${it.product_id} לא נמצא`);
-        const unitPrice = priceTier === 'charity' ? 0 : Number(prod[priceTier]);
-        subtotal += unitPrice * it.quantity;
+        const eff = effectivePrices.get(it.product_id);
+        if (!eff) throw new Error(`מוצר #${it.product_id} לא נמצא`);
+        const customOverride = userCustomPrices[String(it.product_id)];
+        const unitPrice =
+          priceTier === 'charity'
+            ? 0
+            : customOverride !== undefined && !Number.isNaN(Number(customOverride)) && Number(customOverride) >= 0
+            ? Number(customOverride)
+            : eff[priceTier];
+        itemsSubtotal += unitPrice * it.quantity;
         return {
           product_id: it.product_id,
           quantity: it.quantity,
           unit_price_snapshot: unitPrice,
-          cost_price_snapshot: Number(prod.cost_price),
+          cost_price_snapshot: eff.cost_price,
         };
       });
-
-      newTotal =
-        existing.order_type === 'charity' ? 0 : Math.max(0, round2(subtotal + delivery_fee - credit_discount));
 
       await db.run('DELETE FROM order_items WHERE order_id = ?', [id]);
       for (const item of prepared) {
@@ -406,26 +549,46 @@ router.put('/:id', requireAuth, requireRole('admin'), async (req, res) => {
         );
       }
     } else if (existing.order_type !== 'charity') {
-      // Recompute total from existing items if only delivery_fee / credit_discount changed
       const curItems = await db.query<{ quantity: number; unit_price_snapshot: number }>(
         'SELECT quantity, unit_price_snapshot FROM order_items WHERE order_id = ?',
         [id]
       );
-      const subtotal = curItems.reduce(
+      itemsSubtotal = curItems.reduce(
         (s, it) => s + Number(it.quantity) * Number(it.unit_price_snapshot),
         0
       );
-      newTotal = Math.max(0, round2(subtotal + delivery_fee - credit_discount));
     }
+
+    const computed = computeOrderTotals({
+      orderType: existing.order_type,
+      itemsSubtotal,
+      deliveryFee: delivery_fee,
+      fixedDiscount,
+      discountPercent,
+      includeVat,
+    });
+    const newTotal = computed.total_amount;
 
     const oldTotal = Number(existing.total_amount);
     const totalDiff = round2(newTotal - oldTotal);
 
     await db.run(
       `UPDATE orders
-       SET recipient_name = ?, friday_date = ?, delivery_fee = ?, credit_discount = ?, total_amount = ?, status = ?, notes = ?
+       SET recipient_name = ?, friday_date = ?, delivery_fee = ?, credit_discount = ?, discount_percent = ?, include_vat = ?, vat_amount = ?, total_amount = ?, status = ?, notes = ?
        WHERE id = ?`,
-      [recipient_name, friday_date, delivery_fee, credit_discount, newTotal, status, notes, id]
+      [
+        recipient_name,
+        friday_date,
+        delivery_fee,
+        computed.credit_discount,
+        computed.discount_percent,
+        db.isPostgres ? includeVat : includeVat ? 1 : 0,
+        computed.vat_amount,
+        newTotal,
+        status,
+        notes,
+        id,
+      ]
     );
 
     // Adjust linked user balance if total changed

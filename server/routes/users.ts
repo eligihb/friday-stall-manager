@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import { getDb } from '../db.ts';
-import { requireAuth, requireRole, type UserRole } from '../auth.ts';
+import { requireAuth, requireRole, type AuthenticatedRequest, type UserRole } from '../auth.ts';
 
 const router = Router();
 
@@ -12,8 +12,34 @@ interface DbUser {
   email: string;
   role: UserRole;
   balance: number;
+  discount_percent?: number;
+  custom_prices_json?: string;
   notes: string;
   created_at: string;
+}
+
+function parseCustomPrices(raw?: string): Record<number, number> {
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object') return parsed as Record<number, number>;
+  } catch {}
+  return {};
+}
+
+function normalizeUser(u: DbUser) {
+  return {
+    id: Number(u.id),
+    name: u.name,
+    phone: u.phone || '',
+    email: u.email,
+    role: u.role,
+    balance: Number(u.balance ?? 0),
+    discount_percent: Number(u.discount_percent ?? 0),
+    custom_prices: parseCustomPrices(u.custom_prices_json),
+    notes: u.notes || '',
+    created_at: u.created_at,
+  };
 }
 
 router.use(requireAuth, requireRole('admin'));
@@ -22,20 +48,9 @@ router.get('/', async (_req, res) => {
   try {
     const db = await getDb();
     const rows = await db.query<DbUser>(
-      'SELECT id, name, phone, email, role, balance, notes, created_at FROM users ORDER BY role ASC, name ASC'
+      'SELECT id, name, phone, email, role, balance, discount_percent, custom_prices_json, notes, created_at FROM users ORDER BY role ASC, name ASC'
     );
-    res.json({
-      users: rows.map((u) => ({
-        id: Number(u.id),
-        name: u.name,
-        phone: u.phone || '',
-        email: u.email,
-        role: u.role,
-        balance: Number(u.balance ?? 0),
-        notes: u.notes || '',
-        created_at: u.created_at,
-      })),
-    });
+    res.json({ users: rows.map(normalizeUser) });
   } catch (err) {
     console.error('List users error:', err);
     res.status(500).json({ error: 'שגיאה בטעינת רשימת המשתמשים' });
@@ -52,6 +67,8 @@ router.post('/', async (req, res) => {
     const role: UserRole =
       roleRaw === 'admin' || roleRaw === 'supplier' ? roleRaw : 'customer';
     const balance = Number(req.body?.balance || 0);
+    const discount_percent = Math.max(0, Math.min(100, Number(req.body?.discount_percent || 0)));
+    const custom_prices_json = JSON.stringify(req.body?.custom_prices && typeof req.body.custom_prices === 'object' ? req.body.custom_prices : {});
     const notes = String(req.body?.notes || '').trim();
 
     if (!name) {
@@ -73,30 +90,19 @@ router.post('/', async (req, res) => {
 
     const hash = bcrypt.hashSync(password, 10);
     const created = await db.run(
-      `INSERT INTO users (name, phone, email, password_hash, role, balance, notes)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [name, phone, email, hash, role, Number.isNaN(balance) ? 0 : balance, notes]
+      `INSERT INTO users (name, phone, email, password_hash, role, balance, discount_percent, custom_prices_json, notes)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [name, phone, email, hash, role, Number.isNaN(balance) ? 0 : balance, discount_percent, custom_prices_json, notes]
     );
 
     const newUser = await db.get<DbUser>(
-      'SELECT id, name, phone, email, role, balance, notes, created_at FROM users WHERE id = ?',
+      'SELECT id, name, phone, email, role, balance, discount_percent, custom_prices_json, notes, created_at FROM users WHERE id = ?',
       [created.lastInsertId]
     );
 
     res.status(201).json({
       id: created.lastInsertId,
-      user: newUser
-        ? {
-            id: Number(newUser.id),
-            name: newUser.name,
-            phone: newUser.phone || '',
-            email: newUser.email,
-            role: newUser.role,
-            balance: Number(newUser.balance ?? 0),
-            notes: newUser.notes || '',
-            created_at: newUser.created_at,
-          }
-        : null,
+      user: newUser ? normalizeUser(newUser) : null,
     });
   } catch (err) {
     console.error('Create user error:', err);
@@ -123,17 +129,48 @@ router.put('/:id', async (req, res) => {
       req.body?.balance !== undefined && !Number.isNaN(Number(req.body.balance))
         ? Number(req.body.balance)
         : Number(existing.balance);
+    const discount_percent =
+      req.body?.discount_percent !== undefined && !Number.isNaN(Number(req.body.discount_percent))
+        ? Math.max(0, Math.min(100, Number(req.body.discount_percent)))
+        : Number(existing.discount_percent ?? 0);
+    const custom_prices_json =
+      req.body?.custom_prices !== undefined && typeof req.body.custom_prices === 'object'
+        ? JSON.stringify(req.body.custom_prices)
+        : existing.custom_prices_json || '{}';
     const notes = req.body?.notes !== undefined ? String(req.body.notes).trim() : existing.notes;
 
     await db.run(
-      `UPDATE users SET name = ?, phone = ?, role = ?, balance = ?, notes = ? WHERE id = ?`,
-      [name, phone, role, balance, notes, id]
+      `UPDATE users SET name = ?, phone = ?, role = ?, balance = ?, discount_percent = ?, custom_prices_json = ?, notes = ? WHERE id = ?`,
+      [name, phone, role, balance, discount_percent, custom_prices_json, notes, id]
     );
 
     res.json({ ok: true });
   } catch (err) {
     console.error('Update user error:', err);
     res.status(500).json({ error: 'שגיאה בעדכון פרטי המשתמש' });
+  }
+});
+
+router.delete('/:id', async (req: AuthenticatedRequest, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (req.user?.id === id) {
+      res.status(400).json({ error: 'לא ניתן למחוק את המשתמש המחובר כרגע' });
+      return;
+    }
+    const db = await getDb();
+    const existing = await db.get<DbUser>('SELECT * FROM users WHERE id = ?', [id]);
+    if (!existing) {
+      res.status(404).json({ error: 'המשתמש לא נמצא' });
+      return;
+    }
+    await db.run('UPDATE orders SET user_id = NULL WHERE user_id = ?', [id]);
+    await db.run('UPDATE transactions SET user_id = NULL WHERE user_id = ?', [id]);
+    await db.run('DELETE FROM users WHERE id = ?', [id]);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('Delete user error:', err);
+    res.status(500).json({ error: 'שגיאה במחיקת המשתמש' });
   }
 });
 

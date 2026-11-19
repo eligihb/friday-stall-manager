@@ -152,14 +152,19 @@ export function OrderCard({
           ))}
         </div>
 
-        {(order.delivery_fee > 0 || order.credit_discount > 0 || order.notes) && (
+        {(order.delivery_fee > 0 || order.credit_discount > 0 || order.include_vat || order.notes) && (
           <div className="mt-2.5 space-y-1 text-xs">
-            {(order.delivery_fee > 0 || order.credit_discount > 0) && (
+            {(order.delivery_fee > 0 || order.credit_discount > 0 || order.include_vat) && (
               <div className="flex flex-wrap gap-3 text-slate-500 tabular-nums">
                 {order.delivery_fee > 0 && <span>משלוח: {formatILS(order.delivery_fee)}</span>}
                 {order.credit_discount > 0 && (
                   <span className="text-emerald-700 font-semibold">
-                    זכות: -{formatILS(order.credit_discount)}
+                    הנחה/זכות: -{formatILS(order.credit_discount)}
+                  </span>
+                )}
+                {order.include_vat && (order.vat_amount ?? 0) > 0 && (
+                  <span className="text-slate-700 font-semibold">
+                    כולל מע״מ 18% ({formatILS(order.vat_amount ?? 0)})
                   </span>
                 )}
               </div>

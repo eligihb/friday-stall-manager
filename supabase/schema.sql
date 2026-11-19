@@ -8,6 +8,8 @@ CREATE TABLE IF NOT EXISTS users (
   password_hash TEXT NOT NULL,
   role TEXT NOT NULL CHECK (role IN ('admin', 'supplier', 'customer')) DEFAULT 'customer',
   balance NUMERIC(12, 2) NOT NULL DEFAULT 0,
+  discount_percent NUMERIC(5, 2) NOT NULL DEFAULT 0,
+  custom_prices_json TEXT NOT NULL DEFAULT '{}',
   notes TEXT DEFAULT '',
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -19,7 +21,20 @@ CREATE TABLE IF NOT EXISTS products (
   supplier_price NUMERIC(10, 2) NOT NULL DEFAULT 0,
   preorder_price NUMERIC(10, 2) NOT NULL DEFAULT 0,
   customer_price NUMERIC(10, 2) NOT NULL DEFAULT 0,
+  image_url TEXT DEFAULT NULL,
   is_active BOOLEAN NOT NULL DEFAULT TRUE
+);
+
+CREATE TABLE IF NOT EXISTS product_price_history (
+  id SERIAL PRIMARY KEY,
+  product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  effective_date DATE NOT NULL,
+  cost_price NUMERIC(10, 2) NOT NULL DEFAULT 0,
+  supplier_price NUMERIC(10, 2) NOT NULL DEFAULT 0,
+  preorder_price NUMERIC(10, 2) NOT NULL DEFAULT 0,
+  customer_price NUMERIC(10, 2) NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (product_id, effective_date)
 );
 
 CREATE TABLE IF NOT EXISTS orders (
@@ -30,6 +45,9 @@ CREATE TABLE IF NOT EXISTS orders (
   order_type TEXT NOT NULL CHECK (order_type IN ('customer', 'supplier', 'charity')),
   delivery_fee NUMERIC(10, 2) NOT NULL DEFAULT 0,
   credit_discount NUMERIC(10, 2) NOT NULL DEFAULT 0,
+  discount_percent NUMERIC(5, 2) NOT NULL DEFAULT 0,
+  include_vat BOOLEAN NOT NULL DEFAULT FALSE,
+  vat_amount NUMERIC(12, 2) NOT NULL DEFAULT 0,
   total_amount NUMERIC(12, 2) NOT NULL DEFAULT 0,
   paid_amount NUMERIC(12, 2) NOT NULL DEFAULT 0,
   status TEXT NOT NULL CHECK (status IN ('awaiting_approval', 'pending', 'ready', 'delivered')) DEFAULT 'pending',
@@ -110,7 +128,11 @@ INSERT INTO products (name, cost_price, supplier_price, preorder_price, customer
   ('פרנה שום', 3.00, 5.00, 6.00, 7.00, TRUE),
   ('סחוג', 8.00, 11.50, 13.00, 15.00, TRUE),
   ('חילבה 250 ג''', 5.00, 8.00, 10.00, 12.00, TRUE),
-  ('חילבה 500 ג''', 8.00, 14.00, 16.00, 20.00, TRUE)
+  ('חילבה 500 ג''', 8.00, 14.00, 16.00, 20.00, TRUE),
+  ('מארז זלביה', 7.00, 9.50, 12.00, 12.00, TRUE),
+  ('מארז לחם שום', 6.50, 9.50, 12.00, 12.00, TRUE),
+  ('מארז פיתה זעתר', 6.60, 9.99, 12.00, 12.00, TRUE),
+  ('מארז פיתה שומשום', 6.60, 9.99, 12.00, 12.00, TRUE)
 ON CONFLICT (name) DO NOTHING;
 
 -- הפעלת Row-Level Security (RLS) לסביבת Supabase

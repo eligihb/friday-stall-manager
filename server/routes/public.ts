@@ -9,6 +9,7 @@ interface DbProduct {
   cost_price: number;
   preorder_price: number;
   customer_price: number;
+  image_url?: string | null;
   is_active: number | boolean;
 }
 
@@ -34,7 +35,7 @@ router.get('/storefront', async (_req, res) => {
     const db = await getDb();
     const activeFilter = db.isPostgres ? 'is_active = TRUE' : 'is_active = 1';
     const products = await db.query<DbProduct>(
-      `SELECT id, name, preorder_price, customer_price, is_active FROM products WHERE ${activeFilter} ORDER BY id ASC`
+      `SELECT id, name, preorder_price, customer_price, image_url, is_active FROM products WHERE ${activeFilter} ORDER BY id ASC`
     );
     const settings = await db.get<DbSettings>('SELECT * FROM business_settings WHERE id = 1');
 
@@ -47,6 +48,7 @@ router.get('/storefront', async (_req, res) => {
         name: p.name,
         preorder_price: Number(p.preorder_price),
         customer_price: Number(p.customer_price),
+        image_url: p.image_url || null,
         is_active: true,
       })),
     });

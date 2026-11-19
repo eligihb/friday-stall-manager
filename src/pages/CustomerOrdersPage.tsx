@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import { Plus, Minus } from 'lucide-react';
 import { apiFetch } from '../lib/api';
+import { filterUsersByNameOrPhone, getPhoneLast4 } from '../lib/whatsappParser';
 import {
   formatFridayLabel,
   formatHebrewDate,
@@ -44,9 +45,12 @@ export function CustomerOrdersPage() {
   const [editingOrder, setEditingOrder] = useState<Order | null>(null);
   const [formFriday, setFormFriday] = useState(getNextFridayISO());
   const [selectedUserId, setSelectedUserId] = useState('');
+  const [userSearch, setUserSearch] = useState('');
   const [recipientName, setRecipientName] = useState('');
   const [deliveryFee, setDeliveryFee] = useState('0');
-  const [creditDiscount, setCreditDiscount] = useState('0');
+  const [discountMode, setDiscountMode] = useState<'fixed' | 'percent'>('fixed');
+  const [discountValue, setDiscountValue] = useState('0');
+  const [includeVat, setIncludeVat] = useState(false);
   const [paidAmount, setPaidAmount] = useState('0');
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('bit');
   const [notes, setNotes] = useState('');
@@ -96,9 +100,12 @@ export function CustomerOrdersPage() {
     setEditingOrder(null);
     setFormFriday(fridayDate || getNextFridayISO());
     setSelectedUserId('');
+    setUserSearch('');
     setRecipientName('');
     setDeliveryFee(String(bizSettings?.default_delivery_fee ?? 0));
-    setCreditDiscount('0');
+    setDiscountMode('fixed');
+    setDiscountValue('0');
+    setIncludeVat(false);
     setPaidAmount('0');
     setPaymentMethod('bit');
     setNotes('');
@@ -110,9 +117,17 @@ export function CustomerOrdersPage() {
     setEditingOrder(o);
     setFormFriday(o.friday_date);
     setSelectedUserId(o.user_id ? String(o.user_id) : '');
+    setUserSearch('');
     setRecipientName(o.recipient_name);
     setDeliveryFee(String(o.delivery_fee));
-    setCreditDiscount(String(o.credit_discount));
+    if ((o.discount_percent ?? 0) > 0) {
+      setDiscountMode('percent');
+      setDiscountValue(String(o.discount_percent));
+    } else {
+      setDiscountMode('fixed');
+      setDiscountValue(String(o.credit_discount));
+    }
+    setIncludeVat(Boolean(o.include_vat));
     setPaidAmount(String(o.paid_amount));
     setNotes(o.notes);
     const qMap: Record<number, number> = {};
@@ -123,14 +138,33 @@ export function CustomerOrdersPage() {
     setModalOpen(true);
   };
 
-  const draftTotal = useMemo(() => {
+  const selectedCustomer = useMemo(
+    () => users.find((u) => String(u.id) === selectedUserId) || null,
+    [users, selectedUserId]
+  );
+
+  const filteredCustomers = useMemo(
+    () => filterUsersByNameOrPhone(userSearch, users),
+    [userSearch, users]
+  );
+
+  const getCustomerUnitPrice = (p: AdminProduct) => {
+    const ov = selectedCustomer?.custom_prices?.[p.id];
+    return ov !== undefined && !Number.isNaN(Number(ov)) && Number(ov) >= 0 ? Number(ov) : p.preorder_price;
+  };
+
+  const draftTotals = useMemo(() => {
     let sub = 0;
     for (const p of products) {
       const q = quantities[p.id] || 0;
-      if (q > 0) sub += q * p.preorder_price;
+      if (q > 0) sub += q * getCustomerUnitPrice(p);
     }
-    return Math.max(0, sub + (Number(deliveryFee) || 0) - (Number(creditDiscount) || 0));
-  }, [products, quantities, deliveryFee, creditDiscount]);
+    const dv = Math.max(0, Number(discountValue) || 0);
+    const discILS = discountMode === 'percent' ? Math.round(((sub * Math.min(100, dv)) / 100) * 100) / 100 : dv;
+    const preVat = Math.max(0, Math.round((sub + (Number(deliveryFee) || 0) - discILS) * 100) / 100);
+    const vat = includeVat ? Math.round(preVat * 0.18 * 100) / 100 : 0;
+    return { total: Math.round((preVat + vat) * 100) / 100, vat, discILS };
+  }, [products, quantities, deliveryFee, discountMode, discountValue, includeVat, selectedCustomer]);
 
   const handleSaveOrder = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -146,6 +180,12 @@ export function CustomerOrdersPage() {
     setSaving(true);
     setError('');
     try {
+      const dv = Math.max(0, Number(discountValue) || 0);
+      const discPayload = {
+        credit_discount: discountMode === 'fixed' ? dv : 0,
+        discount_percent: discountMode === 'percent' ? Math.min(100, dv) : 0,
+        include_vat: includeVat,
+      };
       if (editingOrder) {
         await apiFetch(`/api/orders/${editingOrder.id}`, {
           method: 'PUT',
@@ -153,7 +193,7 @@ export function CustomerOrdersPage() {
             friday_date: formFriday,
             recipient_name: recipientName.trim(),
             delivery_fee: Number(deliveryFee) || 0,
-            credit_discount: Number(creditDiscount) || 0,
+            ...discPayload,
             notes: notes.trim(),
             price_tier: 'preorder_price',
             items,
@@ -169,7 +209,7 @@ export function CustomerOrdersPage() {
             user_id: selectedUserId ? Number(selectedUserId) : null,
             recipient_name: recipientName.trim(),
             delivery_fee: Number(deliveryFee) || 0,
-            credit_discount: Number(creditDiscount) || 0,
+            ...discPayload,
             paid_amount: Number(paidAmount) || 0,
             payment_method: paymentMethod,
             notes: notes.trim(),
@@ -346,20 +386,35 @@ export function CustomerOrdersPage() {
             </div>
             {!editingOrder && (
               <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1">לקוח רשום</label>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">
+                  לקוח רשום (שם / 4 ספרות)
+                </label>
+                <input
+                  type="text"
+                  value={userSearch}
+                  onChange={(e) => setUserSearch(e.target.value)}
+                  placeholder="חיפוש מהיר (1015)..."
+                  className="w-full px-3 py-1.5 mb-1.5 rounded-xl border border-[#E8D5BE] bg-white text-xs"
+                />
                 <select
                   value={selectedUserId}
                   onChange={(e) => {
                     setSelectedUserId(e.target.value);
                     const found = users.find((u) => String(u.id) === e.target.value);
-                    if (found) setRecipientName(found.name);
+                    if (found) {
+                      setRecipientName(found.name);
+                      if ((found.discount_percent ?? 0) > 0) {
+                        setDiscountMode('percent');
+                        setDiscountValue(String(found.discount_percent));
+                      }
+                    }
                   }}
-                  className="w-full px-3 py-2.5 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7]"
+                  className="w-full px-3 py-2 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7]"
                 >
                   <option value="">לקוח מזדמן</option>
-                  {users.map((u) => (
+                  {filteredCustomers.map((u) => (
                     <option key={u.id} value={u.id}>
-                      {u.name}
+                      {u.name} {u.phone ? `(${getPhoneLast4(u.phone)})` : ''}
                     </option>
                   ))}
                 </select>
@@ -394,7 +449,7 @@ export function CustomerOrdersPage() {
                     <div>
                       <div className="font-bold text-sm">{p.name}</div>
                       <div className="text-xs text-slate-500 tabular-nums">
-                        {formatILS(p.preorder_price)}
+                        {formatILS(getCustomerUnitPrice(p))}
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
@@ -444,15 +499,24 @@ export function CustomerOrdersPage() {
               />
             </div>
             <div>
-              <label className="block text-xs font-semibold text-slate-600 mb-1">זכות / הנחה (₪)</label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-xs font-semibold text-slate-600">הנחה</label>
+                <button
+                  type="button"
+                  onClick={() => setDiscountMode((m) => (m === 'fixed' ? 'percent' : 'fixed'))}
+                  className="text-[10px] font-extrabold px-1.5 py-0.5 rounded bg-amber-100 text-amber-900"
+                >
+                  {discountMode === 'fixed' ? '₪' : '%'}
+                </button>
+              </div>
               <input
                 type="number"
                 inputMode="decimal"
                 min="0"
                 step="0.5"
                 dir="ltr"
-                value={creditDiscount}
-                onChange={(e) => setCreditDiscount(e.target.value)}
+                value={discountValue}
+                onChange={(e) => setDiscountValue(e.target.value)}
                 className="w-full px-3 py-2 rounded-xl border border-[#E8D5BE] text-left tabular-nums font-bold"
               />
             </div>
@@ -489,6 +553,21 @@ export function CustomerOrdersPage() {
             )}
           </div>
 
+          <label className="inline-flex items-center gap-2.5 px-3 py-2 rounded-xl bg-[#FAF6F0] border border-[#E8D5BE] cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={includeVat}
+              onChange={(e) => setIncludeVat(e.target.checked)}
+              className="w-4 h-4 rounded accent-[#C85A17]"
+            />
+            <span className="text-xs font-bold text-slate-800">+ מע״מ 18%</span>
+            {includeVat && (
+              <span className="text-xs font-extrabold text-[#C85A17] tabular-nums">
+                ({formatILS(draftTotals.vat)})
+              </span>
+            )}
+          </label>
+
           <div>
             <label className="block text-xs font-semibold text-slate-600 mb-1">הערות</label>
             <input
@@ -502,7 +581,7 @@ export function CustomerOrdersPage() {
           <div className="bg-[#FAF6F0] rounded-2xl p-4 border border-[#E8D5BE] flex items-center justify-between">
             <span className="font-bold text-slate-700">סה״כ להזמנה:</span>
             <span className="font-extrabold text-2xl text-[#C85A17] tabular-nums">
-              {formatILS(draftTotal)}
+              {formatILS(draftTotals.total)}
             </span>
           </div>
 
