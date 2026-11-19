@@ -1129,7 +1129,7 @@ export function ProductsCatalog() {
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs font-semibold text-slate-600 mb-1">עלות ייצור/רכש (₪)</label>
+              <label className="block text-xs font-semibold text-slate-600 mb-1">עלות רכש מהמאפייה (₪)</label>
               <input
                 type="number"
                 inputMode="decimal"

@@ -58,7 +58,7 @@ router.get('/storefront', async (_req, res) => {
   }
 });
 
-// קליטת הזמנת לקוח ציבורית ללא הרשמה -> נשמרת בסטטוס awaiting_approval (לא נספרת באפייה עד אישור מנהל)
+// קליטת הזמנת לקוח ציבורית ללא הרשמה -> נשמרת בסטטוס awaiting_approval (לא נספרת ברכש מהמאפייה עד אישור מנהל)
 router.post('/orders', async (req, res) => {
   try {
     const db = await getDb();

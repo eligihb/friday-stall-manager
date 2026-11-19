@@ -70,7 +70,7 @@ export function AdminDashboard({ onNavigate }: AdminDashboardProps) {
         apiFetch<{ items: FridayInventoryItem[] }>(`/api/inventory?friday_date=${fridayDate}`),
         apiFetch<{ settings: BusinessSettings }>('/api/settings'),
       ]);
-      // הזמנות ממתינות לאישור אינן נספרות בהזמנות פעילות ובאפייה עד לאישור המנהל
+      // הזמנות ממתינות לאישור אינן נספרות בהזמנות פעילות ובסיכום הרכש מהמאפייה עד לאישור המנהל
       setOrders(ordRes.orders.filter((o) => o.status !== 'awaiting_approval'));
       setAwaitingOrders(awaitRes.orders);
       setUsers(usrRes.users);
@@ -228,7 +228,7 @@ export function AdminDashboard({ onNavigate }: AdminDashboardProps) {
         <FridaySelector value={fridayDate} onChange={setFridayDate} label="תאריך שישי:" />
       </div>
 
-      {/* באנר בולט: הזמנות לקוחות ממתינות לאישור (אנטי-ספאם — לא נכללות בסיכום האפייה עד לאישור) */}
+      {/* באנר בולט: הזמנות לקוחות ממתינות לאישור (אנטי-ספאם — לא נכללות בסיכום הרכש מהמאפייה עד לאישור) */}
       {awaitingOrders.length > 0 && (
         <div className="bg-gradient-to-l from-amber-50 via-[#FFF7ED] to-red-50/70 rounded-3xl border-2 border-[#C85A17]/60 shadow-card p-4 sm:p-5 space-y-3.5">
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -385,7 +385,7 @@ export function AdminDashboard({ onNavigate }: AdminDashboardProps) {
         />
       </div>
 
-      {/* ריכוז ייצור והכנה — רשימה אנכית עם כפתורי +/- גדולים במובייל וטבלה בדסקטופ */}
+      {/* סיכום רכש מהמאפייה וליקוט — רשימה אנכית עם כפתורי +/- גדולים במובייל וטבלה בדסקטופ */}
       <div className="bg-white rounded-3xl border border-[#E8D5BE] shadow-soft overflow-hidden">
         <div className="px-4 sm:px-5 py-4 border-b border-[#F3E9DC] flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2.5">
@@ -398,7 +398,7 @@ export function AdminDashboard({ onNavigate }: AdminDashboardProps) {
                 סה״כ לרכש: <strong className="text-[#8A330B]">{kpis.totalUnitsToPrepare}</strong> יח׳ · עלות מזומן למאפייה:{' '}
                 <strong>{formatILS(kpis.totalProductionCost)}</strong>
                 <span className="block sm:inline sm:mr-1.5 text-[11px] text-slate-400">
-                  (הפריטים נרכשים מהמאפייה במזומן, למעט הכנה עצמית קלה כגון רוטב סלסה / כבד קצוץ)
+                  (הפריטים נרכשים מהמאפייה במזומן, למעט תוספות ביתיות כגון רוטב סלסה / כבד קצוץ)
                 </span>
               </p>
             </div>

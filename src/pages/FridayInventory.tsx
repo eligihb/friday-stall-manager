@@ -80,9 +80,9 @@ export function FridayInventory() {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h2 className="font-serif text-3xl font-bold text-slateink-800">היערכות ומלאי שישי</h2>
+          <h2 className="font-serif text-3xl font-bold text-slateink-800">סיכום רכש מהמאפייה וליקוט</h2>
           <p className="text-sm text-slate-600 mt-1">
-            ריכוז אוטומטי של כלל ההזמנות (ספקים, לקוחות, חסד) + הגדרת אקסטרה למכירה חופשית בדוכן.
+            ריכוז אוטומטי של כלל ההזמנות (ספקים, לקוחות, מסובסדות) + הגדרת אקסטרה למכירה חופשית בדוכן.
           </p>
         </div>
         <FridaySelector value={fridayDate} onChange={setFridayDate} />
@@ -98,18 +98,18 @@ export function FridayInventory() {
           <div className="text-2xl font-extrabold text-[#C85A17] mt-1.5">{totals.extra}</div>
         </div>
         <div className="bg-white rounded-2xl p-4 border border-[#E8D5BE]/80 shadow-soft">
-          <div className="text-xs font-semibold text-slate-500">סה״כ לאפייה והכנה</div>
+          <div className="text-xs font-semibold text-slate-500">סה״כ לרכש מהמאפייה</div>
           <div className="text-2xl font-extrabold text-emerald-700 mt-1.5">{totals.bake}</div>
         </div>
         <div className="bg-white rounded-2xl p-4 border border-[#E8D5BE]/80 shadow-soft">
-          <div className="text-xs font-semibold text-slate-500">עלות חומרי גלם משוערת</div>
+          <div className="text-xs font-semibold text-slate-500">עלות רכש משוערת</div>
           <div className="text-2xl font-extrabold text-slate-900 mt-1.5">{formatILS(totals.estCost)}</div>
         </div>
       </div>
 
       {loading ? (
         <div className="bg-white rounded-2xl p-10 text-center text-slate-400 border border-[#E8D5BE]">
-          טוען גיליון אפייה...
+          טוען סיכום רכש וליקוט...
         </div>
       ) : (
         <div className="bg-white rounded-2xl border border-[#E8D5BE]/80 shadow-soft overflow-hidden">
@@ -122,7 +122,7 @@ export function FridayInventory() {
                   <th className="text-center py-3.5 px-3 font-bold">לקוחות</th>
                   <th className="text-center py-3.5 px-3 font-bold">מסובסדות</th>
                   <th className="text-center py-3.5 px-3 font-bold">אקסטרה לדוכן</th>
-                  <th className="text-center py-3.5 px-4 font-bold bg-[#FFF7ED]">סה״כ להכנה</th>
+                  <th className="text-center py-3.5 px-4 font-bold bg-[#FFF7ED]">סה״כ לליקוט ורכש</th>
                   <th className="text-center py-3.5 px-3 font-bold">שמירה</th>
                 </tr>
               </thead>

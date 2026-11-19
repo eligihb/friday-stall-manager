@@ -526,167 +526,58 @@ async function initializeSchemaAndSeed(db: DbClient): Promise<void> {
     }
   }
 
-  // Seed default demo users & sample operational data if users table is empty
+  // זריעת חשבונות בסיס בלבד (מנהל + ספקים, ללא נתוני דמו של הזמנות/לקוחות/תנועות)
   const existingUsers = await db.query<{ count: number | string }>('SELECT COUNT(*) as count FROM users');
   if (Number(existingUsers[0]?.count ?? 0) === 0) {
     const adminHash = bcrypt.hashSync('123456', 10);
     const supplierHash = bcrypt.hashSync('123456', 10);
-    const customerHash = bcrypt.hashSync('123456', 10);
 
     await db.run(
       `INSERT INTO users (name, phone, email, password_hash, role, balance, notes)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      ['יגאל מנהל', '050-5551000', 'admin@teimani.co.il', adminHash, 'admin', 0, 'מנהל ראשי — המטבח התימני']
+      ['יגאל מנהל', '050-5551000', 'admin@teimani.co.il', adminHash, 'admin', 0, 'מנהל ראשי — דוכן שישי תימני']
     );
 
-    const sup1 = await db.run(
+    await db.run(
       `INSERT INTO users (name, phone, email, password_hash, role, balance, notes)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      ['מעדניית ראש העין', '052-4442211', 'supplier@teimani.co.il', supplierHash, 'supplier', -485.0, 'ספק קבוע — משלוח בשישי ב-06:30']
+      ['מעדניית ראש העין', '052-4442211', 'supplier@teimani.co.il', supplierHash, 'supplier', 0, 'ספק קבוע — משלוח בשישי ב-06:30']
     );
 
-    const sup2 = await db.run(
+    await db.run(
       `INSERT INTO users (name, phone, email, password_hash, role, balance, notes)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      ['מינימרקט השכונה', '054-8883322', 'market@teimani.co.il', supplierHash, 'supplier', -210.0, 'העברה בנקאית בתחילת שבוע']
+      ['מינימרקט השכונה', '054-8883322', 'market@teimani.co.il', supplierHash, 'supplier', 0, 'העברה בנקאית בתחילת שבוע']
     );
+  }
 
-    const cust1 = await db.run(
-      `INSERT INTO users (name, phone, email, password_hash, role, balance, notes)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      ['דנה כהן', '053-7779911', 'customer@teimani.co.il', customerHash, 'customer', 0, 'לקוחה קבועה — איסוף מהדוכן ב-10:00']
+  // מיגרציה חד-פעמית v1.9.1: ניקוי מלא של נתוני דמו (הזמנות, לקוחות דמו, תנועות, מלאי ופחת)
+  // תוך שמירה מלאה על קטלוג המוצרים, היסטוריית המחירים, חשבון המנהל וחשבונות הספקים
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS app_migrations (
+      key TEXT PRIMARY KEY,
+      applied_at TEXT NOT NULL
     );
-
-    // Seed sample Friday orders, fixed expenses, transactions, and stall inventory
-    const upcomingFriday = getNextFridayDate();
-    const products = await db.query<{
-      id: number;
-      name: string;
-      cost_price: number;
-      supplier_price: number;
-      preorder_price: number;
-      customer_price: number;
-    }>('SELECT * FROM products ORDER BY id ASC');
-
-    const byName = new Map(products.map((p) => [p.name, p]));
-    const lachuch = byName.get('לחוח');
-    const kubana = byName.get('קובנה');
-    const jachnun = byName.get("ג'חנון");
-    const schug = byName.get('סחוג');
-    const saluf = byName.get('סאלוף');
-    const hilbe250 = byName.get("חילבה 250 ג'");
-
-    if (lachuch && kubana && jachnun && schug && saluf && hilbe250) {
-      // Sample Supplier Order
-      const supTotal = 30 * Number(lachuch.supplier_price) + 10 * Number(kubana.supplier_price) + 12 * Number(jachnun.supplier_price);
-      const ord1 = await db.run(
-        `INSERT INTO orders (user_id, recipient_name, friday_date, order_type, delivery_fee, credit_discount, total_amount, paid_amount, status, notes)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [sup1.lastInsertId, 'מעדניית ראש העין', upcomingFriday, 'supplier', 0, 0, supTotal, 0, 'pending', 'ארוז בארגזי חלוקה']
-      );
-      if (ord1.lastInsertId) {
-        await db.run(
-          `INSERT INTO order_items (order_id, product_id, quantity, unit_price_snapshot, cost_price_snapshot) VALUES (?, ?, ?, ?, ?)`,
-          [ord1.lastInsertId, lachuch.id, 30, lachuch.supplier_price, lachuch.cost_price]
-        );
-        await db.run(
-          `INSERT INTO order_items (order_id, product_id, quantity, unit_price_snapshot, cost_price_snapshot) VALUES (?, ?, ?, ?, ?)`,
-          [ord1.lastInsertId, kubana.id, 10, kubana.supplier_price, kubana.cost_price]
-        );
-        await db.run(
-          `INSERT INTO order_items (order_id, product_id, quantity, unit_price_snapshot, cost_price_snapshot) VALUES (?, ?, ?, ?, ?)`,
-          [ord1.lastInsertId, jachnun.id, 12, jachnun.supplier_price, jachnun.cost_price]
-        );
-      }
-
-      // Sample Customer Preorder
-      const custTotal = 6 * Number(lachuch.preorder_price) + 2 * Number(kubana.preorder_price) + 1 * Number(schug.preorder_price) + 1 * Number(hilbe250.preorder_price);
-      const ord2 = await db.run(
-        `INSERT INTO orders (user_id, recipient_name, friday_date, order_type, delivery_fee, credit_discount, total_amount, paid_amount, status, notes)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [cust1.lastInsertId, 'דנה כהן', upcomingFriday, 'customer', 0, 0, custTotal, custTotal, 'ready', 'שולם בפייבוקס מראש']
-      );
-      if (ord2.lastInsertId) {
-        await db.run(
-          `INSERT INTO order_items (order_id, product_id, quantity, unit_price_snapshot, cost_price_snapshot) VALUES (?, ?, ?, ?, ?)`,
-          [ord2.lastInsertId, lachuch.id, 6, lachuch.preorder_price, lachuch.cost_price]
-        );
-        await db.run(
-          `INSERT INTO order_items (order_id, product_id, quantity, unit_price_snapshot, cost_price_snapshot) VALUES (?, ?, ?, ?, ?)`,
-          [ord2.lastInsertId, kubana.id, 2, kubana.preorder_price, kubana.cost_price]
-        );
-        await db.run(
-          `INSERT INTO order_items (order_id, product_id, quantity, unit_price_snapshot, cost_price_snapshot) VALUES (?, ?, ?, ?, ?)`,
-          [ord2.lastInsertId, schug.id, 1, schug.preorder_price, schug.cost_price]
-        );
-        await db.run(
-          `INSERT INTO order_items (order_id, product_id, quantity, unit_price_snapshot, cost_price_snapshot) VALUES (?, ?, ?, ?, ?)`,
-          [ord2.lastInsertId, hilbe250.id, 1, hilbe250.preorder_price, hilbe250.cost_price]
-        );
-      }
-
-      // Sample Subsidized Order (הכולל)
-      const kollel = await db.get<{ id: number }>("SELECT id FROM subsidized_entities WHERE name = 'הכולל'");
-      const ord3 = await db.run(
-        `INSERT INTO orders (user_id, subsidized_entity_id, recipient_name, friday_date, order_type, delivery_fee, credit_discount, total_amount, paid_amount, status, notes)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [null, kollel?.id ?? null, 'הכולל', upcomingFriday, 'charity', 0, 0, 0, 0, 'pending', 'חבילת שישי מסובסדת קבועה']
-      );
-      if (ord3.lastInsertId) {
-        await db.run(
-          `INSERT INTO order_items (order_id, product_id, quantity, unit_price_snapshot, cost_price_snapshot) VALUES (?, ?, ?, ?, ?)`,
-          [ord3.lastInsertId, saluf.id, 15, 0, saluf.cost_price]
-        );
-        await db.run(
-          `INSERT INTO order_items (order_id, product_id, quantity, unit_price_snapshot, cost_price_snapshot) VALUES (?, ?, ?, ?, ?)`,
-          [ord3.lastInsertId, kubana.id, 3, 0, kubana.cost_price]
-        );
-      }
-
-      // Sample Friday stall extra inventory
-      const stallDefaults = [
-        [lachuch.id, 40],
-        [saluf.id, 35],
-        [kubana.id, 12],
-        [jachnun.id, 25],
-        [schug.id, 15],
-        [hilbe250.id, 10],
-      ];
-      for (const [prodId, qty] of stallDefaults) {
-        await db.run(
-          `INSERT INTO friday_inventory (friday_date, product_id, extra_stall_qty) VALUES (?, ?, ?)`,
-          [upcomingFriday, prodId, qty]
-        );
-      }
-
-      // Sample Fixed Expenses
-      await db.run(
-        `INSERT INTO fixed_expenses (name, amount, frequency, payment_method, is_active) VALUES (?, ?, ?, ?, ?)`,
-        ['שכירות דוכן שוק שישי', 450, 'weekly', 'transfer', db.isPostgres ? true : 1]
-      );
-      await db.run(
-        `INSERT INTO fixed_expenses (name, amount, frequency, payment_method, is_active) VALUES (?, ?, ?, ?, ?)`,
-        ['שכירות מטבח מאפייה', 4200, 'monthly', 'transfer', db.isPostgres ? true : 1]
-      );
-      await db.run(
-        `INSERT INTO fixed_expenses (name, amount, frequency, payment_method, is_active) VALUES (?, ?, ?, ?, ?)`,
-        ['עוזר דוכן ליום שישי', 500, 'weekly', 'cash', db.isPostgres ? true : 1]
-      );
-
-      // Sample Transactions
-      const todayStr = new Date().toISOString().slice(0, 10);
-      await db.run(
-        `INSERT INTO transactions (date, friday_date, type, category, payment_method, amount, user_id, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        [todayStr, upcomingFriday, 'income', 'תשלום הזמנה מוקדמת', 'paybox', custTotal, cust1.lastInsertId, 'דנה כהן — הזמנה מוקדמת']
-      );
-      await db.run(
-        `INSERT INTO transactions (date, friday_date, type, category, payment_method, amount, user_id, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        [todayStr, upcomingFriday, 'income', 'סגירת חוב ספק', 'transfer', 650, sup2.lastInsertId, 'תשלום משבוע שעבר']
-      );
-      await db.run(
-        `INSERT INTO transactions (date, friday_date, type, category, payment_method, amount, user_id, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        [todayStr, upcomingFriday, 'expense', 'דלק / נסיעות', 'cash', 120, null, 'נסיעת שישי למאפייה ולדוכן']
-      );
-    }
+  `);
+  const purgeDone = await db.get<{ key: string }>(
+    "SELECT key FROM app_migrations WHERE key = 'purge_demo_v191'"
+  );
+  if (!purgeDone) {
+    await db.run('DELETE FROM order_items');
+    await db.run('DELETE FROM orders');
+    await db.run('DELETE FROM transactions');
+    await db.run('DELETE FROM friday_inventory');
+    await db.run('DELETE FROM waste_logs');
+    await db.run('DELETE FROM subsidized_payments');
+    await db.run('DELETE FROM fixed_expenses');
+    await db.run("DELETE FROM users WHERE role = 'customer'");
+    await db.run('UPDATE users SET balance = 0');
+    await db.run(
+      "UPDATE users SET notes = REPLACE(notes, 'המטבח התימני', 'דוכן שישי תימני') WHERE notes LIKE '%המטבח התימני%'"
+    );
+    await db.run(
+      'INSERT INTO app_migrations (key, applied_at) VALUES (?, ?)',
+      ['purge_demo_v191', new Date().toISOString()]
+    );
   }
 }

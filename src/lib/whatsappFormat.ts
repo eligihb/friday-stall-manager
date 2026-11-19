@@ -30,7 +30,7 @@ export function formatProductionWhatsApp(
   lines.push(`━━━━━━━━━━━━━━━━`);
   lines.push(`📦 סה״כ יחידות לרכש מהמאפייה: *${totalUnits}*`);
   lines.push(`💵 עלות משוערת במזומן למאפייה: *${formatILS(totalCost)}*`);
-  lines.push(`ℹ️ הערה: למעט פריטים בהכנה עצמית קלה (כגון רוטב סלסה / כבד קצוץ).`);
+  lines.push(`ℹ️ הערה: למעט תוספות ביתיות (כגון רוטב סלסה / כבד קצוץ).`);
   return lines.join('\n');
 }
 

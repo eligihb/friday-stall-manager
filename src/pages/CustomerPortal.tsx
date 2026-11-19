@@ -9,6 +9,7 @@ import {
   ORDER_STATUS_LABELS,
 } from '../lib/format';
 import { FridaySelector } from '../components/FridaySelector';
+import { getPaymentVisualState } from '../components/SupplierInvoiceSheet';
 import type { Order, Product } from '../types';
 
 export function CustomerPortal() {
@@ -90,7 +91,7 @@ export function CustomerPortal() {
         </div>
         <h2 className="font-serif text-3xl font-bold">שלום {user.name}!</h2>
         <p className="text-sm text-amber-100/90 mt-1.5 max-w-xl">
-          כל המאפים שלנו נאפים טריים לפנות בוקר ביום שישי. בהזמנה מוקדמת דרך האתר נהנים ממחיר מוזל ושמירה מראש בדוכן.
+          המאפים הטריים שלנו מגיעים ישירות מהמאפייה לפנות בוקר ביום שישי. בהזמנה מוקדמת דרך האתר נהנים ממחיר מוזל ושמירה מראש בדוכן.
         </p>
       </div>
 
@@ -211,13 +212,20 @@ export function CustomerPortal() {
           <div className="py-8 text-center text-slate-400 text-sm">עדיין לא ביצעת הזמנות.</div>
         ) : (
           <div className="space-y-3">
-            {orders.map((o) => (
+            {orders.map((o) => {
+              const payState = getPaymentVisualState(o);
+              return (
               <div key={o.id} className="rounded-2xl border border-[#E8D5BE]/80 bg-[#FDFBF7] p-4">
-                <div className="flex items-center justify-between gap-2 mb-2.5">
+                <div className="flex flex-wrap items-center justify-between gap-2 mb-2.5">
                   <div className="font-bold text-slate-900">{formatFridayLabel(o.friday_date)}</div>
-                  <span className="px-3 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800">
-                    {ORDER_STATUS_LABELS[o.status]}
-                  </span>
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className={`px-2.5 py-1 rounded-full text-xs font-extrabold border ${payState.badgeCls}`}>
+                      {payState.label}
+                    </span>
+                    <span className="px-3 py-1 rounded-full text-xs font-bold bg-amber-100 text-amber-900">
+                      {ORDER_STATUS_LABELS[o.status]}
+                    </span>
+                  </div>
                 </div>
                 <div className="space-y-1 text-xs text-slate-700 tabular-nums">
                   {o.items.map((it) => (
@@ -234,7 +242,8 @@ export function CustomerPortal() {
                   <span>{formatILS(o.total_amount)}</span>
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>

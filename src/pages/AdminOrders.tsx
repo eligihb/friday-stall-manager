@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { Plus, Trash2, CheckCircle2, Clock, Truck, X, CreditCard } from 'lucide-react';
+import { Plus, Trash2, CheckCircle2, Clock, Truck, X, CreditCard, Inbox } from 'lucide-react';
 import { apiFetch } from '../lib/api';
 import {
   formatILS,
@@ -9,6 +9,7 @@ import {
   PAYMENT_METHOD_LABELS,
 } from '../lib/format';
 import { FridaySelector } from '../components/FridaySelector';
+import { getPaymentVisualState } from '../components/SupplierInvoiceSheet';
 import type { AdminProduct, Order, OrderStatus, OrderType, PaymentMethod, User } from '../types';
 
 export function AdminOrders() {
@@ -167,6 +168,8 @@ export function AdminOrders() {
       return 'bg-emerald-100 text-emerald-800 border-emerald-200';
     if (status === 'ready')
       return 'bg-amber-100 text-amber-800 border-amber-200';
+    if (status === 'received')
+      return 'bg-sky-100 text-sky-800 border-sky-200';
     return 'bg-slate-100 text-slate-700 border-slate-200';
   };
 
@@ -239,6 +242,7 @@ export function AdminOrders() {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           {orders.map((o) => {
             const unpaid = Math.max(0, o.total_amount - o.paid_amount);
+            const payState = getPaymentVisualState(o);
             return (
               <div
                 key={o.id}
@@ -255,9 +259,16 @@ export function AdminOrders() {
                       </div>
                       <div className="text-xs text-slate-400 mt-0.5 tabular-nums">הזמנה #{o.id}</div>
                     </div>
-                    <span className={`px-2.5 py-1 rounded-full text-xs font-bold border ${statusBadge(o.status)}`}>
-                      {ORDER_STATUS_LABELS[o.status]}
-                    </span>
+                    <div className="flex flex-col items-end gap-1">
+                      <span className={`px-2.5 py-1 rounded-full text-xs font-bold border ${statusBadge(o.status)}`}>
+                        {ORDER_STATUS_LABELS[o.status]}
+                      </span>
+                      {o.order_type !== 'charity' && (
+                        <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-extrabold border ${payState.badgeCls}`}>
+                          {payState.label}
+                        </span>
+                      )}
+                    </div>
                   </div>
 
                   {/* פירוט פריטים */}
@@ -314,11 +325,12 @@ export function AdminOrders() {
                   </div>
 
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="inline-flex rounded-xl border border-[#E8D5BE] overflow-hidden text-xs font-bold">
+                    <div className="inline-flex flex-wrap rounded-xl border border-[#E8D5BE] overflow-hidden text-xs font-bold">
                       {(
                         [
                           ['pending', 'ממתין', Clock],
-                          ['ready', 'מוכן', CheckCircle2],
+                          ['received', 'התקבל', Inbox],
+                          ['ready', 'מוכן למסירה', CheckCircle2],
                           ['delivered', 'נמסר', Truck],
                         ] as const
                       ).map(([st, lbl, Icon]) => (

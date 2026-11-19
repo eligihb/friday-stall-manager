@@ -246,17 +246,17 @@ export function AuthScreen({ onBackToStorefront }: AuthScreenProps) {
               </button>
             </form>
 
-            {/* כניסה מהירה להדגמת התפקידים */}
+            {/* כניסה מהירה לחשבונות מנהל וספק */}
             <div className="mt-7 pt-6 border-t border-[#F3E9DC]">
               <p className="text-xs font-semibold text-slate-500 mb-3 text-center">
-                כניסה מהירה לחשבונות הדגמה (סיסמה: 123456)
+                כניסה מהירה למנהל או ספק (סיסמה: 123456)
               </p>
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-2 gap-2.5">
                 <button
                   type="button"
                   disabled={submitting}
                   onClick={() => quickLogin('admin@teimani.co.il')}
-                  className="flex flex-col items-center gap-1.5 p-2.5 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] hover:border-[#C85A17] hover:bg-[#FFF7ED] transition-colors"
+                  className="min-h-[48px] flex flex-col items-center justify-center gap-1 p-2.5 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] hover:border-[#C85A17] hover:bg-[#FFF7ED] transition-colors"
                 >
                   <ShieldCheck className="w-4 h-4 text-[#C85A17]" />
                   <span className="text-xs font-bold text-slate-800">מנהל</span>
@@ -265,19 +265,10 @@ export function AuthScreen({ onBackToStorefront }: AuthScreenProps) {
                   type="button"
                   disabled={submitting}
                   onClick={() => quickLogin('supplier@teimani.co.il')}
-                  className="flex flex-col items-center gap-1.5 p-2.5 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] hover:border-[#C85A17] hover:bg-[#FFF7ED] transition-colors"
+                  className="min-h-[48px] flex flex-col items-center justify-center gap-1 p-2.5 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] hover:border-[#C85A17] hover:bg-[#FFF7ED] transition-colors"
                 >
                   <Store className="w-4 h-4 text-amber-700" />
                   <span className="text-xs font-bold text-slate-800">ספק</span>
-                </button>
-                <button
-                  type="button"
-                  disabled={submitting}
-                  onClick={() => quickLogin('customer@teimani.co.il')}
-                  className="flex flex-col items-center gap-1.5 p-2.5 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] hover:border-[#C85A17] hover:bg-[#FFF7ED] transition-colors"
-                >
-                  <ShoppingBag className="w-4 h-4 text-emerald-700" />
-                  <span className="text-xs font-bold text-slate-800">לקוח</span>
                 </button>
               </div>
             </div>

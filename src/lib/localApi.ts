@@ -79,6 +79,7 @@ interface LocalDb {
   subsidized_entities?: StoredSubsidizedEntity[];
   subsidized_payments?: StoredSubsidizedPayment[];
   waste_logs?: StoredWasteLog[];
+  demoPurgedV191?: boolean;
   settings: BusinessSettings;
 }
 
@@ -95,7 +96,6 @@ function round2(n: number): number {
 }
 
 function createInitialDb(): LocalDb {
-  const upcomingFriday = getNextFridayISO();
   const today = new Date().toISOString().slice(0, 10);
 
   const products: AdminProduct[] = [
@@ -121,24 +121,20 @@ function createInitialDb(): LocalDb {
   ];
 
   const users: StoredUser[] = [
-    { id: 1, name: 'יגאל מנהל', phone: '050-5551000', email: 'admin@teimani.co.il', password: '123456', role: 'admin', balance: 0, notes: 'מנהל ראשי — המטבח התימני', created_at: today },
-    { id: 2, name: 'מעדניית ראש העין', phone: '052-4442211', email: 'supplier@teimani.co.il', password: '123456', role: 'supplier', balance: -485, notes: 'ספק קבוע — משלוח בשישי ב-06:30', created_at: today },
-    { id: 3, name: 'מינימרקט השכונה', phone: '054-8883322', email: 'market@teimani.co.il', password: '123456', role: 'supplier', balance: -210, notes: 'העברה בנקאית בתחילת שבוע', created_at: today },
-    { id: 4, name: 'דנה כהן', phone: '053-7779911', email: 'customer@teimani.co.il', password: '123456', role: 'customer', balance: 0, notes: 'לקוחה קבועה — איסוף מהדוכן ב-10:00', created_at: today },
+    { id: 1, name: 'יגאל מנהל', phone: '050-5551000', email: 'admin@teimani.co.il', password: '123456', role: 'admin', balance: 0, notes: 'מנהל ראשי — דוכן שישי תימני', created_at: today },
+    { id: 2, name: 'מעדניית ראש העין', phone: '052-4442211', email: 'supplier@teimani.co.il', password: '123456', role: 'supplier', balance: 0, notes: 'ספק קבוע — משלוח בשישי ב-06:30', created_at: today },
+    { id: 3, name: 'מינימרקט השכונה', phone: '054-8883322', email: 'market@teimani.co.il', password: '123456', role: 'supplier', balance: 0, notes: 'העברה בנקאית בתחילת שבוע', created_at: today },
   ];
-
-  const supTotal = 30 * 3.7 + 10 * 29 + 12 * 7; // 485
-  const custTotal = 6 * 4 + 2 * 30 + 1 * 13 + 1 * 10; // 107
 
   return {
     nextIds: {
-      users: 5,
+      users: 4,
       products: 20,
       price_history: 20,
-      orders: 4,
-      order_items: 10,
-      transactions: 4,
-      fixed_expenses: 4,
+      orders: 1,
+      order_items: 1,
+      transactions: 1,
+      fixed_expenses: 1,
       subsidized_entities: 4,
       subsidized_payments: 1,
     },
@@ -161,40 +157,12 @@ function createInitialDb(): LocalDb {
     ],
     subsidized_payments: [],
     waste_logs: [],
-    orders: [
-      { id: 1, user_id: 2, recipient_name: 'מעדניית ראש העין', friday_date: upcomingFriday, order_type: 'supplier', delivery_fee: 0, credit_discount: 0, total_amount: supTotal, paid_amount: 0, status: 'pending', notes: 'ארוז בארגזי חלוקה', created_at: today },
-      { id: 2, user_id: 4, recipient_name: 'דנה כהן', friday_date: upcomingFriday, order_type: 'customer', delivery_fee: 0, credit_discount: 0, total_amount: custTotal, paid_amount: custTotal, status: 'ready', notes: 'שולם בפייבוקס מראש', created_at: today },
-      { id: 3, user_id: null, subsidized_entity_id: 1, recipient_name: 'הכולל', friday_date: upcomingFriday, order_type: 'charity', delivery_fee: 0, credit_discount: 0, total_amount: 0, paid_amount: 0, status: 'pending', notes: 'חבילת שישי מסובסדת קבועה', created_at: today },
-    ],
-    order_items: [
-      { id: 1, order_id: 1, product_id: 1, quantity: 30, unit_price_snapshot: 3.7, cost_price_snapshot: 2.5 },
-      { id: 2, order_id: 1, product_id: 4, quantity: 10, unit_price_snapshot: 29, cost_price_snapshot: 20 },
-      { id: 3, order_id: 1, product_id: 9, quantity: 12, unit_price_snapshot: 7, cost_price_snapshot: 5 },
-      { id: 4, order_id: 2, product_id: 1, quantity: 6, unit_price_snapshot: 4, cost_price_snapshot: 2.5 },
-      { id: 5, order_id: 2, product_id: 4, quantity: 2, unit_price_snapshot: 30, cost_price_snapshot: 20 },
-      { id: 6, order_id: 2, product_id: 13, quantity: 1, unit_price_snapshot: 13, cost_price_snapshot: 8 },
-      { id: 7, order_id: 2, product_id: 14, quantity: 1, unit_price_snapshot: 10, cost_price_snapshot: 5 },
-      { id: 8, order_id: 3, product_id: 2, quantity: 15, unit_price_snapshot: 0, cost_price_snapshot: 2.5 },
-      { id: 9, order_id: 3, product_id: 4, quantity: 3, unit_price_snapshot: 0, cost_price_snapshot: 20 },
-    ],
-    transactions: [
-      { id: 1, date: today, friday_date: upcomingFriday, type: 'income', category: 'תשלום הזמנה מוקדמת', payment_method: 'paybox', amount: custTotal, user_id: 4, notes: 'דנה כהן — הזמנה מוקדמת' },
-      { id: 2, date: today, friday_date: upcomingFriday, type: 'income', category: 'סגירת חוב ספק', payment_method: 'transfer', amount: 650, user_id: 3, notes: 'תשלום משבוע שעבר' },
-      { id: 3, date: today, friday_date: upcomingFriday, type: 'expense', category: 'דלק / נסיעות', payment_method: 'cash', amount: 120, user_id: null, notes: 'נסיעת שישי למאפייה ולדוכן' },
-    ],
-    fixed_expenses: [
-      { id: 1, name: 'שכירות דוכן שוק שישי', amount: 450, frequency: 'weekly', payment_method: 'transfer', is_active: true },
-      { id: 2, name: 'שכירות מטבח מאפייה', amount: 4200, frequency: 'monthly', payment_method: 'transfer', is_active: true },
-      { id: 3, name: 'עוזר דוכן ליום שישי', amount: 500, frequency: 'weekly', payment_method: 'cash', is_active: true },
-    ],
-    friday_inventory: [
-      { friday_date: upcomingFriday, product_id: 1, extra_stall_qty: 40 },
-      { friday_date: upcomingFriday, product_id: 2, extra_stall_qty: 35 },
-      { friday_date: upcomingFriday, product_id: 4, extra_stall_qty: 12 },
-      { friday_date: upcomingFriday, product_id: 9, extra_stall_qty: 25 },
-      { friday_date: upcomingFriday, product_id: 13, extra_stall_qty: 15 },
-      { friday_date: upcomingFriday, product_id: 14, extra_stall_qty: 10 },
-    ],
+    orders: [],
+    order_items: [],
+    transactions: [],
+    fixed_expenses: [],
+    friday_inventory: [],
+    demoPurgedV191: true,
     settings: {
       business_name: 'דוכן שישי תימני',
       admin_whatsapp_phone: '050-5551000',
@@ -411,6 +379,37 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
       dbMutated = true;
     }
   }
+  // מיגרציה חד-פעמית v1.9.1: ניקוי מלא של נתוני דמו (הזמנות, לקוחות דמו, תנועות, מלאי ופחת)
+  // תוך שמירה מלאה על קטלוג המוצרים, היסטוריית המחירים, חשבון המנהל וחשבונות הספקים
+  if (!db.demoPurgedV191) {
+    db.orders = [];
+    db.order_items = [];
+    db.transactions = [];
+    db.friday_inventory = [];
+    db.waste_logs = [];
+    db.subsidized_payments = [];
+    db.fixed_expenses = [];
+    db.users = db.users
+      .filter((u) => u.role === 'admin' || u.role === 'supplier')
+      .map((u) => ({
+        ...u,
+        balance: 0,
+        notes: String(u.notes || '').replace(/המטבח התימני/g, 'דוכן שישי תימני'),
+      }));
+    const currentSessionUid = Number(safeGetItem(SESSION_KEY) || 0);
+    if (currentSessionUid && !db.users.some((u) => u.id === currentSessionUid)) {
+      safeRemoveItem(SESSION_KEY);
+    }
+    db.nextIds.orders = 1;
+    db.nextIds.order_items = 1;
+    db.nextIds.transactions = 1;
+    db.nextIds.fixed_expenses = 1;
+    db.nextIds.subsidized_payments = 1;
+    db.nextIds.users = Math.max(1, db.users.reduce((m, x) => Math.max(m, Number(x.id) || 0), 0) + 1);
+    db.demoPurgedV191 = true;
+    dbMutated = true;
+  }
+
   if (dbMutated) {
     saveDb(db);
   }
