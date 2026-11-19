@@ -14,7 +14,7 @@ interface DbOrder {
   credit_discount: number;
   total_amount: number;
   paid_amount: number;
-  status: 'pending' | 'ready' | 'delivered';
+  status: 'awaiting_approval' | 'pending' | 'ready' | 'delivered';
   notes: string;
   created_at: string;
   user_name?: string;
@@ -331,7 +331,7 @@ router.put('/:id', requireAuth, requireRole('admin'), async (req, res) => {
         : existing.recipient_name;
     const notes = req.body?.notes !== undefined ? String(req.body.notes).trim() : existing.notes;
     const status =
-      req.body?.status && ['pending', 'ready', 'delivered'].includes(req.body.status)
+      req.body?.status && ['awaiting_approval', 'pending', 'ready', 'delivered'].includes(req.body.status)
         ? req.body.status
         : existing.status;
 
@@ -451,7 +451,7 @@ router.patch('/:id', requireAuth, requireRole('admin'), async (req, res) => {
     }
 
     const status =
-      req.body?.status && ['pending', 'ready', 'delivered'].includes(req.body.status)
+      req.body?.status && ['awaiting_approval', 'pending', 'ready', 'delivered'].includes(req.body.status)
         ? req.body.status
         : existing.status;
     const notes = req.body?.notes !== undefined ? String(req.body.notes) : existing.notes;

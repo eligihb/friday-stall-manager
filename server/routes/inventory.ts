@@ -34,7 +34,7 @@ router.get('/', async (req, res) => {
       `SELECT oi.product_id, o.order_type, SUM(oi.quantity) as qty
        FROM order_items oi
        JOIN orders o ON o.id = oi.order_id
-       WHERE o.friday_date = ?
+       WHERE o.friday_date = ? AND o.status != 'awaiting_approval'
        GROUP BY oi.product_id, o.order_type`,
       [fridayDate]
     );

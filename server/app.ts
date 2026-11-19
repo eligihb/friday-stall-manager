@@ -12,6 +12,7 @@ import usersRoutes from './routes/users.ts';
 import financeRoutes from './routes/finance.ts';
 import inventoryRoutes from './routes/inventory.ts';
 import settingsRoutes from './routes/settings.ts';
+import publicRoutes from './routes/public.ts';
 
 export function createApp() {
   const app = express();
@@ -34,6 +35,7 @@ export function createApp() {
     }
   });
 
+  app.use('/api/public', publicRoutes);
   app.use('/api/auth', authRoutes);
   app.use('/api/products', productsRoutes);
   app.use('/api/orders', ordersRoutes);

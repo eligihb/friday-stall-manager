@@ -6,7 +6,7 @@ export function formatProductionWhatsApp(
   items: FridayInventoryItem[],
   settings?: Partial<BusinessSettings>
 ): string {
-  const bizName = settings?.business_name || 'המטבח התימני';
+  const bizName = settings?.business_name || 'דוכן שישי תימני';
   const activeItems = items.filter((i) => i.total_to_bake > 0);
   const totalUnits = activeItems.reduce((s, i) => s + i.total_to_bake, 0);
   const totalCost = activeItems.reduce((s, i) => s + i.total_to_bake * i.cost_price, 0);
@@ -34,7 +34,7 @@ export function formatProductionWhatsApp(
 }
 
 export function formatOrderWhatsApp(order: Order, settings?: Partial<BusinessSettings>): string {
-  const bizName = settings?.business_name || 'המטבח התימני';
+  const bizName = settings?.business_name || 'דוכן שישי תימני';
   const footer = settings?.whatsapp_footer ?? 'שבת שלום ומבורכת! 🕯️';
   const lines: string[] = [
     `🫓 *${bizName} — סיכום הזמנה #${order.id}*`,
@@ -76,6 +76,37 @@ export function buildWhatsAppShareUrl(text: string, phone?: string): string {
   return `https://wa.me/?text=${encoded}`;
 }
 
+export function formatPublicApprovalWhatsApp(payload: {
+  id: number;
+  business_name: string;
+  recipient_name: string;
+  phone: string;
+  friday_date: string;
+  pricing_mode: 'preorder' | 'stall';
+  items: Array<{ product_name: string; quantity: number; unit_price: number }>;
+  total_amount: number;
+  notes?: string;
+}): string {
+  const lines: string[] = [
+    `🫓 *${payload.business_name} — הזמנה חדשה לאישור (#${payload.id})*`,
+    `👤 שם: *${payload.recipient_name}*`,
+    `📱 טלפון: ${payload.phone}`,
+    `📅 ${formatFridayLabel(payload.friday_date)}`,
+    `🏷️ תעריף: ${payload.pricing_mode === 'preorder' ? 'הזמנה מוקדמת' : 'מחיר דוכן רגיל'}`,
+    `━━━━━━━━━━━━━━━━`,
+  ];
+
+  for (const it of payload.items) {
+    lines.push(`• ${it.quantity} × ${it.product_name} — ${formatILS(it.quantity * it.unit_price)}`);
+  }
+
+  lines.push(`━━━━━━━━━━━━━━━━`);
+  lines.push(`💳 *סה״כ לתשלום: ${formatILS(payload.total_amount)}*`);
+  if (payload.notes) lines.push(`📝 הערה: ${payload.notes}`);
+  lines.push(`⏳ סטטוס: ממתין לאישור מנהל`);
+  return lines.join('\n');
+}
+
 export function formatSupplierLedgerWhatsApp(user: User, orders: Order[]): string {
   const balanceText =
     user.balance < 0
@@ -85,7 +116,7 @@ export function formatSupplierLedgerWhatsApp(user: User, orders: Order[]): strin
       : 'מאוזן (₪0.00)';
 
   const lines: string[] = [
-    `📋 *המטבח התימני — כרטסת ספק*`,
+    `📋 *דוכן שישי תימני — כרטסת ספק*`,
     `🏪 ${user.name}`,
     `💰 *מצב חשבון נוכחי: ${balanceText}*`,
     `━━━━━━━━━━━━━━━━`,

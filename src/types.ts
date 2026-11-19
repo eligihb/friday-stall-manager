@@ -42,7 +42,7 @@ export interface OrderItem {
 }
 
 export type OrderType = 'customer' | 'supplier' | 'charity';
-export type OrderStatus = 'pending' | 'ready' | 'delivered';
+export type OrderStatus = 'awaiting_approval' | 'pending' | 'ready' | 'delivered';
 
 export interface Order {
   id: number;
@@ -101,6 +101,7 @@ export interface FridayInventoryItem {
 
 export interface BusinessSettings {
   business_name: string;
+  admin_whatsapp_phone: string;
   default_delivery_fee: number;
   whatsapp_footer: string;
 }

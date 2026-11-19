@@ -50,7 +50,9 @@ router.get('/summary', async (req, res) => {
     const db = await getDb();
     const fridayDate = req.query.friday_date ? String(req.query.friday_date) : '';
     const params: unknown[] = [];
-    const orderWhere = fridayDate ? 'WHERE o.friday_date = ?' : '';
+    const orderWhere = fridayDate
+      ? "WHERE o.friday_date = ? AND o.status != 'awaiting_approval'"
+      : "WHERE o.status != 'awaiting_approval'";
     if (fridayDate) params.push(fridayDate);
 
     const cogsRows = await db.query<{ order_type: string; total_cost: number; total_units: number }>(
@@ -114,7 +116,7 @@ router.get('/pnl', async (req, res) => {
 
     if (mode === 'friday') {
       periodLabel = fridayDate;
-      orderWhere = 'WHERE o.friday_date = ?';
+      orderWhere = "WHERE o.friday_date = ? AND o.status != 'awaiting_approval'";
       orderParams = [fridayDate];
       invWhere = 'WHERE fi.friday_date = ?';
       invParams = [fridayDate];
@@ -125,7 +127,7 @@ router.get('/pnl', async (req, res) => {
     } else if (mode === 'month') {
       const bounds = getMonthBounds(month);
       periodLabel = month;
-      orderWhere = 'WHERE o.friday_date >= ? AND o.friday_date <= ?';
+      orderWhere = "WHERE o.friday_date >= ? AND o.friday_date <= ? AND o.status != 'awaiting_approval'";
       orderParams = [bounds.from, bounds.to];
       invWhere = 'WHERE fi.friday_date >= ? AND fi.friday_date <= ?';
       invParams = [bounds.from, bounds.to];
@@ -138,7 +140,7 @@ router.get('/pnl', async (req, res) => {
       const from = customFrom <= customTo ? customFrom : customTo;
       const to = customFrom <= customTo ? customTo : customFrom;
       periodLabel = `${from} — ${to}`;
-      orderWhere = 'WHERE o.friday_date >= ? AND o.friday_date <= ?';
+      orderWhere = "WHERE o.friday_date >= ? AND o.friday_date <= ? AND o.status != 'awaiting_approval'";
       orderParams = [from, to];
       invWhere = 'WHERE fi.friday_date >= ? AND fi.friday_date <= ?';
       invParams = [from, to];

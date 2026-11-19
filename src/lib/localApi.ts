@@ -12,6 +12,7 @@ import type {
   UserRole,
 } from '../types';
 import { getNextFridayISO } from './format';
+import { getFridayPricingStatus } from './pricingCutoff';
 
 const STORAGE_KEY = 'ht_static_db_v1';
 const SESSION_KEY = 'ht_static_session_uid';
@@ -122,7 +123,8 @@ function createInitialDb(): LocalDb {
       { friday_date: upcomingFriday, product_id: 14, extra_stall_qty: 10 },
     ],
     settings: {
-      business_name: 'המטבח התימני',
+      business_name: 'דוכן שישי תימני',
+      admin_whatsapp_phone: '050-5551000',
       default_delivery_fee: 0,
       whatsapp_footer: 'שבת שלום ומבורכת! 🕯️',
     },
@@ -214,6 +216,110 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
   const path = parsedUrl.pathname;
   const q = parsedUrl.searchParams;
 
+  // תמיכה במיגרציה אוטומטית להגדרות ישנות ב-localStorage
+  if (!db.settings.admin_whatsapp_phone) {
+    db.settings.admin_whatsapp_phone = '050-5551000';
+  }
+  if (db.settings.business_name === 'המטבח התימני') {
+    db.settings.business_name = 'דוכן שישי תימני';
+  }
+
+  // --- PUBLIC STOREFRONT (ללא התחברות) ---
+  if (path === '/api/public/storefront' && method === 'GET') {
+    return {
+      business_name: db.settings.business_name || 'דוכן שישי תימני',
+      admin_whatsapp_phone: db.settings.admin_whatsapp_phone || '050-5551000',
+      whatsapp_footer: db.settings.whatsapp_footer || 'שבת שלום ומבורכת! 🕯️',
+      products: db.products
+        .filter((p) => p.is_active)
+        .map((p) => ({
+          id: p.id,
+          name: p.name,
+          preorder_price: p.preorder_price,
+          customer_price: p.customer_price,
+          is_active: true,
+        })),
+    } as T;
+  }
+
+  if (path === '/api/public/orders' && method === 'POST') {
+    const friday_date = String(body.friday_date || getNextFridayISO()).slice(0, 10);
+    const recipient_name = String(body.recipient_name || '').trim();
+    const phone = String(body.phone || '').trim();
+    const notesRaw = String(body.notes || '').trim();
+    const rawItems = (Array.isArray(body.items) ? body.items : []) as Array<{
+      product_id: number;
+      quantity: number;
+    }>;
+    const validItems = rawItems.filter((i) => i.product_id && i.quantity > 0);
+    if (!recipient_name || !phone) throwErr('יש להזין שם מלא ומספר טלפון', 400);
+    if (!validItems.length) throwErr('יש לבחור לפחות מוצר אחד להזמנה', 400);
+
+    const pMap = new Map(db.products.map((p) => [p.id, p]));
+    const pricing = getFridayPricingStatus(friday_date);
+    const orderId = db.nextIds.orders++;
+    let total_amount = 0;
+    const resultItems: Array<{
+      product_id: number;
+      product_name: string;
+      quantity: number;
+      unit_price: number;
+    }> = [];
+
+    for (const it of validItems) {
+      const prod = pMap.get(Number(it.product_id));
+      if (!prod || !prod.is_active) throwErr('אחד המוצרים שנבחרו אינו זמין', 400);
+      const unitPrice = pricing.isPreorder ? prod.preorder_price : prod.customer_price;
+      total_amount += unitPrice * it.quantity;
+      db.order_items.push({
+        id: db.nextIds.order_items++,
+        order_id: orderId,
+        product_id: prod.id,
+        quantity: it.quantity,
+        unit_price_snapshot: unitPrice,
+        cost_price_snapshot: prod.cost_price,
+      });
+      resultItems.push({
+        product_id: prod.id,
+        product_name: prod.name,
+        quantity: it.quantity,
+        unit_price: unitPrice,
+      });
+    }
+
+    total_amount = round2(total_amount);
+    const combinedNotes = [`טלפון: ${phone}`, notesRaw].filter(Boolean).join(' | ');
+    db.orders.push({
+      id: orderId,
+      user_id: null,
+      recipient_name,
+      friday_date,
+      order_type: 'customer',
+      delivery_fee: 0,
+      credit_discount: 0,
+      total_amount,
+      paid_amount: 0,
+      status: 'awaiting_approval',
+      notes: combinedNotes,
+      created_at: new Date().toISOString().slice(0, 10),
+    });
+    saveDb(db);
+
+    return {
+      id: orderId,
+      friday_date,
+      recipient_name,
+      phone,
+      pricing_mode: pricing.mode,
+      total_amount,
+      status: 'awaiting_approval',
+      items: resultItems,
+      business_name: db.settings.business_name || 'דוכן שישי תימני',
+      admin_whatsapp_phone: db.settings.admin_whatsapp_phone || '050-5551000',
+      whatsapp_footer: db.settings.whatsapp_footer || 'שבת שלום ומבורכת! 🕯️',
+    } as T;
+  }
+
   // --- AUTH ---
   if (path === '/api/auth/login' && method === 'POST') {
     const email = String(body.email || '').trim().toLowerCase();
@@ -275,7 +381,8 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
   if (path === '/api/settings' && method === 'PUT') {
     requireAdmin();
     db.settings = {
-      business_name: String(body.business_name || 'המטבח התימני').trim(),
+      business_name: String(body.business_name || 'דוכן שישי תימני').trim(),
+      admin_whatsapp_phone: String(body.admin_whatsapp_phone || '050-5551000').trim(),
       default_delivery_fee: Math.max(0, Number(body.default_delivery_fee || 0)),
       whatsapp_footer: String(body.whatsapp_footer ?? '').trim(),
     };
@@ -678,7 +785,9 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
   if (path === '/api/inventory' && method === 'GET') {
     requireAdmin();
     const fri = String(q.get('friday_date') || getNextFridayISO()).slice(0, 10);
-    const friOrders = db.orders.filter((o) => o.friday_date === fri);
+    const friOrders = db.orders.filter(
+      (o) => o.friday_date === fri && o.status !== 'awaiting_approval'
+    );
     const orderTypeById = new Map(friOrders.map((o) => [o.id, o.order_type]));
     const items = db.products
       .filter((p) => p.is_active)
@@ -879,7 +988,9 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
       }
 
       const inRange = (d: string) => d >= from && d <= to;
-      const pOrders = db.orders.filter((o) => inRange(o.friday_date));
+      const pOrders = db.orders.filter(
+        (o) => inRange(o.friday_date) && o.status !== 'awaiting_approval'
+      );
       const pOrderMap = new Map(pOrders.map((o) => [o.id, o]));
       const customer_orders_revenue = round2(pOrders.filter((o) => o.order_type === 'customer').reduce((s, o) => s + o.total_amount, 0));
       const supplier_orders_revenue = round2(pOrders.filter((o) => o.order_type === 'supplier').reduce((s, o) => s + o.total_amount, 0));

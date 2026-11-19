@@ -32,7 +32,8 @@ export function SettingsPage() {
 
   // הגדרות עסק
   const [settings, setSettings] = useState<BusinessSettings>({
-    business_name: 'המטבח התימני',
+    business_name: 'דוכן שישי תימני',
+    admin_whatsapp_phone: '050-5551000',
     default_delivery_fee: 0,
     whatsapp_footer: 'שבת שלום ומבורכת! 🕯️',
   });
@@ -422,6 +423,25 @@ export function SettingsPage() {
                 onChange={(e) => setSettings({ ...settings, business_name: e.target.value })}
                 className="w-full px-4 py-2.5 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] focus:bg-white focus:border-[#C85A17] focus:outline-none font-semibold"
               />
+            </div>
+
+            <div>
+              <label className="block text-sm font-bold text-slate-700 mb-1.5">
+                טלפון וואטסאפ של המנהל לקבלת הזמנות לקוחות
+              </label>
+              <input
+                type="tel"
+                inputMode="tel"
+                dir="ltr"
+                required
+                value={settings.admin_whatsapp_phone || ''}
+                onChange={(e) => setSettings({ ...settings, admin_whatsapp_phone: e.target.value })}
+                placeholder="050-5551000"
+                className="w-56 px-4 py-2.5 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] focus:bg-white focus:border-[#C85A17] focus:outline-none text-left tabular-nums font-bold"
+              />
+              <p className="text-xs text-slate-500 mt-1">
+                למספר זה נשלחות הודעות הוואטסאפ לאישור הזמנה מהתפריט הציבורי.
+              </p>
             </div>
 
             <div>

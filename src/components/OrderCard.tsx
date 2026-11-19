@@ -16,6 +16,7 @@ import { buildWhatsAppShareUrl, formatOrderWhatsApp } from '../lib/whatsappForma
 import type { BusinessSettings, Order, OrderStatus, OrderType } from '../types';
 
 const NEXT_STATUS: Record<OrderStatus, OrderStatus> = {
+  awaiting_approval: 'pending',
   pending: 'ready',
   ready: 'delivered',
   delivered: 'pending',
@@ -55,6 +56,12 @@ export function OrderCard({
   };
 
   const statusMeta = (st: OrderStatus) => {
+    if (st === 'awaiting_approval')
+      return {
+        cls: 'bg-red-50 text-red-800 border-red-300',
+        label: 'אשר הזמנה',
+        icon: CheckCircle2,
+      };
     if (st === 'delivered')
       return {
         cls: 'bg-emerald-100 text-emerald-900 border-emerald-300',

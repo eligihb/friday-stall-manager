@@ -1,10 +1,14 @@
 import React, { useState } from 'react';
-import { Flame, Lock, Mail, Phone, User as UserIcon, ShieldCheck, Store, ShoppingBag, ArrowLeft } from 'lucide-react';
+import { Flame, Lock, Mail, Phone, User as UserIcon, ShieldCheck, Store, ShoppingBag, ArrowLeft, ArrowRight } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { APP_VERSION } from '../lib/version';
+import { APP_BRAND_NAME, APP_VERSION } from '../lib/version';
 import type { UserRole } from '../types';
 
-export function AuthScreen() {
+interface AuthScreenProps {
+  onBackToStorefront?: () => void;
+}
+
+export function AuthScreen({ onBackToStorefront }: AuthScreenProps) {
   const { login, signup } = useAuth();
   const [mode, setMode] = useState<'login' | 'signup'>('login');
   const [name, setName] = useState('');
@@ -61,11 +65,21 @@ export function AuthScreen() {
           </div>
 
           <h1 className="font-serif text-4xl lg:text-5xl font-bold tracking-tight text-white mb-4">
-            המטבח התימני
+            {APP_BRAND_NAME}
           </h1>
           <p className="text-cream-200/90 text-base lg:text-lg leading-relaxed max-w-md">
-            מערכת ניהול מלאה למחירון, הזמנות שישי, היערכות אפייה, תזרים כספי ופורטל ספקים ולקוחות — הכל במקום אחד.
+            כניסת צוות ניהול וספקים סיטונאיים — ניהול מחירון, אישור הזמנות שישי, ריכוז אפייה, תזרים כספי ופורטל ספקים.
           </p>
+          {onBackToStorefront && (
+            <button
+              type="button"
+              onClick={onBackToStorefront}
+              className="mt-6 inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-amber-200 text-sm font-bold border border-white/15 transition-colors"
+            >
+              <ArrowRight className="w-4 h-4" />
+              <span>חזרה לתפריט הלקוחות</span>
+            </button>
+          )}
         </div>
 
         <div className="relative z-10 mt-10 pt-8 border-t border-white/10 grid grid-cols-3 gap-4 text-center">

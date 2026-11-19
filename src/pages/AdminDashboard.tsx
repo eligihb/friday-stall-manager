@@ -11,9 +11,12 @@ import {
   Plus,
   Minus,
   Share2,
+  ShieldAlert,
+  CheckCircle2,
+  Trash2,
 } from 'lucide-react';
 import { apiFetch } from '../lib/api';
-import { formatILS } from '../lib/format';
+import { formatFridayLabel, formatILS } from '../lib/format';
 import { buildWhatsAppShareUrl, formatProductionWhatsApp } from '../lib/whatsappFormat';
 import { useFriday } from '../context/FridayContext';
 import { FridaySelector } from '../components/FridaySelector';
@@ -38,6 +41,7 @@ interface AdminDashboardProps {
 export function AdminDashboard({ onNavigate }: AdminDashboardProps) {
   const { fridayDate, setFridayDate, refreshTick } = useFriday();
   const [orders, setOrders] = useState<Order[]>([]);
+  const [awaitingOrders, setAwaitingOrders] = useState<Order[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [products, setProducts] = useState<AdminProduct[]>([]);
   const [inventory, setInventory] = useState<FridayInventoryItem[]>([]);
@@ -53,14 +57,17 @@ export function AdminDashboard({ onNavigate }: AdminDashboardProps) {
   const loadAll = useCallback(async () => {
     setLoading(true);
     try {
-      const [ordRes, usrRes, prodRes, invRes, setRes] = await Promise.all([
+      const [ordRes, awaitRes, usrRes, prodRes, invRes, setRes] = await Promise.all([
         apiFetch<{ orders: Order[] }>(`/api/orders?friday_date=${fridayDate}`),
+        apiFetch<{ orders: Order[] }>('/api/orders?status=awaiting_approval'),
         apiFetch<{ users: User[] }>('/api/users'),
         apiFetch<{ products: AdminProduct[] }>('/api/products'),
         apiFetch<{ items: FridayInventoryItem[] }>(`/api/inventory?friday_date=${fridayDate}`),
         apiFetch<{ settings: BusinessSettings }>('/api/settings'),
       ]);
-      setOrders(ordRes.orders);
+      // הזמנות ממתינות לאישור אינן נספרות בהזמנות פעילות ובאפייה עד לאישור המנהל
+      setOrders(ordRes.orders.filter((o) => o.status !== 'awaiting_approval'));
+      setAwaitingOrders(awaitRes.orders);
       setUsers(usrRes.users);
       setProducts(prodRes.products);
       setInventory(invRes.items);
@@ -74,6 +81,20 @@ export function AdminDashboard({ onNavigate }: AdminDashboardProps) {
       setLoading(false);
     }
   }, [fridayDate]);
+
+  const handleApproveOrder = async (orderId: number) => {
+    await apiFetch(`/api/orders/${orderId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status: 'pending' }),
+    });
+    await loadAll();
+  };
+
+  const handleRejectOrder = async (orderId: number) => {
+    if (!window.confirm('למחוק הזמנה זו לצמיתות?')) return;
+    await apiFetch(`/api/orders/${orderId}`, { method: 'DELETE' });
+    await loadAll();
+  };
 
   useEffect(() => {
     loadAll();
@@ -201,6 +222,87 @@ export function AdminDashboard({ onNavigate }: AdminDashboardProps) {
         </div>
         <FridaySelector value={fridayDate} onChange={setFridayDate} label="תאריך שישי:" />
       </div>
+
+      {/* באנר בולט: הזמנות לקוחות ממתינות לאישור (אנטי-ספאם — לא נכללות בסיכום האפייה עד לאישור) */}
+      {awaitingOrders.length > 0 && (
+        <div className="bg-gradient-to-l from-amber-50 via-[#FFF7ED] to-red-50/70 rounded-3xl border-2 border-[#C85A17]/60 shadow-card p-4 sm:p-5 space-y-3.5">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2.5">
+              <div className="w-10 h-10 rounded-2xl bg-[#C85A17] text-white flex items-center justify-center shadow-sm shrink-0">
+                <ShieldAlert className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="font-serif text-xl sm:text-2xl font-bold text-[#6D280B] leading-tight">
+                  הזמנות ממתינות לאישור ({awaitingOrders.length})
+                </h3>
+                <p className="text-xs text-amber-950/80">
+                  הזמנות אלו התקבלו מהתפריט הציבורי ואינן נספרות בכמויות הייצור והמאפייה עד שתאשר אותן.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {awaitingOrders.map((ord) => (
+              <div
+                key={ord.id}
+                className="bg-white rounded-2xl border border-[#E8D5BE] p-4 shadow-soft flex flex-col justify-between gap-3"
+              >
+                <div>
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <div className="font-extrabold text-base text-slate-900">{ord.recipient_name}</div>
+                      <div className="text-xs text-slate-500 mt-0.5 tabular-nums">
+                        #{ord.id} · {formatFridayLabel(ord.friday_date)}
+                      </div>
+                    </div>
+                    <div className="font-extrabold text-lg text-[#C85A17] tabular-nums">
+                      {formatILS(ord.total_amount)}
+                    </div>
+                  </div>
+
+                  {ord.notes && (
+                    <div className="mt-2 text-xs font-semibold text-slate-700 bg-[#FAF6F0] px-2.5 py-1.5 rounded-xl">
+                      {ord.notes}
+                    </div>
+                  )}
+
+                  <div className="mt-2.5 flex flex-wrap gap-1.5">
+                    {ord.items.map((it) => (
+                      <span
+                        key={it.id}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-[#FFF7ED] border border-[#E8D5BE] text-xs font-bold text-slate-800 tabular-nums"
+                      >
+                        <span className="text-[#C85A17] font-extrabold">{it.quantity}</span>
+                        <span>{it.product_name}</span>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-12 gap-2 pt-2 border-t border-[#F3E9DC]">
+                  <button
+                    type="button"
+                    onClick={() => handleApproveOrder(ord.id)}
+                    className="col-span-8 min-h-[46px] rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-sm flex items-center justify-center gap-1.5 shadow-sm active:scale-[0.98]"
+                  >
+                    <CheckCircle2 className="w-4 h-4" />
+                    <span>אשר הזמנה</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleRejectOrder(ord.id)}
+                    className="col-span-4 min-h-[46px] rounded-xl bg-red-50 hover:bg-red-100 border border-red-200 text-red-700 font-extrabold text-xs flex items-center justify-center gap-1 active:scale-[0.98]"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    <span>מחק</span>
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* כרטיסי KPI עליונים */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 tabular-nums">

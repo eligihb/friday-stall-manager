@@ -170,7 +170,7 @@ async function initializeSchemaAndSeed(db: DbClient): Promise<void> {
         credit_discount REAL NOT NULL DEFAULT 0,
         total_amount REAL NOT NULL DEFAULT 0,
         paid_amount REAL NOT NULL DEFAULT 0,
-        status TEXT NOT NULL CHECK (status IN ('pending', 'ready', 'delivered')) DEFAULT 'pending',
+        status TEXT NOT NULL CHECK (status IN ('awaiting_approval', 'pending', 'ready', 'delivered')) DEFAULT 'pending',
         notes TEXT DEFAULT '',
         created_at TEXT NOT NULL DEFAULT (datetime('now'))
       );
@@ -215,13 +215,11 @@ async function initializeSchemaAndSeed(db: DbClient): Promise<void> {
 
       CREATE TABLE IF NOT EXISTS business_settings (
         id INTEGER PRIMARY KEY CHECK (id = 1),
-        business_name TEXT NOT NULL DEFAULT 'המטבח התימני',
+        business_name TEXT NOT NULL DEFAULT 'דוכן שישי תימני',
+        admin_whatsapp_phone TEXT NOT NULL DEFAULT '050-5551000',
         default_delivery_fee REAL NOT NULL DEFAULT 0,
         whatsapp_footer TEXT NOT NULL DEFAULT 'שבת שלום ומבורכת! 🕯️'
       );
-
-      INSERT OR IGNORE INTO business_settings (id, business_name, default_delivery_fee, whatsapp_footer)
-      VALUES (1, 'המטבח התימני', 0, 'שבת שלום ומבורכת! 🕯️');
 
       CREATE INDEX IF NOT EXISTS idx_orders_friday_date ON orders(friday_date);
       CREATE INDEX IF NOT EXISTS idx_orders_user_id ON orders(user_id);
@@ -229,6 +227,50 @@ async function initializeSchemaAndSeed(db: DbClient): Promise<void> {
       CREATE INDEX IF NOT EXISTS idx_transactions_friday_date ON transactions(friday_date);
       CREATE INDEX IF NOT EXISTS idx_friday_inventory_date ON friday_inventory(friday_date);
     `);
+
+    // מיגרציה בטוחה לטבלאות קיימות ב-SQLite (הוספת awaiting_approval ו-admin_whatsapp_phone)
+    const ordDef = await db.get<{ sql: string }>(
+      "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'orders'"
+    );
+    if (ordDef?.sql && !ordDef.sql.includes('awaiting_approval')) {
+      await db.exec(`
+        PRAGMA foreign_keys = OFF;
+        CREATE TABLE orders_new (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+          recipient_name TEXT NOT NULL,
+          friday_date TEXT NOT NULL,
+          order_type TEXT NOT NULL CHECK (order_type IN ('customer', 'supplier', 'charity')),
+          delivery_fee REAL NOT NULL DEFAULT 0,
+          credit_discount REAL NOT NULL DEFAULT 0,
+          total_amount REAL NOT NULL DEFAULT 0,
+          paid_amount REAL NOT NULL DEFAULT 0,
+          status TEXT NOT NULL CHECK (status IN ('awaiting_approval', 'pending', 'ready', 'delivered')) DEFAULT 'pending',
+          notes TEXT DEFAULT '',
+          created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        INSERT INTO orders_new SELECT * FROM orders;
+        DROP TABLE orders;
+        ALTER TABLE orders_new RENAME TO orders;
+        CREATE INDEX IF NOT EXISTS idx_orders_friday_date ON orders(friday_date);
+        CREATE INDEX IF NOT EXISTS idx_orders_user_id ON orders(user_id);
+        PRAGMA foreign_keys = ON;
+      `);
+    }
+
+    const setCols = await db.query<{ name: string }>('PRAGMA table_info(business_settings)');
+    if (!setCols.some((c) => c.name === 'admin_whatsapp_phone')) {
+      await db.exec(
+        "ALTER TABLE business_settings ADD COLUMN admin_whatsapp_phone TEXT NOT NULL DEFAULT '050-5551000';"
+      );
+    }
+    await db.run(
+      `INSERT OR IGNORE INTO business_settings (id, business_name, admin_whatsapp_phone, default_delivery_fee, whatsapp_footer)
+       VALUES (1, 'דוכן שישי תימני', '050-5551000', 0, 'שבת שלום ומבורכת! 🕯️')`
+    );
+    await db.run(
+      "UPDATE business_settings SET business_name = 'דוכן שישי תימני' WHERE id = 1 AND business_name = 'המטבח התימני'"
+    );
   }
 
   // Seed products if table is empty

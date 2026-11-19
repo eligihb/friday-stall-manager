@@ -26,6 +26,7 @@ import { BottomSheet } from '../components/BottomSheet';
 import type { AdminProduct, Order, OrderStatus, PaymentMethod, Transaction, User } from '../types';
 
 const NEXT_STATUS: Record<OrderStatus, OrderStatus> = {
+  awaiting_approval: 'pending',
   pending: 'ready',
   ready: 'delivered',
   delivered: 'pending',

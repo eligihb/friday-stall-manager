@@ -32,7 +32,7 @@ CREATE TABLE IF NOT EXISTS orders (
   credit_discount NUMERIC(10, 2) NOT NULL DEFAULT 0,
   total_amount NUMERIC(12, 2) NOT NULL DEFAULT 0,
   paid_amount NUMERIC(12, 2) NOT NULL DEFAULT 0,
-  status TEXT NOT NULL CHECK (status IN ('pending', 'ready', 'delivered')) DEFAULT 'pending',
+  status TEXT NOT NULL CHECK (status IN ('awaiting_approval', 'pending', 'ready', 'delivered')) DEFAULT 'pending',
   notes TEXT DEFAULT '',
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -77,13 +77,14 @@ CREATE TABLE IF NOT EXISTS friday_inventory (
 
 CREATE TABLE IF NOT EXISTS business_settings (
   id INTEGER PRIMARY KEY CHECK (id = 1),
-  business_name TEXT NOT NULL DEFAULT 'המטבח התימני',
+  business_name TEXT NOT NULL DEFAULT 'דוכן שישי תימני',
+  admin_whatsapp_phone TEXT NOT NULL DEFAULT '050-5551000',
   default_delivery_fee NUMERIC(10, 2) NOT NULL DEFAULT 0,
   whatsapp_footer TEXT NOT NULL DEFAULT 'שבת שלום ומבורכת! 🕯️'
 );
 
-INSERT INTO business_settings (id, business_name, default_delivery_fee, whatsapp_footer)
-VALUES (1, 'המטבח התימני', 0, 'שבת שלום ומבורכת! 🕯️')
+INSERT INTO business_settings (id, business_name, admin_whatsapp_phone, default_delivery_fee, whatsapp_footer)
+VALUES (1, 'דוכן שישי תימני', '050-5551000', 0, 'שבת שלום ומבורכת! 🕯️')
 ON CONFLICT (id) DO NOTHING;
 
 -- אינדקסים לביצועים מהירים

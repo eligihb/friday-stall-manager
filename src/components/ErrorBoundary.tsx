@@ -1,6 +1,6 @@
 import React from 'react';
 import { AlertTriangle, RefreshCw, RotateCcw } from 'lucide-react';
-import { APP_VERSION } from '../lib/version';
+import { APP_BRAND_NAME, APP_VERSION } from '../lib/version';
 
 interface ErrorBoundaryState {
   hasError: boolean;
@@ -90,7 +90,7 @@ export class ErrorBoundary extends React.Component<
           </div>
 
           <div className="text-[11px] text-slate-400 font-semibold tabular-nums pt-1">
-            המטבח התימני · גרסה {APP_VERSION}
+            {APP_BRAND_NAME} · גרסה {APP_VERSION}
           </div>
         </div>
       </div>

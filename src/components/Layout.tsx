@@ -19,7 +19,7 @@ import {
 import { useAuth } from '../context/AuthContext';
 import { useFriday } from '../context/FridayContext';
 import { formatShortFriday, getFridaysRange, ROLE_LABELS } from '../lib/format';
-import { APP_VERSION } from '../lib/version';
+import { APP_BRAND_NAME, APP_VERSION } from '../lib/version';
 import { BottomSheet } from './BottomSheet';
 import { QuickOrderSheet } from './QuickOrderSheet';
 
@@ -101,7 +101,7 @@ export function Layout({ activeTab, onSelectTab, children }: LayoutProps) {
             </div>
             <div className="min-w-0">
               <h1 className="font-serif text-xl font-bold text-white leading-tight truncate">
-                המטבח התימני
+                {APP_BRAND_NAME}
               </h1>
               <p className="text-xs text-amber-300/90 mt-0.5 truncate">
                 {user.role === 'admin'
@@ -198,7 +198,7 @@ export function Layout({ activeTab, onSelectTab, children }: LayoutProps) {
               <div className="min-w-0">
                 <div className="flex items-center gap-1.5">
                   <span className="font-serif font-bold text-base leading-none truncate">
-                    {isAdmin ? TAB_TITLES[activeTab] : 'המטבח התימני'}
+                    {isAdmin ? TAB_TITLES[activeTab] : APP_BRAND_NAME}
                   </span>
                   <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-white/10 text-amber-300 tabular-nums shrink-0">
                     {APP_VERSION}
@@ -460,7 +460,7 @@ export function Layout({ activeTab, onSelectTab, children }: LayoutProps) {
 
           <div className="pt-3 border-t border-[#F3E9DC] flex items-center justify-between gap-3">
             <span className="text-xs font-bold text-slate-400 tabular-nums">
-              המטבח התימני · גרסה {APP_VERSION}
+              {APP_BRAND_NAME} · גרסה {APP_VERSION}
             </span>
             <button
               type="button"
