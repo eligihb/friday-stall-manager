@@ -7,6 +7,7 @@ const router = Router();
 interface DbOrder {
   id: number;
   user_id: number | null;
+  subsidized_entity_id?: number | null;
   recipient_name: string;
   friday_date: string;
   order_type: 'customer' | 'supplier' | 'charity';
@@ -192,6 +193,7 @@ router.get('/', requireAuth, async (req: AuthenticatedRequest, res) => {
       return {
         id: Number(o.id),
         user_id: o.user_id !== null ? Number(o.user_id) : null,
+        subsidized_entity_id: o.subsidized_entity_id !== null && o.subsidized_entity_id !== undefined ? Number(o.subsidized_entity_id) : null,
         user_name: o.user_name || null,
         recipient_name: o.recipient_name,
         friday_date: String(o.friday_date).slice(0, 10),
@@ -266,6 +268,7 @@ router.post('/', requireAuth, async (req: AuthenticatedRequest, res) => {
     }
 
     let user_id: number | null = null;
+    let subsidized_entity_id: number | null = null;
     let recipient_name = '';
     let order_type: 'customer' | 'supplier' | 'charity' = 'customer';
     let delivery_fee = 0;
@@ -273,7 +276,7 @@ router.post('/', requireAuth, async (req: AuthenticatedRequest, res) => {
     let discountPercent = 0;
     let includeVat = false;
     let paid_amount = 0;
-    let payment_method: 'cash' | 'bit' | 'transfer' = 'cash';
+    let payment_method: 'cash' | 'paybox' | 'transfer' = 'cash';
     let priceTier: 'supplier_price' | 'preorder_price' | 'customer_price' | 'charity' = 'customer_price';
 
     if (role === 'supplier') {
@@ -294,7 +297,24 @@ router.post('/', requireAuth, async (req: AuthenticatedRequest, res) => {
       const reqType = String(req.body?.order_type || 'customer');
       order_type = reqType === 'supplier' || reqType === 'charity' ? reqType : 'customer';
       user_id = req.body?.user_id ? Number(req.body.user_id) : null;
+      subsidized_entity_id =
+        order_type === 'charity' && req.body?.subsidized_entity_id
+          ? Number(req.body.subsidized_entity_id)
+          : null;
       recipient_name = String(req.body?.recipient_name || '').trim();
+
+      if (order_type === 'charity' && subsidized_entity_id && !recipient_name) {
+        const ent = await db.get<{ name: string }>('SELECT name FROM subsidized_entities WHERE id = ?', [
+          subsidized_entity_id,
+        ]);
+        recipient_name = ent?.name || '';
+      }
+      if (order_type === 'charity' && !subsidized_entity_id && recipient_name) {
+        const ent = await db.get<{ id: number }>('SELECT id FROM subsidized_entities WHERE name = ?', [
+          recipient_name,
+        ]);
+        if (ent) subsidized_entity_id = Number(ent.id);
+      }
 
       if (user_id && !recipient_name) {
         const u = await db.get<{ name: string }>('SELECT name FROM users WHERE id = ?', [user_id]);
@@ -311,7 +331,7 @@ router.post('/', requireAuth, async (req: AuthenticatedRequest, res) => {
       includeVat = Boolean(req.body?.include_vat);
       paid_amount = Math.max(0, Number(req.body?.paid_amount || 0));
       const pm = String(req.body?.payment_method || 'cash');
-      payment_method = pm === 'bit' || pm === 'transfer' ? pm : 'cash';
+      payment_method = pm === 'paybox' || pm === 'bit' ? 'paybox' : pm === 'transfer' ? 'transfer' : 'cash';
 
       if (order_type === 'charity') {
         priceTier = 'charity';
@@ -370,10 +390,11 @@ router.post('/', requireAuth, async (req: AuthenticatedRequest, res) => {
     const { credit_discount, vat_amount, total_amount } = computed;
 
     const inserted = await db.run(
-      `INSERT INTO orders (user_id, recipient_name, friday_date, order_type, delivery_fee, credit_discount, discount_percent, include_vat, vat_amount, total_amount, paid_amount, status, notes)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
+      `INSERT INTO orders (user_id, subsidized_entity_id, recipient_name, friday_date, order_type, delivery_fee, credit_discount, discount_percent, include_vat, vat_amount, total_amount, paid_amount, status, notes)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
       [
         user_id,
+        subsidized_entity_id,
         recipient_name,
         friday_date,
         order_type,
@@ -572,11 +593,21 @@ router.put('/:id', requireAuth, requireRole('admin'), async (req, res) => {
     const oldTotal = Number(existing.total_amount);
     const totalDiff = round2(newTotal - oldTotal);
 
+    const subsidized_entity_id =
+      existing.order_type === 'charity'
+        ? req.body?.subsidized_entity_id !== undefined
+          ? req.body.subsidized_entity_id
+            ? Number(req.body.subsidized_entity_id)
+            : null
+          : existing.subsidized_entity_id ?? null
+        : null;
+
     await db.run(
       `UPDATE orders
-       SET recipient_name = ?, friday_date = ?, delivery_fee = ?, credit_discount = ?, discount_percent = ?, include_vat = ?, vat_amount = ?, total_amount = ?, status = ?, notes = ?
+       SET subsidized_entity_id = ?, recipient_name = ?, friday_date = ?, delivery_fee = ?, credit_discount = ?, discount_percent = ?, include_vat = ?, vat_amount = ?, total_amount = ?, status = ?, notes = ?
        WHERE id = ?`,
       [
+        subsidized_entity_id,
         recipient_name,
         friday_date,
         delivery_fee,
@@ -622,7 +653,11 @@ router.patch('/:id', requireAuth, requireRole('admin'), async (req, res) => {
       req.body?.paid_amount !== undefined ? Math.max(0, Number(req.body.paid_amount)) : Number(existing.paid_amount);
     const paymentMethodRaw = String(req.body?.payment_method || 'cash');
     const paymentMethod =
-      paymentMethodRaw === 'bit' || paymentMethodRaw === 'transfer' ? paymentMethodRaw : 'cash';
+      paymentMethodRaw === 'paybox' || paymentMethodRaw === 'bit'
+        ? 'paybox'
+        : paymentMethodRaw === 'transfer'
+        ? 'transfer'
+        : 'cash';
 
     const paidDiff = round2(newPaid - Number(existing.paid_amount));
 

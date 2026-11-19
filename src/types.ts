@@ -63,6 +63,7 @@ export interface Order {
   id: number;
   user_id: number | null;
   user_name?: string | null;
+  subsidized_entity_id?: number | null;
   recipient_name: string;
   friday_date: string;
   order_type: OrderType;
@@ -80,7 +81,7 @@ export interface Order {
   estimated_cost?: number;
 }
 
-export type PaymentMethod = 'cash' | 'bit' | 'transfer';
+export type PaymentMethod = 'cash' | 'paybox' | 'transfer';
 
 export interface Transaction {
   id: number;
@@ -117,6 +118,57 @@ export interface FridayInventoryItem {
   total_to_bake: number;
 }
 
+export interface SubsidizedEntity {
+  id: number;
+  name: string;
+  phone: string;
+  notes: string;
+  is_active: boolean;
+  total_orders: number;
+  total_units: number;
+  total_cost: number;
+  total_paid: number;
+  net_subsidy_gap: number;
+}
+
+export interface SubsidizedPayment {
+  id: number;
+  entity_id: number;
+  entity_name: string;
+  date: string;
+  amount: number;
+  payment_method: PaymentMethod;
+  notes: string;
+  created_at?: string;
+}
+
+export interface SubsidizedOverviewResponse {
+  entities: SubsidizedEntity[];
+  payments: SubsidizedPayment[];
+  totals: {
+    total_cost: number;
+    total_paid: number;
+    net_subsidy_expense: number;
+    total_units: number;
+  };
+}
+
+export interface WasteLogItem {
+  product_id: number;
+  product_name: string;
+  cost_price: number;
+  quantity: number;
+  line_cost: number;
+  notes: string;
+}
+
+export interface WasteLogResponse {
+  friday_date: string;
+  items: WasteLogItem[];
+  total_waste_units: number;
+  total_waste_cost: number;
+}
+
 export interface BusinessSettings {
   business_name: string;
   admin_whatsapp_phone: string;
@@ -136,18 +188,20 @@ export interface PnlReportResponse {
     customer_orders_revenue: number;
     supplier_orders_revenue: number;
     walkin_stall_cash: number;
-    walkin_stall_bit: number;
+    walkin_stall_paybox: number;
+    walkin_stall_transfer: number;
     walkin_stall_revenue: number;
     total_revenue: number;
     orders_cogs: number;
     extra_stall_cogs: number;
     extra_stall_units: number;
-    charity_cogs: number;
-    charity_units: number;
     total_cogs: number;
+    waste_cost: number;
+    waste_units: number;
     gross_profit: number;
     gross_margin_pct: number;
     variable_expenses: number;
+    bakery_cash_purchases: number;
     expense_breakdown: Array<{ category: string; amount: number }>;
     prorated_fixed_expenses: number;
     prorated_fixed_items: Array<{
@@ -161,9 +215,26 @@ export interface PnlReportResponse {
     net_profit: number;
     net_margin_pct: number;
   };
+  subsidized: {
+    period_cost: number;
+    period_units: number;
+    period_receipts: number;
+    period_net_expense: number;
+    cumulative_cost: number;
+    cumulative_receipts: number;
+    cumulative_net_expense: number;
+    entities: Array<{
+      id: number;
+      name: string;
+      period_cost: number;
+      period_receipts: number;
+      period_net_gap: number;
+      cumulative_net_gap: number;
+    }>;
+  };
   reconciliation: {
     cash: PaymentBucket;
-    bit: PaymentBucket;
+    paybox: PaymentBucket;
     transfer: PaymentBucket;
     digital_combined: PaymentBucket;
     total_in: number;

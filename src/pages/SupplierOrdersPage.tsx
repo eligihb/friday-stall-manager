@@ -818,7 +818,7 @@ export function SupplierOrdersPage() {
                   onChange={(e) => setOrderPayMethod(e.target.value as PaymentMethod)}
                   className="w-full px-3 py-2.5 rounded-xl border border-[#E8D5BE]"
                 >
-                  {(['transfer', 'cash', 'bit'] as const).map((pm) => (
+                  {(['transfer', 'cash', 'paybox'] as const).map((pm) => (
                     <option key={pm} value={pm}>
                       {PAYMENT_METHOD_LABELS[pm]}
                     </option>
@@ -879,7 +879,7 @@ export function SupplierOrdersPage() {
           <div>
             <label className="block text-xs font-bold text-slate-600 mb-1.5">אמצעי תשלום</label>
             <div className="grid grid-cols-3 gap-2">
-              {(['transfer', 'bit', 'cash'] as const).map((pm) => (
+              {(['transfer', 'paybox', 'cash'] as const).map((pm) => (
                 <button
                   key={pm}
                   type="button"

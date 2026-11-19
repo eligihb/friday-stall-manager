@@ -204,7 +204,11 @@ router.post('/:id/payment', async (req, res) => {
     const amount = Number(req.body?.amount);
     const paymentMethodRaw = String(req.body?.payment_method || 'transfer');
     const payment_method =
-      paymentMethodRaw === 'cash' || paymentMethodRaw === 'bit' ? paymentMethodRaw : 'transfer';
+      paymentMethodRaw === 'cash'
+        ? 'cash'
+        : paymentMethodRaw === 'paybox' || paymentMethodRaw === 'bit'
+        ? 'paybox'
+        : 'transfer';
     const friday_date = req.body?.friday_date ? String(req.body.friday_date).slice(0, 10) : null;
     const notes = String(req.body?.notes || '').trim();
 
@@ -359,7 +363,7 @@ router.get('/:id/ledger', async (req, res) => {
       friday_date: string | null;
       type: 'income' | 'expense';
       category: string;
-      payment_method: 'cash' | 'bit' | 'transfer';
+      payment_method: 'cash' | 'paybox' | 'transfer';
       amount: number;
       notes: string;
     }>('SELECT * FROM transactions WHERE user_id = ? ORDER BY date DESC, id DESC', [id]);

@@ -51,7 +51,7 @@ export function WhatsAppOrderParser({
   const [discountValue, setDiscountValue] = useState('0');
   const [includeVat, setIncludeVat] = useState(false);
   const [paidAmount, setPaidAmount] = useState('0');
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('bit');
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('paybox');
   const [notes, setNotes] = useState('');
   const [addProductId, setAddProductId] = useState('');
 
@@ -476,14 +476,30 @@ export function WhatsAppOrderParser({
             ) : (
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">
-                  שם המשפחה / העמותה המקבלת (תרומה — ₪0 הכנסה)
+                  שם הגוף / המשפחה (הזמנה מסובסדת — סעיף סבסוד נפרד)
                 </label>
+                <div className="flex flex-wrap gap-1.5 mb-2">
+                  {['הכולל', 'משפחה 1', 'משפחה 2'].map((preset) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => setRecipientName(preset)}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-bold border ${
+                        recipientName === preset
+                          ? 'bg-purple-700 text-white border-purple-700'
+                          : 'bg-purple-50 text-purple-900 border-purple-200'
+                      }`}
+                    >
+                      {preset}
+                    </button>
+                  ))}
+                </div>
                 <input
                   type="text"
                   required
                   value={recipientName}
                   onChange={(e) => setRecipientName(e.target.value)}
-                  placeholder="לדוגמה: משפחת לוי / חלוקת שבת שכונתית"
+                  placeholder="לדוגמה: הכולל / משפחה 1 / משפחה 2"
                   className="w-full px-3.5 py-2 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] text-sm"
                 />
               </div>
@@ -548,7 +564,7 @@ export function WhatsAppOrderParser({
                       onChange={(e) => setPaymentMethod(e.target.value as PaymentMethod)}
                       className="w-full px-2.5 py-1.5 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] text-sm"
                     >
-                      {(['cash', 'bit', 'transfer'] as const).map((pm) => (
+                      {(['cash', 'paybox', 'transfer'] as const).map((pm) => (
                         <option key={pm} value={pm}>
                           {PAYMENT_METHOD_LABELS[pm]}
                         </option>
@@ -710,7 +726,7 @@ export function WhatsAppOrderParser({
             <div className="tabular-nums">
               <div className="text-[11px] text-slate-500">
                 {orderType === 'charity'
-                  ? `עלות תרומה: ${formatILS(estimatedCost)}`
+                  ? `עלות סבסוד: ${formatILS(estimatedCost)}`
                   : `${totals.discountILS > 0 ? `הנחה: -${formatILS(totals.discountILS)} · ` : ''}${
                       includeVat ? `מע״מ 18%: ${formatILS(totals.vatAmount)} · ` : ''
                     }עלות: ${formatILS(estimatedCost)}`}

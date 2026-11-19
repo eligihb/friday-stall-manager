@@ -52,7 +52,7 @@ export function CustomerOrdersPage() {
   const [discountValue, setDiscountValue] = useState('0');
   const [includeVat, setIncludeVat] = useState(false);
   const [paidAmount, setPaidAmount] = useState('0');
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('bit');
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('paybox');
   const [notes, setNotes] = useState('');
   const [quantities, setQuantities] = useState<Record<number, number>>({});
   const [saving, setSaving] = useState(false);
@@ -107,7 +107,7 @@ export function CustomerOrdersPage() {
     setDiscountValue('0');
     setIncludeVat(false);
     setPaidAmount('0');
-    setPaymentMethod('bit');
+    setPaymentMethod('paybox');
     setNotes('');
     setQuantities({});
     setModalOpen(true);
@@ -542,7 +542,7 @@ export function CustomerOrdersPage() {
                     onChange={(e) => setPaymentMethod(e.target.value as PaymentMethod)}
                     className="w-full px-3 py-2 rounded-xl border border-[#E8D5BE]"
                   >
-                    {(['cash', 'bit', 'transfer'] as const).map((pm) => (
+                    {(['cash', 'paybox', 'transfer'] as const).map((pm) => (
                       <option key={pm} value={pm}>
                         {PAYMENT_METHOD_LABELS[pm]}
                       </option>

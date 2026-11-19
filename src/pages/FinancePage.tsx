@@ -13,24 +13,29 @@ import {
   X,
   Filter,
   PlayCircle,
+  AlertOctagon,
 } from 'lucide-react';
 import { apiFetch } from '../lib/api';
 import { formatHebrewDate, formatILS, getNextFridayISO, PAYMENT_METHOD_LABELS } from '../lib/format';
 import { downloadCsv } from '../lib/csvExport';
 import { FridaySelector } from '../components/FridaySelector';
-import type { FixedExpense, PaymentMethod, Transaction } from '../types';
+import { WasteTrackingSheet } from '../components/WasteTrackingSheet';
+import type { FixedExpense, PaymentMethod, Transaction, WasteLogResponse } from '../types';
 
-const EXPENSE_PRESETS = [
-  'חומרי גלם (קמח, שמן, תבלינים)',
-  'אריזות וכלים חד-פעמיים',
-  'דלק ומשלוחים',
-  'שכר עובד דוכן',
-  'גז, חשמל ותחזוקה',
+const EXPENSE_PRESETS: Array<{ label: string; defaultMethod?: PaymentMethod }> = [
+  { label: 'רכש מאפייה (מזומן)', defaultMethod: 'cash' },
+  { label: 'שכר עובד יומי', defaultMethod: 'cash' },
+  { label: 'דלק / נסיעות', defaultMethod: 'cash' },
+  { label: 'כביש 6', defaultMethod: 'transfer' },
+  { label: 'אריזות וכלים חד-פעמיים', defaultMethod: 'cash' },
+  { label: 'חומרי גלם (סלסה, כבד קצוץ ותבלינים)', defaultMethod: 'cash' },
 ];
 
 export function FinancePage() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [fixedExpenses, setFixedExpenses] = useState<FixedExpense[]>([]);
+  const [wasteSummary, setWasteSummary] = useState<{ units: number; cost: number }>({ units: 0, cost: 0 });
+  const [wasteOpen, setWasteOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [toast, setToast] = useState('');
@@ -42,16 +47,17 @@ export function FinancePage() {
   const [filterType, setFilterType] = useState<'' | 'income' | 'expense'>('');
   const [filterPayment, setFilterPayment] = useState<'' | PaymentMethod>('');
 
-  // טופס מהיר 1: סיכום קופת דוכן (מזומן + ביט)
+  // טופס מהיר 1: סיכום קופת דוכן (מזומן + פייבוקס + העברה בנקאית)
   const [stallFriday, setStallFriday] = useState(getNextFridayISO());
   const [stallCash, setStallCash] = useState('');
-  const [stallBit, setStallBit] = useState('');
+  const [stallPaybox, setStallPaybox] = useState('');
+  const [stallTransfer, setStallTransfer] = useState('');
   const [stallNotes, setStallNotes] = useState('');
   const [savingStall, setSavingStall] = useState(false);
 
   // טופס מהיר 2: הזנת הוצאה משתנה
   const [expFriday, setExpFriday] = useState(getNextFridayISO());
-  const [expCategory, setExpCategory] = useState(EXPENSE_PRESETS[0]);
+  const [expCategory, setExpCategory] = useState(EXPENSE_PRESETS[0].label);
   const [expAmount, setExpAmount] = useState('');
   const [expMethod, setExpMethod] = useState<PaymentMethod>('cash');
   const [expNotes, setExpNotes] = useState('');
@@ -94,19 +100,21 @@ export function FinancePage() {
       if (filterType) qs.set('type', filterType);
       if (filterPayment) qs.set('payment_method', filterPayment);
 
-      const [txRes, fixRes] = await Promise.all([
+      const [txRes, fixRes, wasteRes] = await Promise.all([
         apiFetch<{ transactions: Transaction[] }>(`/api/finance/transactions?${qs.toString()}`),
         apiFetch<{ fixed_expenses: FixedExpense[] }>('/api/finance/fixed-expenses'),
+        apiFetch<WasteLogResponse>(`/api/finance/waste?friday_date=${stallFriday}`),
       ]);
       setTransactions(txRes.transactions);
       setFixedExpenses(fixRes.fixed_expenses);
+      setWasteSummary({ units: wasteRes.total_waste_units, cost: wasteRes.total_waste_cost });
       setError('');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'שגיאה בטעינת נתונים כספיים');
     } finally {
       setLoading(false);
     }
-  }, [filterFriday, filterFrom, filterTo, filterType, filterPayment]);
+  }, [filterFriday, filterFrom, filterTo, filterType, filterPayment, stallFriday]);
 
   useEffect(() => {
     load();
@@ -115,23 +123,23 @@ export function FinancePage() {
   const summary = useMemo(() => {
     let cashIn = 0;
     let cashOut = 0;
-    let bitIn = 0;
-    let bitOut = 0;
+    let payboxIn = 0;
+    let payboxOut = 0;
     let transferIn = 0;
     let transferOut = 0;
     for (const t of transactions) {
       if (t.type === 'income') {
         if (t.payment_method === 'cash') cashIn += t.amount;
-        else if (t.payment_method === 'bit') bitIn += t.amount;
+        else if (t.payment_method === 'paybox') payboxIn += t.amount;
         else transferIn += t.amount;
       } else {
         if (t.payment_method === 'cash') cashOut += t.amount;
-        else if (t.payment_method === 'bit') bitOut += t.amount;
+        else if (t.payment_method === 'paybox') payboxOut += t.amount;
         else transferOut += t.amount;
       }
     }
-    const income = cashIn + bitIn + transferIn;
-    const expense = cashOut + bitOut + transferOut;
+    const income = cashIn + payboxIn + transferIn;
+    const expense = cashOut + payboxOut + transferOut;
     const weeklyFixed = fixedExpenses
       .filter((f) => f.is_active && f.frequency === 'weekly')
       .reduce((s, f) => s + f.amount, 0);
@@ -143,7 +151,7 @@ export function FinancePage() {
       expense,
       net: income - expense,
       cashNet: cashIn - cashOut,
-      bitNet: bitIn - bitOut,
+      payboxNet: payboxIn - payboxOut,
       transferNet: transferIn - transferOut,
       weeklyFixed,
       monthlyFixed,
@@ -160,14 +168,16 @@ export function FinancePage() {
         body: JSON.stringify({
           friday_date: stallFriday,
           cash_amount: Number(stallCash) || 0,
-          bit_amount: Number(stallBit) || 0,
+          paybox_amount: Number(stallPaybox) || 0,
+          transfer_amount: Number(stallTransfer) || 0,
           notes: stallNotes.trim(),
         }),
       });
       setStallCash('');
-      setStallBit('');
+      setStallPaybox('');
+      setStallTransfer('');
       setStallNotes('');
-      showToast('סיכום קופת הדוכן (מזומן + ביט) נרשם ביומן ההכנסות!');
+      showToast('סיכום קופת הדוכן (מזומן, פייבוקס והעברה) נרשם ביומן ההכנסות!');
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'שגיאה ברישום סיכום הקופה');
@@ -311,18 +321,31 @@ export function FinancePage() {
     );
   };
 
+  const stallTotalInput =
+    (Number(stallCash) || 0) + (Number(stallPaybox) || 0) + (Number(stallTransfer) || 0);
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h2 className="font-serif text-3xl font-bold text-slateink-800">
-            יומן הכנסות והוצאות (ביט מול מזומן)
+            יומן הכנסות והוצאות (מזומן, פייבוקס והעברה)
           </h2>
           <p className="text-sm text-slate-600 mt-1">
-            סיכום מהיר של קופת הדוכן, תיעוד הוצאות משתנות וקבועות, וסנכרון אוטומטי מכל תשלום בהזמנות.
+            סיכום קופת הדוכן, תיעוד הוצאות שישי ופחת סוף יום, והוצאות קבועות.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => setWasteOpen(true)}
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-red-50 hover:bg-red-100 border border-red-200 text-red-800 font-bold text-xs shadow-sm"
+          >
+            <AlertOctagon className="w-4 h-4" />
+            <span>
+              ניהול פחת סוף יום{wasteSummary.cost > 0 ? ` (${formatILS(wasteSummary.cost)})` : ''}
+            </span>
+          </button>
           <button
             type="button"
             onClick={() => setShowTxModal(true)}
@@ -363,17 +386,19 @@ export function FinancePage() {
         >
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-2.5">
-              <div className="w-9 h-9 rounded-xl bg-[#C85A17] text-white flex items-center justify-center">
+              <div className="w-9 h-9 rounded-xl bg-[#C85A17] text-white flex items-center justify-center shrink-0">
                 <Store className="w-5 h-5" />
               </div>
               <div>
                 <h3 className="font-serif text-xl font-bold text-slate-900">סיכום קופת דוכן (סוף יום שישי)</h3>
-                <p className="text-xs text-slate-500">הזנת פדיון מכירות חופשיות בדוכן במזומן ובביט בשני קליקים.</p>
+                <p className="text-xs text-slate-500">
+                  הזנת פדיון מכירות חופשיות בדוכן במזומן, פייבוקס והעברה בנקאית.
+                </p>
               </div>
             </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
             <div>
               <label className="block text-xs font-bold text-slate-600 mb-1">יום שישי</label>
               <input
@@ -381,11 +406,11 @@ export function FinancePage() {
                 required
                 value={stallFriday}
                 onChange={(e) => setStallFriday(e.target.value)}
-                className="w-full px-3 py-2 rounded-xl border border-[#E8D5BE] bg-white text-sm font-semibold"
+                className="w-full px-2.5 py-2.5 rounded-xl border border-[#E8D5BE] bg-white text-xs font-semibold"
               />
             </div>
             <div>
-              <label className="block text-xs font-bold text-emerald-800 mb-1">מזומן בקופה (₪)</label>
+              <label className="block text-xs font-bold text-emerald-800 mb-1">מזומן (₪)</label>
               <input
                 type="number"
                 inputMode="decimal"
@@ -395,11 +420,11 @@ export function FinancePage() {
                 placeholder="0.00"
                 value={stallCash}
                 onChange={(e) => setStallCash(e.target.value)}
-                className="w-full px-3 py-2.5 rounded-xl border border-emerald-300 bg-white text-left tabular-nums font-extrabold text-emerald-800"
+                className="w-full px-3 py-2 rounded-xl border border-emerald-300 bg-white text-left tabular-nums font-extrabold text-emerald-800"
               />
             </div>
             <div>
-              <label className="block text-xs font-bold text-sky-800 mb-1">ביט בדוכן (₪)</label>
+              <label className="block text-xs font-bold text-sky-800 mb-1">פייבוקס (₪)</label>
               <input
                 type="number"
                 inputMode="decimal"
@@ -407,9 +432,23 @@ export function FinancePage() {
                 step="0.5"
                 dir="ltr"
                 placeholder="0.00"
-                value={stallBit}
-                onChange={(e) => setStallBit(e.target.value)}
-                className="w-full px-3 py-2.5 rounded-xl border border-sky-300 bg-white text-left tabular-nums font-extrabold text-sky-800"
+                value={stallPaybox}
+                onChange={(e) => setStallPaybox(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl border border-sky-300 bg-white text-left tabular-nums font-extrabold text-sky-800"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-amber-800 mb-1">העברה (₪)</label>
+              <input
+                type="number"
+                inputMode="decimal"
+                min="0"
+                step="0.5"
+                dir="ltr"
+                placeholder="0.00"
+                value={stallTransfer}
+                onChange={(e) => setStallTransfer(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl border border-amber-300 bg-white text-left tabular-nums font-extrabold text-amber-800"
               />
             </div>
           </div>
@@ -424,12 +463,10 @@ export function FinancePage() {
             />
             <button
               type="submit"
-              disabled={savingStall || (!Number(stallCash) && !Number(stallBit))}
+              disabled={savingStall || stallTotalInput <= 0}
               className="px-5 py-2.5 rounded-xl bg-[#C85A17] hover:bg-[#A9440F] disabled:opacity-50 text-white font-bold text-sm shadow-sm whitespace-nowrap"
             >
-              {savingStall
-                ? 'רושם...'
-                : `רשום קופה (${formatILS((Number(stallCash) || 0) + (Number(stallBit) || 0))})`}
+              {savingStall ? 'רושם...' : `רשום קופה (${formatILS(stallTotalInput)})`}
             </button>
           </div>
         </form>
@@ -440,28 +477,33 @@ export function FinancePage() {
           className="bg-white rounded-3xl border border-[#E8D5BE] shadow-soft p-5 space-y-3.5"
         >
           <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl bg-red-100 text-red-700 flex items-center justify-center">
+            <div className="w-9 h-9 rounded-xl bg-red-100 text-red-700 flex items-center justify-center shrink-0">
               <Receipt className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="font-serif text-xl font-bold text-slate-900">רישום הוצאה משתנה מהירה</h3>
-              <p className="text-xs text-slate-500">חומרי גלם, אריזות, דלק, שכר עובד דוכן ועוד.</p>
+              <h3 className="font-serif text-xl font-bold text-slate-900">רישום הוצאות תפעול שישי</h3>
+              <p className="text-xs text-slate-500">
+                רכש מאפייה במזומן, שכר עובד יומי, דלק / נסיעות, כביש 6 ועוד.
+              </p>
             </div>
           </div>
 
           <div className="flex flex-wrap gap-1.5">
             {EXPENSE_PRESETS.map((preset) => (
               <button
-                key={preset}
+                key={preset.label}
                 type="button"
-                onClick={() => setExpCategory(preset)}
-                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-colors ${
-                  expCategory === preset
+                onClick={() => {
+                  setExpCategory(preset.label);
+                  if (preset.defaultMethod) setExpMethod(preset.defaultMethod);
+                }}
+                className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold transition-colors ${
+                  expCategory === preset.label
                     ? 'bg-red-700 text-white'
                     : 'bg-[#FAF6F0] text-slate-600 hover:bg-[#F3E9DC]'
                 }`}
               >
-                {preset}
+                {preset.label}
               </button>
             ))}
           </div>
@@ -492,7 +534,7 @@ export function FinancePage() {
               onChange={(e) => setExpMethod(e.target.value as PaymentMethod)}
               className="px-3 py-2 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] text-sm font-semibold"
             >
-              {(['cash', 'bit', 'transfer'] as const).map((pm) => (
+              {(['cash', 'paybox', 'transfer'] as const).map((pm) => (
                 <option key={pm} value={pm}>
                   {PAYMENT_METHOD_LABELS[pm]}
                 </option>
@@ -512,7 +554,7 @@ export function FinancePage() {
               type="text"
               value={expNotes}
               onChange={(e) => setExpNotes(e.target.value)}
-              placeholder="פירוט / שם ספק חומרי גלם"
+              placeholder="פירוט / הערה"
               className="flex-1 px-3 py-2 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] text-sm"
             />
             <button
@@ -526,7 +568,7 @@ export function FinancePage() {
         </form>
       </div>
 
-      {/* כרטיסי תזרים לפי אמצעי תשלום (לפי הסינון הנוכחי) */}
+      {/* כרטיסי תזרים לפי 3 אמצעי התשלום (לפי הסינון הנוכחי) */}
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 tabular-nums">
         <div className="bg-white rounded-2xl p-4 border border-[#E8D5BE]/80 shadow-soft">
           <div className="text-xs font-bold text-slate-500">הכנסות (מסונן)</div>
@@ -541,8 +583,8 @@ export function FinancePage() {
           <div className="text-xl font-extrabold text-slate-900 mt-1">{formatILS(summary.cashNet)}</div>
         </div>
         <div className="bg-white rounded-2xl p-4 border border-sky-200 shadow-soft">
-          <div className="text-xs font-bold text-sky-800">נטו ביט</div>
-          <div className="text-xl font-extrabold text-slate-900 mt-1">{formatILS(summary.bitNet)}</div>
+          <div className="text-xs font-bold text-sky-800">נטו פייבוקס</div>
+          <div className="text-xl font-extrabold text-slate-900 mt-1">{formatILS(summary.payboxNet)}</div>
         </div>
         <div className="bg-white rounded-2xl p-4 border border-amber-200 shadow-soft">
           <div className="text-xs font-bold text-amber-800">נטו העברה בנקאית</div>
@@ -597,7 +639,7 @@ export function FinancePage() {
               >
                 <option value="">כל אמצעי התשלום</option>
                 <option value="cash">מזומן</option>
-                <option value="bit">ביט</option>
+                <option value="paybox">פייבוקס</option>
                 <option value="transfer">העברה בנקאית</option>
               </select>
             </div>
@@ -628,7 +670,7 @@ export function FinancePage() {
                           className={`px-2 py-0.5 rounded-md font-bold text-[11px] ${
                             t.payment_method === 'cash'
                               ? 'bg-emerald-50 text-emerald-800'
-                              : t.payment_method === 'bit'
+                              : t.payment_method === 'paybox'
                               ? 'bg-sky-50 text-sky-800'
                               : 'bg-amber-50 text-amber-800'
                           }`}
@@ -754,6 +796,14 @@ export function FinancePage() {
         </div>
       </div>
 
+      {/* חלונית ניהול פחת סוף יום */}
+      <WasteTrackingSheet
+        open={wasteOpen}
+        initialFriday={stallFriday}
+        onClose={() => setWasteOpen(false)}
+        onSaved={load}
+      />
+
       {/* מודאל תנועה ידנית */}
       {showTxModal && (
         <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
@@ -820,7 +870,7 @@ export function FinancePage() {
                     onChange={(e) => setTxForm({ ...txForm, payment_method: e.target.value as PaymentMethod })}
                     className="w-full px-3 py-2 rounded-xl border border-[#E8D5BE] text-sm"
                   >
-                    {(['cash', 'bit', 'transfer'] as const).map((pm) => (
+                    {(['cash', 'paybox', 'transfer'] as const).map((pm) => (
                       <option key={pm} value={pm}>
                         {PAYMENT_METHOD_LABELS[pm]}
                       </option>
@@ -888,7 +938,7 @@ export function FinancePage() {
                   required
                   value={fixedForm.name}
                   onChange={(e) => setFixedForm({ ...fixedForm, name: e.target.value })}
-                  placeholder="לדוגמה: שכירות מטבח / ביטוח / אחסון / תוכנה"
+                  placeholder="לדוגמה: שכירות דוכן / ביטוח / אחסון / תוכנה"
                   className="w-full px-3.5 py-2 rounded-xl border border-[#E8D5BE] text-sm"
                 />
               </div>
@@ -929,7 +979,7 @@ export function FinancePage() {
                   }
                   className="w-full px-3 py-2 rounded-xl border border-[#E8D5BE] text-sm"
                 >
-                  {(['cash', 'bit', 'transfer'] as const).map((pm) => (
+                  {(['cash', 'paybox', 'transfer'] as const).map((pm) => (
                     <option key={pm} value={pm}>
                       {PAYMENT_METHOD_LABELS[pm]}
                     </option>

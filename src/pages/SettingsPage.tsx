@@ -519,7 +519,7 @@ export function SettingsPage() {
                 rows={4}
                 value={settings.whatsapp_footer}
                 onChange={(e) => setSettings({ ...settings, whatsapp_footer: e.target.value })}
-                placeholder="לדוגמה: לתשלום בביט: 050-5551000 | שבת שלום ומבורכת!"
+                placeholder="לדוגמה: לתשלום בפייבוקס: 050-5551000 | שבת שלום ומבורכת!"
                 className="w-full px-4 py-3 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] focus:bg-white focus:border-[#C85A17] focus:outline-none text-sm leading-relaxed"
               />
             </div>
@@ -962,7 +962,7 @@ export function SettingsPage() {
                   onChange={(e) => setPayMethod(e.target.value as PaymentMethod)}
                   className="w-full px-3 py-2.5 rounded-xl border border-[#E8D5BE] text-sm"
                 >
-                  {(['transfer', 'bit', 'cash'] as const).map((pm) => (
+                  {(['transfer', 'paybox', 'cash'] as const).map((pm) => (
                     <option key={pm} value={pm}>
                       {PAYMENT_METHOD_LABELS[pm]}
                     </option>

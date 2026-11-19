@@ -12,13 +12,13 @@ interface QuickPaymentSheetProps {
 
 export function QuickPaymentSheet({ order, onClose, onConfirm }: QuickPaymentSheetProps) {
   const [amount, setAmount] = useState('');
-  const [method, setMethod] = useState<PaymentMethod>('bit');
+  const [method, setMethod] = useState<PaymentMethod>('paybox');
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (order) {
       setAmount(order.total_amount.toFixed(2));
-      setMethod('bit');
+      setMethod('paybox');
     }
   }, [order]);
 
@@ -52,8 +52,8 @@ export function QuickPaymentSheet({ order, onClose, onConfirm }: QuickPaymentShe
               {(
                 [
                   ['cash', 'מזומן', Banknote, 'emerald'],
-                  ['bit', 'ביט', Smartphone, 'sky'],
-                  ['transfer', 'העברה', Landmark, 'amber'],
+                  ['paybox', 'פייבוקס', Smartphone, 'sky'],
+                  ['transfer', 'העברה בנקאית', Landmark, 'amber'],
                 ] as const
               ).map(([pm, label, Icon]) => {
                 const active = method === pm;

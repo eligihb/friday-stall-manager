@@ -120,7 +120,7 @@ export function FridayInventory() {
                   <th className="text-right py-3.5 px-4 font-bold">מוצר</th>
                   <th className="text-center py-3.5 px-3 font-bold">ספקים</th>
                   <th className="text-center py-3.5 px-3 font-bold">לקוחות</th>
-                  <th className="text-center py-3.5 px-3 font-bold">חסד</th>
+                  <th className="text-center py-3.5 px-3 font-bold">מסובסדות</th>
                   <th className="text-center py-3.5 px-3 font-bold">אקסטרה לדוכן</th>
                   <th className="text-center py-3.5 px-4 font-bold bg-[#FFF7ED]">סה״כ להכנה</th>
                   <th className="text-center py-3.5 px-3 font-bold">שמירה</th>

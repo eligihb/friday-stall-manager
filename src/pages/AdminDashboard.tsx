@@ -14,6 +14,7 @@ import {
   ShieldAlert,
   CheckCircle2,
   Trash2,
+  AlertOctagon,
 } from 'lucide-react';
 import { apiFetch } from '../lib/api';
 import { formatFridayLabel, formatILS } from '../lib/format';
@@ -23,6 +24,7 @@ import { FridaySelector } from '../components/FridaySelector';
 import { WhatsAppOrderParser } from '../components/WhatsAppOrderParser';
 import { OrderCard } from '../components/OrderCard';
 import { QuickPaymentSheet } from '../components/QuickPaymentSheet';
+import { WasteTrackingSheet } from '../components/WasteTrackingSheet';
 import type { AdminTab } from '../components/Layout';
 import type {
   AdminProduct,
@@ -52,6 +54,7 @@ export function AdminDashboard({ onNavigate }: AdminDashboardProps) {
   const [copiedProd, setCopiedProd] = useState(false);
   const [boardFilter, setBoardFilter] = useState<string>('');
   const [payOrder, setPayOrder] = useState<Order | null>(null);
+  const [wasteOpen, setWasteOpen] = useState(false);
   const [loading, setLoading] = useState(true);
 
   const loadAll = useCallback(async () => {
@@ -398,7 +401,15 @@ export function AdminDashboard({ onNavigate }: AdminDashboardProps) {
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setWasteOpen(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-red-50 hover:bg-red-100 border border-red-200 text-red-800 font-bold text-xs shadow-sm"
+            >
+              <AlertOctagon className="w-4 h-4" />
+              <span>ניהול פחת סוף יום</span>
+            </button>
             <button
               type="button"
               onClick={copyProductionWhatsApp}
@@ -462,7 +473,7 @@ export function AdminDashboard({ onNavigate }: AdminDashboardProps) {
                         )}
                         {it.charity_qty > 0 && (
                           <span className="px-2 py-0.5 rounded-md bg-purple-50 text-purple-800 font-bold">
-                            נזקקים {it.charity_qty}
+                            מסובסדות {it.charity_qty}
                           </span>
                         )}
                         <span className="text-slate-400 font-semibold">
@@ -533,7 +544,7 @@ export function AdminDashboard({ onNavigate }: AdminDashboardProps) {
                     <th className="text-right py-3 px-4 font-bold">מוצר</th>
                     <th className="text-center py-3 px-2.5 font-bold">לקוחות</th>
                     <th className="text-center py-3 px-2.5 font-bold">ספקים</th>
-                    <th className="text-center py-3 px-2.5 font-bold">נזקקים</th>
+                    <th className="text-center py-3 px-2.5 font-bold">מסובסדות</th>
                     <th className="text-center py-3 px-3 font-bold">מלאי חופשי לדוכן</th>
                     <th className="text-center py-3 px-3 font-bold bg-[#FFF7ED]">סה״כ לרכש</th>
                     <th className="text-left py-3 px-4 font-bold">עלות מאפייה (מזומן)</th>
@@ -700,6 +711,13 @@ export function AdminDashboard({ onNavigate }: AdminDashboardProps) {
         order={payOrder}
         onClose={() => setPayOrder(null)}
         onConfirm={handleConfirmQuickPay}
+      />
+
+      {/* חלונית ניהול פחת סוף יום שישי */}
+      <WasteTrackingSheet
+        open={wasteOpen}
+        initialFriday={fridayDate}
+        onClose={() => setWasteOpen(false)}
       />
     </div>
   );

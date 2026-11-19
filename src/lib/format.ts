@@ -80,7 +80,7 @@ export function getFridaysRange(pastCount = 3, upcomingCount = 6): string[] {
 export const ORDER_TYPE_LABELS: Record<OrderType, string> = {
   customer: 'לקוח',
   supplier: 'ספק סיטונאי',
-  charity: 'תרומה למשפחות נזקקות',
+  charity: 'הזמנה מסובסדת',
 };
 
 export const ORDER_STATUS_LABELS: Record<OrderStatus, string> = {
@@ -92,6 +92,6 @@ export const ORDER_STATUS_LABELS: Record<OrderStatus, string> = {
 
 export const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
   cash: 'מזומן',
-  bit: 'ביט',
+  paybox: 'פייבוקס',
   transfer: 'העברה בנקאית',
 };

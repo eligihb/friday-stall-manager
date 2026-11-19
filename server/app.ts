@@ -13,6 +13,7 @@ import financeRoutes from './routes/finance.ts';
 import inventoryRoutes from './routes/inventory.ts';
 import settingsRoutes from './routes/settings.ts';
 import publicRoutes from './routes/public.ts';
+import subsidizedRoutes from './routes/subsidized.ts';
 
 export function createApp() {
   const app = express();
@@ -43,6 +44,7 @@ export function createApp() {
   app.use('/api/finance', financeRoutes);
   app.use('/api/inventory', inventoryRoutes);
   app.use('/api/settings', settingsRoutes);
+  app.use('/api/subsidized', subsidizedRoutes);
 
   // Serve built frontend in production (supports both /friday-stall-manager/ base and /)
   const distDir = path.resolve(process.cwd(), 'dist');

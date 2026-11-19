@@ -37,7 +37,7 @@ export function AdminOrders() {
   // מודאל עדכון תשלום
   const [payOrder, setPayOrder] = useState<Order | null>(null);
   const [payValue, setPayValue] = useState('');
-  const [payMethod, setPayMethod] = useState<PaymentMethod>('bit');
+  const [payMethod, setPayMethod] = useState<PaymentMethod>('paybox');
 
   const loadData = async () => {
     setLoading(true);
@@ -204,7 +204,7 @@ export function AdminOrders() {
           { key: '', label: 'הכל' },
           { key: 'supplier', label: 'ספקים סיטונאיים' },
           { key: 'customer', label: 'לקוחות' },
-          { key: 'charity', label: 'חסד ותרומה' },
+          { key: 'charity', label: 'הזמנות מסובסדות' },
         ].map((f) => (
           <button
             key={f.key}
@@ -574,7 +574,7 @@ export function AdminOrders() {
                       onChange={(e) => setPaymentMethod(e.target.value as PaymentMethod)}
                       className="w-full px-3 py-2 rounded-xl border border-[#E8D5BE] text-sm"
                     >
-                      {(['cash', 'bit', 'transfer'] as const).map((pm) => (
+                      {(['cash', 'paybox', 'transfer'] as const).map((pm) => (
                         <option key={pm} value={pm}>
                           {PAYMENT_METHOD_LABELS[pm]}
                         </option>
@@ -652,7 +652,7 @@ export function AdminOrders() {
                   onChange={(e) => setPayMethod(e.target.value as PaymentMethod)}
                   className="w-full px-3.5 py-2.5 rounded-xl border border-[#E8D5BE] text-sm"
                 >
-                  {(['cash', 'bit', 'transfer'] as const).map((pm) => (
+                  {(['cash', 'paybox', 'transfer'] as const).map((pm) => (
                     <option key={pm} value={pm}>
                       {PAYMENT_METHOD_LABELS[pm]}
                     </option>

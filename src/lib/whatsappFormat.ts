@@ -21,7 +21,7 @@ export function formatProductionWhatsApp(
     const breakdown: string[] = [];
     if (item.supplier_qty > 0) breakdown.push(`ספקים: ${item.supplier_qty}`);
     if (item.customer_qty > 0) breakdown.push(`לקוחות: ${item.customer_qty}`);
-    if (item.charity_qty > 0) breakdown.push(`נזקקים: ${item.charity_qty}`);
+    if (item.charity_qty > 0) breakdown.push(`מסובסדות: ${item.charity_qty}`);
     if (item.extra_stall_qty > 0) breakdown.push(`דוכן: ${item.extra_stall_qty}`);
     const details = breakdown.length ? ` (${breakdown.join(' | ')})` : '';
     lines.push(`• *${item.product_name}*: ${item.total_to_bake} יח׳${details}`);

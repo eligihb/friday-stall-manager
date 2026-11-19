@@ -182,9 +182,29 @@ async function initializeSchemaAndSeed(db: DbClient): Promise<void> {
         UNIQUE (product_id, effective_date)
       );
 
+      CREATE TABLE IF NOT EXISTS subsidized_entities (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL UNIQUE,
+        phone TEXT DEFAULT '',
+        notes TEXT DEFAULT '',
+        is_active INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
+      CREATE TABLE IF NOT EXISTS subsidized_payments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        entity_id INTEGER NOT NULL REFERENCES subsidized_entities(id) ON DELETE CASCADE,
+        date TEXT NOT NULL DEFAULT (date('now')),
+        amount REAL NOT NULL CHECK (amount > 0),
+        payment_method TEXT NOT NULL CHECK (payment_method IN ('cash', 'paybox', 'transfer')) DEFAULT 'cash',
+        notes TEXT DEFAULT '',
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
       CREATE TABLE IF NOT EXISTS orders (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        subsidized_entity_id INTEGER REFERENCES subsidized_entities(id) ON DELETE SET NULL,
         recipient_name TEXT NOT NULL,
         friday_date TEXT NOT NULL,
         order_type TEXT NOT NULL CHECK (order_type IN ('customer', 'supplier', 'charity')),
@@ -215,7 +235,7 @@ async function initializeSchemaAndSeed(db: DbClient): Promise<void> {
         friday_date TEXT,
         type TEXT NOT NULL CHECK (type IN ('income', 'expense')),
         category TEXT NOT NULL,
-        payment_method TEXT NOT NULL CHECK (payment_method IN ('cash', 'bit', 'transfer')),
+        payment_method TEXT NOT NULL CHECK (payment_method IN ('cash', 'paybox', 'transfer')),
         amount REAL NOT NULL CHECK (amount >= 0),
         user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
         notes TEXT DEFAULT ''
@@ -226,7 +246,7 @@ async function initializeSchemaAndSeed(db: DbClient): Promise<void> {
         name TEXT NOT NULL,
         amount REAL NOT NULL CHECK (amount >= 0),
         frequency TEXT NOT NULL CHECK (frequency IN ('weekly', 'monthly')),
-        payment_method TEXT NOT NULL CHECK (payment_method IN ('cash', 'bit', 'transfer')),
+        payment_method TEXT NOT NULL CHECK (payment_method IN ('cash', 'paybox', 'transfer')),
         is_active INTEGER NOT NULL DEFAULT 1
       );
 
@@ -235,6 +255,17 @@ async function initializeSchemaAndSeed(db: DbClient): Promise<void> {
         friday_date TEXT NOT NULL,
         product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
         extra_stall_qty INTEGER NOT NULL DEFAULT 0,
+        UNIQUE (friday_date, product_id)
+      );
+
+      CREATE TABLE IF NOT EXISTS waste_logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        friday_date TEXT NOT NULL,
+        product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+        quantity INTEGER NOT NULL CHECK (quantity >= 0),
+        unit_cost REAL NOT NULL DEFAULT 0,
+        notes TEXT DEFAULT '',
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
         UNIQUE (friday_date, product_id)
       );
 
@@ -251,6 +282,8 @@ async function initializeSchemaAndSeed(db: DbClient): Promise<void> {
       CREATE INDEX IF NOT EXISTS idx_order_items_order_id ON order_items(order_id);
       CREATE INDEX IF NOT EXISTS idx_transactions_friday_date ON transactions(friday_date);
       CREATE INDEX IF NOT EXISTS idx_friday_inventory_date ON friday_inventory(friday_date);
+      CREATE INDEX IF NOT EXISTS idx_waste_logs_friday_date ON waste_logs(friday_date);
+      CREATE INDEX IF NOT EXISTS idx_subsidized_payments_entity ON subsidized_payments(entity_id);
     `);
 
     // מיגרציה בטוחה לטבלאות קיימות ב-SQLite (הוספת awaiting_approval ו-admin_whatsapp_phone)
@@ -320,6 +353,88 @@ async function initializeSchemaAndSeed(db: DbClient): Promise<void> {
     }
     if (!ordCols.some((c) => c.name === 'vat_amount')) {
       await db.exec('ALTER TABLE orders ADD COLUMN vat_amount REAL NOT NULL DEFAULT 0;');
+    }
+    if (!ordCols.some((c) => c.name === 'subsidized_entity_id')) {
+      await db.exec('ALTER TABLE orders ADD COLUMN subsidized_entity_id INTEGER DEFAULT NULL;');
+    }
+    await db.exec('CREATE INDEX IF NOT EXISTS idx_orders_subsidized_entity ON orders(subsidized_entity_id);');
+
+    // מיגרציית v1.7.0: החלפת 'bit' ב-'paybox' בטבלאות transactions ו-fixed_expenses
+    const txDef = await db.get<{ sql: string }>(
+      "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'transactions'"
+    );
+    if (txDef?.sql && txDef.sql.includes("'bit'")) {
+      await db.exec(`
+        PRAGMA foreign_keys = OFF;
+        CREATE TABLE transactions_new (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          date TEXT NOT NULL DEFAULT (date('now')),
+          friday_date TEXT,
+          type TEXT NOT NULL CHECK (type IN ('income', 'expense')),
+          category TEXT NOT NULL,
+          payment_method TEXT NOT NULL CHECK (payment_method IN ('cash', 'paybox', 'transfer')),
+          amount REAL NOT NULL CHECK (amount >= 0),
+          user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+          notes TEXT DEFAULT ''
+        );
+        INSERT INTO transactions_new (id, date, friday_date, type, category, payment_method, amount, user_id, notes)
+        SELECT id, date, friday_date, type,
+               REPLACE(category, 'ביט', 'פייבוקס'),
+               CASE WHEN payment_method = 'bit' THEN 'paybox' ELSE payment_method END,
+               amount, user_id,
+               REPLACE(COALESCE(notes, ''), 'ביט', 'פייבוקס')
+        FROM transactions;
+        DROP TABLE transactions;
+        ALTER TABLE transactions_new RENAME TO transactions;
+        CREATE INDEX IF NOT EXISTS idx_transactions_friday_date ON transactions(friday_date);
+        PRAGMA foreign_keys = ON;
+      `);
+    }
+
+    const fixDef = await db.get<{ sql: string }>(
+      "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'fixed_expenses'"
+    );
+    if (fixDef?.sql && fixDef.sql.includes("'bit'")) {
+      await db.exec(`
+        PRAGMA foreign_keys = OFF;
+        CREATE TABLE fixed_expenses_new (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT NOT NULL,
+          amount REAL NOT NULL CHECK (amount >= 0),
+          frequency TEXT NOT NULL CHECK (frequency IN ('weekly', 'monthly')),
+          payment_method TEXT NOT NULL CHECK (payment_method IN ('cash', 'paybox', 'transfer')),
+          is_active INTEGER NOT NULL DEFAULT 1
+        );
+        INSERT INTO fixed_expenses_new (id, name, amount, frequency, payment_method, is_active)
+        SELECT id, name, amount, frequency,
+               CASE WHEN payment_method = 'bit' THEN 'paybox' ELSE payment_method END,
+               is_active
+        FROM fixed_expenses;
+        DROP TABLE fixed_expenses;
+        ALTER TABLE fixed_expenses_new RENAME TO fixed_expenses;
+        PRAGMA foreign_keys = ON;
+      `);
+    }
+
+    // עדכון טקסטים היסטוריים של 'ביט' בהערות הזמנות לדוגמה
+    await db.run("UPDATE orders SET notes = REPLACE(notes, 'בביט', 'בפייבוקס') WHERE notes LIKE '%בביט%'");
+  }
+
+  // זריעת 3 הגופים המוגדרים מראש להזמנות מסובסדות ("הכולל", "משפחה 1", "משפחה 2")
+  const existingEntities = await db.query<{ count: number | string }>(
+    'SELECT COUNT(*) as count FROM subsidized_entities'
+  );
+  if (Number(existingEntities[0]?.count ?? 0) === 0) {
+    const defaultEntities = [
+      { name: 'הכולל', phone: '', notes: 'חלוקה שבועית קבועה ותשלום חודשי במזומן' },
+      { name: 'משפחה 1', phone: '', notes: 'חבילת שישי מסובסדת' },
+      { name: 'משפחה 2', phone: '', notes: 'חבילת שישי מסובסדת' },
+    ];
+    for (const ent of defaultEntities) {
+      await db.run(
+        `INSERT INTO subsidized_entities (name, phone, notes, is_active) VALUES (?, ?, ?, ?)`,
+        [ent.name, ent.phone, ent.notes, db.isPostgres ? true : 1]
+      );
     }
   }
 
@@ -447,7 +562,7 @@ async function initializeSchemaAndSeed(db: DbClient): Promise<void> {
       const ord2 = await db.run(
         `INSERT INTO orders (user_id, recipient_name, friday_date, order_type, delivery_fee, credit_discount, total_amount, paid_amount, status, notes)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [cust1.lastInsertId, 'דנה כהן', upcomingFriday, 'customer', 0, 0, custTotal, custTotal, 'ready', 'שולם בביט מראש']
+        [cust1.lastInsertId, 'דנה כהן', upcomingFriday, 'customer', 0, 0, custTotal, custTotal, 'ready', 'שולם בפייבוקס מראש']
       );
       if (ord2.lastInsertId) {
         await db.run(
@@ -468,11 +583,12 @@ async function initializeSchemaAndSeed(db: DbClient): Promise<void> {
         );
       }
 
-      // Sample Charity Order
+      // Sample Subsidized Order (הכולל)
+      const kollel = await db.get<{ id: number }>("SELECT id FROM subsidized_entities WHERE name = 'הכולל'");
       const ord3 = await db.run(
-        `INSERT INTO orders (user_id, recipient_name, friday_date, order_type, delivery_fee, credit_discount, total_amount, paid_amount, status, notes)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [null, 'חלוקת חסד לשבת — עמותת מאיר פנים', upcomingFriday, 'charity', 0, 0, 0, 0, 'pending', 'תרומה קבועה לשבת']
+        `INSERT INTO orders (user_id, subsidized_entity_id, recipient_name, friday_date, order_type, delivery_fee, credit_discount, total_amount, paid_amount, status, notes)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [null, kollel?.id ?? null, 'הכולל', upcomingFriday, 'charity', 0, 0, 0, 0, 'pending', 'חבילת שישי מסובסדת קבועה']
       );
       if (ord3.lastInsertId) {
         await db.run(
@@ -519,7 +635,7 @@ async function initializeSchemaAndSeed(db: DbClient): Promise<void> {
       const todayStr = new Date().toISOString().slice(0, 10);
       await db.run(
         `INSERT INTO transactions (date, friday_date, type, category, payment_method, amount, user_id, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        [todayStr, upcomingFriday, 'income', 'תשלום הזמנה מוקדמת', 'bit', custTotal, cust1.lastInsertId, 'דנה כהן — הזמנה מוקדמת']
+        [todayStr, upcomingFriday, 'income', 'תשלום הזמנה מוקדמת', 'paybox', custTotal, cust1.lastInsertId, 'דנה כהן — הזמנה מוקדמת']
       );
       await db.run(
         `INSERT INTO transactions (date, friday_date, type, category, payment_method, amount, user_id, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -527,7 +643,7 @@ async function initializeSchemaAndSeed(db: DbClient): Promise<void> {
       );
       await db.run(
         `INSERT INTO transactions (date, friday_date, type, category, payment_method, amount, user_id, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        [todayStr, upcomingFriday, 'expense', 'חומרי גלם (קמח, שמן, תבלינים)', 'transfer', 1180, null, 'רכישה שבועית לספק חומרי גלם']
+        [todayStr, upcomingFriday, 'expense', 'דלק / נסיעות', 'cash', 120, null, 'נסיעת שישי למאפייה ולדוכן']
       );
     }
   }

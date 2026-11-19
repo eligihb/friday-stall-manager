@@ -30,6 +30,32 @@ interface StoredInventory {
   extra_stall_qty: number;
 }
 
+interface StoredSubsidizedEntity {
+  id: number;
+  name: string;
+  phone: string;
+  notes: string;
+  is_active: boolean;
+}
+
+interface StoredSubsidizedPayment {
+  id: number;
+  entity_id: number;
+  date: string;
+  amount: number;
+  payment_method: PaymentMethod;
+  notes: string;
+  created_at: string;
+}
+
+interface StoredWasteLog {
+  friday_date: string;
+  product_id: number;
+  quantity: number;
+  unit_cost: number;
+  notes: string;
+}
+
 interface LocalDb {
   nextIds: {
     users: number;
@@ -39,6 +65,8 @@ interface LocalDb {
     order_items: number;
     transactions: number;
     fixed_expenses: number;
+    subsidized_entities?: number;
+    subsidized_payments?: number;
   };
   users: StoredUser[];
   products: AdminProduct[];
@@ -48,7 +76,18 @@ interface LocalDb {
   transactions: Array<Omit<Transaction, 'user_name'>>;
   fixed_expenses: FixedExpense[];
   friday_inventory: StoredInventory[];
+  subsidized_entities?: StoredSubsidizedEntity[];
+  subsidized_payments?: StoredSubsidizedPayment[];
+  waste_logs?: StoredWasteLog[];
   settings: BusinessSettings;
+}
+
+function normalizePM(raw: unknown, fallback: PaymentMethod = 'cash'): PaymentMethod {
+  const s = String(raw || '');
+  if (s === 'cash') return 'cash';
+  if (s === 'paybox' || s === 'bit') return 'paybox';
+  if (s === 'transfer') return 'transfer';
+  return fallback;
 }
 
 function round2(n: number): number {
@@ -92,7 +131,17 @@ function createInitialDb(): LocalDb {
   const custTotal = 6 * 4 + 2 * 30 + 1 * 13 + 1 * 10; // 107
 
   return {
-    nextIds: { users: 5, products: 20, price_history: 20, orders: 4, order_items: 10, transactions: 4, fixed_expenses: 4 },
+    nextIds: {
+      users: 5,
+      products: 20,
+      price_history: 20,
+      orders: 4,
+      order_items: 10,
+      transactions: 4,
+      fixed_expenses: 4,
+      subsidized_entities: 4,
+      subsidized_payments: 1,
+    },
     users,
     products,
     product_price_history: products.map((p, idx) => ({
@@ -105,10 +154,17 @@ function createInitialDb(): LocalDb {
       customer_price: p.customer_price,
       created_at: today,
     })),
+    subsidized_entities: [
+      { id: 1, name: 'הכולל', phone: '', notes: 'חלוקה שבועית קבועה ותשלום חודשי במזומן', is_active: true },
+      { id: 2, name: 'משפחה 1', phone: '', notes: 'חבילת שישי מסובסדת', is_active: true },
+      { id: 3, name: 'משפחה 2', phone: '', notes: 'חבילת שישי מסובסדת', is_active: true },
+    ],
+    subsidized_payments: [],
+    waste_logs: [],
     orders: [
       { id: 1, user_id: 2, recipient_name: 'מעדניית ראש העין', friday_date: upcomingFriday, order_type: 'supplier', delivery_fee: 0, credit_discount: 0, total_amount: supTotal, paid_amount: 0, status: 'pending', notes: 'ארוז בארגזי חלוקה', created_at: today },
-      { id: 2, user_id: 4, recipient_name: 'דנה כהן', friday_date: upcomingFriday, order_type: 'customer', delivery_fee: 0, credit_discount: 0, total_amount: custTotal, paid_amount: custTotal, status: 'ready', notes: 'שולם בביט מראש', created_at: today },
-      { id: 3, user_id: null, recipient_name: 'חלוקת חסד לשבת — עמותת מאיר פנים', friday_date: upcomingFriday, order_type: 'charity', delivery_fee: 0, credit_discount: 0, total_amount: 0, paid_amount: 0, status: 'pending', notes: 'תרומה קבועה לשבת', created_at: today },
+      { id: 2, user_id: 4, recipient_name: 'דנה כהן', friday_date: upcomingFriday, order_type: 'customer', delivery_fee: 0, credit_discount: 0, total_amount: custTotal, paid_amount: custTotal, status: 'ready', notes: 'שולם בפייבוקס מראש', created_at: today },
+      { id: 3, user_id: null, subsidized_entity_id: 1, recipient_name: 'הכולל', friday_date: upcomingFriday, order_type: 'charity', delivery_fee: 0, credit_discount: 0, total_amount: 0, paid_amount: 0, status: 'pending', notes: 'חבילת שישי מסובסדת קבועה', created_at: today },
     ],
     order_items: [
       { id: 1, order_id: 1, product_id: 1, quantity: 30, unit_price_snapshot: 3.7, cost_price_snapshot: 2.5 },
@@ -122,9 +178,9 @@ function createInitialDb(): LocalDb {
       { id: 9, order_id: 3, product_id: 4, quantity: 3, unit_price_snapshot: 0, cost_price_snapshot: 20 },
     ],
     transactions: [
-      { id: 1, date: today, friday_date: upcomingFriday, type: 'income', category: 'תשלום הזמנה מוקדמת', payment_method: 'bit', amount: custTotal, user_id: 4, notes: 'דנה כהן — הזמנה מוקדמת' },
+      { id: 1, date: today, friday_date: upcomingFriday, type: 'income', category: 'תשלום הזמנה מוקדמת', payment_method: 'paybox', amount: custTotal, user_id: 4, notes: 'דנה כהן — הזמנה מוקדמת' },
       { id: 2, date: today, friday_date: upcomingFriday, type: 'income', category: 'סגירת חוב ספק', payment_method: 'transfer', amount: 650, user_id: 3, notes: 'תשלום משבוע שעבר' },
-      { id: 3, date: today, friday_date: upcomingFriday, type: 'expense', category: 'חומרי גלם (קמח, שמן, תבלינים)', payment_method: 'transfer', amount: 1180, user_id: null, notes: 'רכישה שבועית לספק חומרי גלם' },
+      { id: 3, date: today, friday_date: upcomingFriday, type: 'expense', category: 'דלק / נסיעות', payment_method: 'cash', amount: 120, user_id: null, notes: 'נסיעת שישי למאפייה ולדוכן' },
     ],
     fixed_expenses: [
       { id: 1, name: 'שכירות דוכן שוק שישי', amount: 450, frequency: 'weekly', payment_method: 'transfer', is_active: true },
@@ -257,6 +313,39 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
   }
   if (!db.nextIds.price_history) {
     db.nextIds.price_history = db.product_price_history.length + 1;
+  }
+  // מיגרציות v1.7.0 ב-localStorage: פייבוקס, הזמנות מסובסדות ופחת
+  if (!db.subsidized_entities) {
+    db.subsidized_entities = [
+      { id: 1, name: 'הכולל', phone: '', notes: 'חלוקה שבועית קבועה ותשלום חודשי במזומן', is_active: true },
+      { id: 2, name: 'משפחה 1', phone: '', notes: 'חבילת שישי מסובסדת', is_active: true },
+      { id: 3, name: 'משפחה 2', phone: '', notes: 'חבילת שישי מסובסדת', is_active: true },
+    ];
+    db.nextIds.subsidized_entities = 4;
+  }
+  if (!db.nextIds.subsidized_entities) {
+    db.nextIds.subsidized_entities = Math.max(0, ...db.subsidized_entities.map((e) => e.id)) + 1;
+  }
+  if (!db.subsidized_payments) {
+    db.subsidized_payments = [];
+    db.nextIds.subsidized_payments = 1;
+  }
+  if (!db.nextIds.subsidized_payments) {
+    db.nextIds.subsidized_payments = Math.max(0, ...db.subsidized_payments.map((p) => p.id)) + 1;
+  }
+  if (!db.waste_logs) {
+    db.waste_logs = [];
+  }
+  for (const t of db.transactions) {
+    if ((t.payment_method as string) === 'bit') t.payment_method = 'paybox';
+    if (t.category.includes('ביט')) t.category = t.category.replace(/ביט/g, 'פייבוקס');
+    if (t.notes.includes('ביט')) t.notes = t.notes.replace(/ביט/g, 'פייבוקס');
+  }
+  for (const f of db.fixed_expenses) {
+    if ((f.payment_method as string) === 'bit') f.payment_method = 'paybox';
+  }
+  for (const o of db.orders) {
+    if (o.notes.includes('בביט')) o.notes = o.notes.replace(/בביט/g, 'בפייבוקס');
   }
   for (const p of db.products) {
     if (!db.product_price_history.some((h) => h.product_id === p.id)) {
@@ -623,12 +712,21 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
     } else {
       order_type = body.order_type === 'supplier' || body.order_type === 'charity' ? body.order_type : 'customer';
       user_id = body.user_id ? Number(body.user_id) : null;
-      recipient_name = String(body.recipient_name || (user_id ? userMap.get(user_id)?.name : '') || '').trim();
+      const subEntId =
+        order_type === 'charity' && body.subsidized_entity_id ? Number(body.subsidized_entity_id) : null;
+      const matchedEnt = subEntId
+        ? db.subsidized_entities?.find((e) => e.id === subEntId)
+        : order_type === 'charity' && body.recipient_name
+        ? db.subsidized_entities?.find((e) => e.name === String(body.recipient_name).trim())
+        : undefined;
+      recipient_name = String(
+        body.recipient_name || matchedEnt?.name || (user_id ? userMap.get(user_id)?.name : '') || ''
+      ).trim();
       if (!recipient_name) throwErr('יש להזין שם מקבל ההזמנה', 400);
       delivery_fee = order_type === 'charity' ? 0 : Math.max(0, Number(body.delivery_fee || 0));
       credit_discount = order_type === 'charity' ? 0 : Math.max(0, Number(body.credit_discount || 0));
       paid_amount = order_type === 'charity' ? 0 : Math.max(0, Number(body.paid_amount || 0));
-      payment_method = body.payment_method === 'bit' || body.payment_method === 'transfer' ? body.payment_method : 'cash';
+      payment_method = normalizePM(body.payment_method, 'cash');
       tier =
         order_type === 'charity'
           ? 'charity'
@@ -637,6 +735,7 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
           : body.price_tier === 'customer_price'
           ? 'customer_price'
           : 'preorder_price';
+      (body as Record<string, unknown>).__resolvedSubEntId = matchedEnt?.id ?? subEntId ?? null;
     }
 
     let subtotal = 0;
@@ -683,6 +782,10 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
     db.orders.push({
       id: orderId,
       user_id,
+      subsidized_entity_id:
+        order_type === 'charity'
+          ? ((body as Record<string, unknown>).__resolvedSubEntId as number | null) ?? null
+          : null,
       recipient_name,
       friday_date,
       order_type,
@@ -740,8 +843,7 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
             if (u) u.balance = round2(u.balance + diff);
           }
           if (diff > 0) {
-            const pm: PaymentMethod =
-              body.payment_method === 'bit' || body.payment_method === 'transfer' ? body.payment_method : 'cash';
+            const pm: PaymentMethod = normalizePM(body.payment_method, 'cash');
             db.transactions.push({
               id: db.nextIds.transactions++,
               date: new Date().toISOString().slice(0, 10),
@@ -916,7 +1018,7 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
         friday_date: body.friday_date ? String(body.friday_date).slice(0, 10) : null,
         type: 'income',
         category: u.role === 'supplier' ? 'סגירת חוב ספק' : 'תשלום מלקוח',
-        payment_method: body.payment_method === 'cash' || body.payment_method === 'bit' ? body.payment_method : 'transfer',
+        payment_method: normalizePM(body.payment_method, 'transfer'),
         amount: round2(amt),
         user_id: uid,
         notes: String(body.notes || `תשלום מאת ${u.name}`).trim(),
@@ -1002,9 +1104,195 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
     return { ok: true } as T;
   }
 
+  // --- SUBSIDIZED ENTITIES & PAYMENTS ---
+  if (path.startsWith('/api/subsidized')) {
+    requireAdmin();
+    const entities = db.subsidized_entities || [];
+    const payments = db.subsidized_payments || [];
+
+    if (path === '/api/subsidized' && method === 'GET') {
+      const entityByName = new Map(entities.map((e) => [e.name.trim(), e.id]));
+      const stats = new Map<number, { orders: number; units: number; cost: number; paid: number }>();
+      for (const e of entities) stats.set(e.id, { orders: 0, units: 0, cost: 0, paid: 0 });
+
+      let unlinkedCost = 0;
+      let unlinkedUnits = 0;
+      for (const o of db.orders) {
+        if (o.order_type !== 'charity' || o.status === 'awaiting_approval') continue;
+        const oItems = db.order_items.filter((oi) => oi.order_id === o.id);
+        const cost = round2(oItems.reduce((s, it) => s + it.quantity * it.cost_price_snapshot, 0));
+        const units = oItems.reduce((s, it) => s + it.quantity, 0);
+        const eid = o.subsidized_entity_id ?? entityByName.get(o.recipient_name.trim()) ?? null;
+        if (eid && stats.has(eid)) {
+          const st = stats.get(eid)!;
+          st.orders += 1;
+          st.units += units;
+          st.cost = round2(st.cost + cost);
+        } else {
+          unlinkedCost = round2(unlinkedCost + cost);
+          unlinkedUnits += units;
+        }
+      }
+      for (const p of payments) {
+        if (stats.has(p.entity_id)) {
+          stats.get(p.entity_id)!.paid = round2(stats.get(p.entity_id)!.paid + p.amount);
+        }
+      }
+
+      const entMap = new Map(entities.map((e) => [e.id, e]));
+      const hydrated = entities.map((e) => {
+        const s = stats.get(e.id) || { orders: 0, units: 0, cost: 0, paid: 0 };
+        return {
+          ...e,
+          total_orders: s.orders,
+          total_units: s.units,
+          total_cost: round2(s.cost),
+          total_paid: round2(s.paid),
+          net_subsidy_gap: round2(s.cost - s.paid),
+        };
+      });
+      const total_cost = round2(hydrated.reduce((s, e) => s + e.total_cost, 0) + unlinkedCost);
+      const total_paid = round2(hydrated.reduce((s, e) => s + e.total_paid, 0));
+      const total_units = hydrated.reduce((s, e) => s + e.total_units, 0) + unlinkedUnits;
+
+      return {
+        entities: hydrated,
+        payments: [...payments]
+          .sort((a, b) => b.date.localeCompare(a.date) || b.id - a.id)
+          .map((p) => ({ ...p, entity_name: entMap.get(p.entity_id)?.name || '' })),
+        totals: {
+          total_cost,
+          total_paid,
+          net_subsidy_expense: round2(total_cost - total_paid),
+          total_units,
+        },
+      } as T;
+    }
+
+    if (path === '/api/subsidized/entities' && method === 'POST') {
+      const name = String(body.name || '').trim();
+      if (!name) throwErr('יש להזין שם לגוף המסובסד', 400);
+      if (entities.some((e) => e.name === name)) throwErr('כבר קיים גוף מסובסד בשם זה', 409);
+      const id = db.nextIds.subsidized_entities!++;
+      entities.push({
+        id,
+        name,
+        phone: String(body.phone || '').trim(),
+        notes: String(body.notes || '').trim(),
+        is_active: true,
+      });
+      saveDb(db);
+      return { id } as T;
+    }
+
+    const entMatch = path.match(/^\/api\/subsidized\/entities\/(\d+)$/);
+    if (entMatch) {
+      const eid = Number(entMatch[1]);
+      const ent = entities.find((e) => e.id === eid);
+      if (!ent) throwErr('הגוף המסובסד לא נמצא', 404);
+      if (method === 'PUT') {
+        const name = String(body.name || '').trim();
+        if (!name) throwErr('יש להזין שם תקין', 400);
+        if (entities.some((e) => e.name === name && e.id !== eid)) throwErr('כבר קיים גוף מסובסד בשם זה', 409);
+        ent.name = name;
+        ent.phone = String(body.phone || '').trim();
+        ent.notes = String(body.notes || '').trim();
+        for (const o of db.orders) {
+          if (o.subsidized_entity_id === eid) o.recipient_name = name;
+        }
+        saveDb(db);
+        return { ok: true } as T;
+      }
+      if (method === 'DELETE') {
+        db.subsidized_entities = entities.filter((e) => e.id !== eid);
+        db.subsidized_payments = payments.filter((p) => p.entity_id !== eid);
+        for (const o of db.orders) {
+          if (o.subsidized_entity_id === eid) o.subsidized_entity_id = null;
+        }
+        saveDb(db);
+        return { ok: true } as T;
+      }
+    }
+
+    if (path === '/api/subsidized/payments' && method === 'POST') {
+      const entity_id = Number(body.entity_id);
+      const amount = Number(body.amount);
+      const ent = entities.find((e) => e.id === entity_id);
+      if (!ent || !amount || amount <= 0) throwErr('יש לבחור גוף ולהזין סכום חיובי', 400);
+      const id = db.nextIds.subsidized_payments!++;
+      payments.push({
+        id,
+        entity_id,
+        date: String(body.date || new Date().toISOString().slice(0, 10)).slice(0, 10),
+        amount: round2(amount),
+        payment_method: normalizePM(body.payment_method, 'cash'),
+        notes: String(body.notes || `תשלום חודשי — ${ent.name}`).trim(),
+        created_at: new Date().toISOString().slice(0, 10),
+      });
+      saveDb(db);
+      return { id } as T;
+    }
+
+    const payDel = path.match(/^\/api\/subsidized\/payments\/(\d+)$/);
+    if (payDel && method === 'DELETE') {
+      db.subsidized_payments = payments.filter((p) => p.id !== Number(payDel[1]));
+      saveDb(db);
+      return { ok: true } as T;
+    }
+  }
+
   // --- FINANCE ---
   if (path.startsWith('/api/finance')) {
     requireAdmin();
+
+    if (path === '/api/finance/waste' && method === 'GET') {
+      const fri = String(q.get('friday_date') || getNextFridayISO()).slice(0, 10);
+      const wMap = new Map((db.waste_logs || []).filter((w) => w.friday_date === fri).map((w) => [w.product_id, w]));
+      const items = db.products
+        .filter((p) => p.is_active)
+        .map((p) => {
+          const w = wMap.get(p.id);
+          const qty = w ? w.quantity : 0;
+          const unitCost = w && w.unit_cost > 0 ? w.unit_cost : p.cost_price;
+          return {
+            product_id: p.id,
+            product_name: p.name,
+            cost_price: round2(unitCost),
+            quantity: qty,
+            line_cost: round2(qty * unitCost),
+            notes: w?.notes || '',
+          };
+        });
+      return {
+        friday_date: fri,
+        items,
+        total_waste_units: items.reduce((s, i) => s + i.quantity, 0),
+        total_waste_cost: round2(items.reduce((s, i) => s + i.line_cost, 0)),
+      } as T;
+    }
+
+    if (path === '/api/finance/waste' && method === 'PUT') {
+      const fri = String(body.friday_date || getNextFridayISO()).slice(0, 10);
+      const rawItems = Array.isArray(body.items) ? body.items : [];
+      if (!db.waste_logs) db.waste_logs = [];
+      for (const row of rawItems) {
+        const pid = Number(row.product_id);
+        const qty = Math.max(0, Math.floor(Number(row.quantity) || 0));
+        const notes = String(row.notes || '').trim();
+        const p = prodMap.get(pid);
+        if (!p) continue;
+        db.waste_logs = db.waste_logs.filter((w) => !(w.friday_date === fri && w.product_id === pid));
+        if (qty > 0) {
+          const hist = (db.product_price_history || [])
+            .filter((h) => h.product_id === pid && h.effective_date <= fri)
+            .sort((a, b) => b.effective_date.localeCompare(a.effective_date) || b.id - a.id)[0];
+          const unitCost = round2(hist ? hist.cost_price : p.cost_price);
+          db.waste_logs.push({ friday_date: fri, product_id: pid, quantity: qty, unit_cost: unitCost, notes });
+        }
+      }
+      saveDb(db);
+      return { ok: true } as T;
+    }
 
     if (path === '/api/finance/transactions' && method === 'GET') {
       let list = [...db.transactions];
@@ -1023,17 +1311,25 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
       const fri = String(body.friday_date || getNextFridayISO()).slice(0, 10);
       const date = String(body.date || new Date().toISOString().slice(0, 10)).slice(0, 10);
       const cash = Math.max(0, Number(body.cash_amount || 0));
-      const bit = Math.max(0, Number(body.bit_amount || 0));
-      if (cash <= 0 && bit <= 0) throwErr('יש להזין סכום במזומן או בביט', 400);
+      const paybox = Math.max(0, Number(body.paybox_amount ?? body.bit_amount ?? 0));
+      const transfer = Math.max(0, Number(body.transfer_amount || 0));
+      if (cash <= 0 && paybox <= 0 && transfer <= 0) {
+        throwErr('יש להזין סכום במזומן, בפייבוקס או בהעברה בנקאית', 400);
+      }
       const ids: number[] = [];
       if (cash > 0) {
         const id = db.nextIds.transactions++;
         db.transactions.push({ id, date, friday_date: fri, type: 'income', category: 'מכירות דוכן שישי (מזומן)', payment_method: 'cash', amount: round2(cash), user_id: null, notes: String(body.notes || `סיכום קופה מזומן — ${fri}`) });
         ids.push(id);
       }
-      if (bit > 0) {
+      if (paybox > 0) {
         const id = db.nextIds.transactions++;
-        db.transactions.push({ id, date, friday_date: fri, type: 'income', category: 'מכירות דוכן שישי (ביט)', payment_method: 'bit', amount: round2(bit), user_id: null, notes: String(body.notes || `סיכום קופה ביט — ${fri}`) });
+        db.transactions.push({ id, date, friday_date: fri, type: 'income', category: 'מכירות דוכן שישי (פייבוקס)', payment_method: 'paybox', amount: round2(paybox), user_id: null, notes: String(body.notes || `סיכום קופה פייבוקס — ${fri}`) });
+        ids.push(id);
+      }
+      if (transfer > 0) {
+        const id = db.nextIds.transactions++;
+        db.transactions.push({ id, date, friday_date: fri, type: 'income', category: 'מכירות דוכן שישי (העברה בנקאית)', payment_method: 'transfer', amount: round2(transfer), user_id: null, notes: String(body.notes || `סיכום קופה העברה בנקאית — ${fri}`) });
         ids.push(id);
       }
       saveDb(db);
@@ -1048,7 +1344,7 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
         friday_date: body.friday_date ? String(body.friday_date).slice(0, 10) : null,
         type: body.type === 'expense' ? 'expense' : 'income',
         category: String(body.category || '').trim(),
-        payment_method: body.payment_method === 'bit' || body.payment_method === 'transfer' ? body.payment_method : 'cash',
+        payment_method: normalizePM(body.payment_method, 'cash'),
         amount: round2(Number(body.amount || 0)),
         user_id: body.user_id ? Number(body.user_id) : null,
         notes: String(body.notes || '').trim(),
@@ -1074,7 +1370,7 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
         name: String(body.name || '').trim(),
         amount: round2(Number(body.amount || 0)),
         frequency: body.frequency === 'monthly' ? 'monthly' : 'weekly',
-        payment_method: body.payment_method === 'cash' || body.payment_method === 'bit' ? body.payment_method : 'transfer',
+        payment_method: normalizePM(body.payment_method, 'transfer'),
         is_active: true,
       });
       saveDb(db);
@@ -1115,7 +1411,7 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
         fx.name = String(body.name || fx.name).trim();
         fx.amount = round2(Number(body.amount || fx.amount));
         fx.frequency = body.frequency === 'monthly' ? 'monthly' : 'weekly';
-        fx.payment_method = body.payment_method === 'cash' || body.payment_method === 'bit' ? body.payment_method : 'transfer';
+        fx.payment_method = normalizePM(body.payment_method, 'transfer');
         saveDb(db);
         return { ok: true } as T;
       }
@@ -1165,46 +1461,71 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
       const supplier_orders_revenue = round2(pOrders.filter((o) => o.order_type === 'supplier').reduce((s, o) => s + o.total_amount, 0));
 
       let orders_cogs = 0;
-      let charity_cogs = 0;
-      let charity_units = 0;
+      let period_subsidized_cost = 0;
+      let period_subsidized_units = 0;
       for (const oi of db.order_items) {
         const ord = pOrderMap.get(oi.order_id);
         if (!ord) continue;
         if (ord.order_type === 'charity') {
-          charity_cogs += oi.quantity * oi.cost_price_snapshot;
-          charity_units += oi.quantity;
+          period_subsidized_cost += oi.quantity * oi.cost_price_snapshot;
+          period_subsidized_units += oi.quantity;
         } else {
           orders_cogs += oi.quantity * oi.cost_price_snapshot;
         }
       }
+
+      // פחת סוף יום
+      let waste_cost = 0;
+      let waste_units = 0;
+      const wasteByDateProd = new Map<string, number>();
+      for (const w of db.waste_logs || []) {
+        if (!inRange(w.friday_date)) continue;
+        waste_units += w.quantity;
+        waste_cost += w.quantity * w.unit_cost;
+        const k = `${w.friday_date}_${w.product_id}`;
+        wasteByDateProd.set(k, (wasteByDateProd.get(k) || 0) + w.quantity);
+      }
+      waste_cost = round2(waste_cost);
 
       let extra_stall_cogs = 0;
       let extra_stall_units = 0;
       for (const fi of db.friday_inventory) {
         if (!inRange(fi.friday_date)) continue;
         const p = prodMap.get(fi.product_id);
-        extra_stall_units += fi.extra_stall_qty;
-        extra_stall_cogs += fi.extra_stall_qty * (p?.cost_price ?? 0);
+        const wastedQty = wasteByDateProd.get(`${fi.friday_date}_${fi.product_id}`) || 0;
+        const soldExtra = Math.max(0, fi.extra_stall_qty - wastedQty);
+        extra_stall_units += soldExtra;
+        extra_stall_cogs += soldExtra * (p?.cost_price ?? 0);
       }
+      extra_stall_cogs = round2(extra_stall_cogs);
 
       const pTx = db.transactions.filter((t) => inRange(t.friday_date || t.date));
       let walkin_stall_cash = 0;
-      let walkin_stall_bit = 0;
+      let walkin_stall_paybox = 0;
+      let walkin_stall_transfer = 0;
       let variable_expenses = 0;
+      let bakery_cash_purchases = 0;
       let posted_fixed_expenses = 0;
       const expMap = new Map<string, number>();
-      const rec = { cash: { in: 0, out: 0, net: 0 }, bit: { in: 0, out: 0, net: 0 }, transfer: { in: 0, out: 0, net: 0 } };
+      const rec = {
+        cash: { in: 0, out: 0, net: 0 },
+        paybox: { in: 0, out: 0, net: 0 },
+        transfer: { in: 0, out: 0, net: 0 },
+      };
 
       for (const t of pTx) {
+        const pm = normalizePM(t.payment_method, 'cash');
         if (t.type === 'income') {
-          rec[t.payment_method].in = round2(rec[t.payment_method].in + t.amount);
+          rec[pm].in = round2(rec[pm].in + t.amount);
           if (t.category.includes('דוכן')) {
-            if (t.payment_method === 'cash') walkin_stall_cash += t.amount;
-            else if (t.payment_method === 'bit') walkin_stall_bit += t.amount;
+            if (pm === 'cash') walkin_stall_cash += t.amount;
+            else if (pm === 'paybox') walkin_stall_paybox += t.amount;
+            else walkin_stall_transfer += t.amount;
           }
         } else {
-          rec[t.payment_method].out = round2(rec[t.payment_method].out + t.amount);
+          rec[pm].out = round2(rec[pm].out + t.amount);
           if (t.notes.includes('[הוצאה קבועה]')) posted_fixed_expenses += t.amount;
+          else if (t.category.includes('רכש מאפייה')) bakery_cash_purchases += t.amount;
           else {
             variable_expenses += t.amount;
             expMap.set(t.category, round2((expMap.get(t.category) || 0) + t.amount));
@@ -1212,10 +1533,10 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
         }
       }
       rec.cash.net = round2(rec.cash.in - rec.cash.out);
-      rec.bit.net = round2(rec.bit.in - rec.bit.out);
+      rec.paybox.net = round2(rec.paybox.in - rec.paybox.out);
       rec.transfer.net = round2(rec.transfer.in - rec.transfer.out);
 
-      const walkin_stall_revenue = round2(walkin_stall_cash + walkin_stall_bit);
+      const walkin_stall_revenue = round2(walkin_stall_cash + walkin_stall_paybox + walkin_stall_transfer);
       const prorated_fixed_items = db.fixed_expenses
         .filter((f) => f.is_active)
         .map((f) => ({
@@ -1227,11 +1548,52 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
         }));
       const prorated_fixed_expenses = round2(prorated_fixed_items.reduce((s, i) => s + i.prorated_amount, 0));
       const total_revenue = round2(customer_orders_revenue + supplier_orders_revenue + walkin_stall_revenue);
-      const total_cogs = round2(orders_cogs + extra_stall_cogs + charity_cogs);
-      const gross_profit = round2(total_revenue - total_cogs);
+      const total_cogs = round2(orders_cogs + extra_stall_cogs);
+      const gross_profit = round2(total_revenue - total_cogs - waste_cost);
       const gross_margin_pct = total_revenue > 0 ? round2((gross_profit / total_revenue) * 100) : 0;
       const net_profit = round2(gross_profit - variable_expenses - prorated_fixed_expenses);
       const net_margin_pct = total_revenue > 0 ? round2((net_profit / total_revenue) * 100) : 0;
+
+      // סעיף נפרד: הוצאות הזמנות מסובסדות
+      const entities = db.subsidized_entities || [];
+      const subPayments = db.subsidized_payments || [];
+      const entByName = new Map(entities.map((e) => [e.name.trim(), e.id]));
+      const periodSubReceipts = round2(
+        subPayments.filter((p) => inRange(p.date)).reduce((s, p) => s + p.amount, 0)
+      );
+      const cumSubReceipts = round2(subPayments.reduce((s, p) => s + p.amount, 0));
+      let cumSubCost = 0;
+
+      const entPeriod = new Map<number, { cost: number; paid: number }>();
+      const entCum = new Map<number, { cost: number; paid: number }>();
+      for (const e of entities) {
+        entPeriod.set(e.id, { cost: 0, paid: 0 });
+        entCum.set(e.id, { cost: 0, paid: 0 });
+      }
+      for (const o of db.orders) {
+        if (o.order_type !== 'charity' || o.status === 'awaiting_approval') continue;
+        const c = round2(
+          db.order_items
+            .filter((oi) => oi.order_id === o.id)
+            .reduce((s, oi) => s + oi.quantity * oi.cost_price_snapshot, 0)
+        );
+        cumSubCost = round2(cumSubCost + c);
+        const eid = o.subsidized_entity_id ?? entByName.get(o.recipient_name.trim()) ?? null;
+        if (eid && entCum.has(eid)) {
+          entCum.get(eid)!.cost = round2(entCum.get(eid)!.cost + c);
+          if (inRange(o.friday_date)) {
+            entPeriod.get(eid)!.cost = round2(entPeriod.get(eid)!.cost + c);
+          }
+        }
+      }
+      for (const p of subPayments) {
+        if (entCum.has(p.entity_id)) {
+          entCum.get(p.entity_id)!.paid = round2(entCum.get(p.entity_id)!.paid + p.amount);
+          if (inRange(p.date)) {
+            entPeriod.get(p.entity_id)!.paid = round2(entPeriod.get(p.entity_id)!.paid + p.amount);
+          }
+        }
+      }
 
       const openUsers = db.users.filter((u) => Math.abs(u.balance) > 0.009).sort((a, b) => a.balance - b.balance).map(sanitizeUser);
       return {
@@ -1240,18 +1602,20 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
           customer_orders_revenue,
           supplier_orders_revenue,
           walkin_stall_cash: round2(walkin_stall_cash),
-          walkin_stall_bit: round2(walkin_stall_bit),
+          walkin_stall_paybox: round2(walkin_stall_paybox),
+          walkin_stall_transfer: round2(walkin_stall_transfer),
           walkin_stall_revenue,
           total_revenue,
           orders_cogs: round2(orders_cogs),
           extra_stall_cogs: round2(extra_stall_cogs),
           extra_stall_units,
-          charity_cogs: round2(charity_cogs),
-          charity_units,
           total_cogs,
+          waste_cost,
+          waste_units,
           gross_profit,
           gross_margin_pct,
           variable_expenses: round2(variable_expenses),
+          bakery_cash_purchases: round2(bakery_cash_purchases),
           expense_breakdown: Array.from(expMap.entries()).map(([category, amount]) => ({ category, amount })),
           prorated_fixed_expenses,
           prorated_fixed_items,
@@ -1259,16 +1623,37 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
           net_profit,
           net_margin_pct,
         },
+        subsidized: {
+          period_cost: round2(period_subsidized_cost),
+          period_units: period_subsidized_units,
+          period_receipts: periodSubReceipts,
+          period_net_expense: round2(period_subsidized_cost - periodSubReceipts),
+          cumulative_cost: cumSubCost,
+          cumulative_receipts: cumSubReceipts,
+          cumulative_net_expense: round2(cumSubCost - cumSubReceipts),
+          entities: entities.map((e) => {
+            const pm = entPeriod.get(e.id) || { cost: 0, paid: 0 };
+            const cm = entCum.get(e.id) || { cost: 0, paid: 0 };
+            return {
+              id: e.id,
+              name: e.name,
+              period_cost: round2(pm.cost),
+              period_receipts: round2(pm.paid),
+              period_net_gap: round2(pm.cost - pm.paid),
+              cumulative_net_gap: round2(cm.cost - cm.paid),
+            };
+          }),
+        },
         reconciliation: {
           ...rec,
           digital_combined: {
-            in: round2(rec.bit.in + rec.transfer.in),
-            out: round2(rec.bit.out + rec.transfer.out),
-            net: round2(rec.bit.net + rec.transfer.net),
+            in: round2(rec.paybox.in + rec.transfer.in),
+            out: round2(rec.paybox.out + rec.transfer.out),
+            net: round2(rec.paybox.net + rec.transfer.net),
           },
-          total_in: round2(rec.cash.in + rec.bit.in + rec.transfer.in),
-          total_out: round2(rec.cash.out + rec.bit.out + rec.transfer.out),
-          total_net: round2(rec.cash.net + rec.bit.net + rec.transfer.net),
+          total_in: round2(rec.cash.in + rec.paybox.in + rec.transfer.in),
+          total_out: round2(rec.cash.out + rec.paybox.out + rec.transfer.out),
+          total_net: round2(rec.cash.net + rec.paybox.net + rec.transfer.net),
         },
         open_balances: {
           items: openUsers,

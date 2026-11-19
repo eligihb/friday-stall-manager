@@ -109,7 +109,7 @@ export function OrderCard({
             <div className="flex items-center gap-2 flex-wrap">
               <span className="font-bold text-base text-slate-900 truncate">{order.recipient_name}</span>
               <span className={`px-2 py-0.5 rounded-full text-[11px] font-bold ${typeBadgeCls(order.order_type)}`}>
-                {order.order_type === 'charity' ? 'תרומה' : ORDER_TYPE_LABELS[order.order_type]}
+                {order.order_type === 'charity' ? 'מסובסד' : ORDER_TYPE_LABELS[order.order_type]}
               </span>
             </div>
             <div className="text-xs text-slate-500 mt-0.5 tabular-nums flex items-center gap-2 flex-wrap">

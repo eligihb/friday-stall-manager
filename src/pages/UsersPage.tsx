@@ -392,7 +392,7 @@ export function UsersPage() {
                   onChange={(e) => setPayMethod(e.target.value as PaymentMethod)}
                   className="w-full px-3 py-2.5 rounded-xl border border-[#E8D5BE] text-sm"
                 >
-                  {(['transfer', 'bit', 'cash'] as const).map((pm) => (
+                  {(['transfer', 'paybox', 'cash'] as const).map((pm) => (
                     <option key={pm} value={pm}>
                       {PAYMENT_METHOD_LABELS[pm]}
                     </option>

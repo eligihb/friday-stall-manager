@@ -43,7 +43,7 @@ const ADMIN_NAV: NavItem[] = [
   { id: 'dashboard', label: 'מסך ראשי ותפעול שישי', icon: LayoutDashboard },
   { id: 'customer-orders', label: 'הזמנות לקוחות', icon: ShoppingBag },
   { id: 'supplier-orders', label: 'הזמנות ספקים', icon: Store },
-  { id: 'charity-orders', label: 'המשפחות הנזקקות', icon: HeartHandshake },
+  { id: 'charity-orders', label: 'הזמנות מסובסדות', icon: HeartHandshake },
   { id: 'products', label: 'מחירון מוצרים', icon: Tag },
   { id: 'finance', label: 'הכנסות, הוצאות וקבועות', icon: Wallet },
   { id: 'reports', label: 'דוחות ורווח והפסד', icon: BarChart3 },
@@ -54,7 +54,7 @@ const TAB_TITLES: Record<AdminTab, string> = {
   dashboard: 'מסך ראשי',
   'customer-orders': 'הזמנות לקוחות',
   'supplier-orders': 'הזמנות ספקים',
-  'charity-orders': 'משפחות נזקקות',
+  'charity-orders': 'הזמנות מסובסדות',
   products: 'מחירון מוצרים',
   finance: 'כספים וקופה',
   reports: 'דוחות ורווח והפסד',
@@ -268,7 +268,7 @@ export function Layout({ activeTab, onSelectTab, children }: LayoutProps) {
                 onClick={() => onSelectTab('charity-orders')}
                 className="py-1.5 rounded-lg text-xs font-bold text-slate-300"
               >
-                נזקקים
+                מסובסדות
               </button>
             </div>
           )}
@@ -402,8 +402,8 @@ export function Layout({ activeTab, onSelectTab, children }: LayoutProps) {
             },
             {
               tab: 'charity-orders' as AdminTab,
-              title: 'המשפחות הנזקקות',
-              desc: 'חבילות תרומה (₪0) ורישום עלות חסד',
+              title: 'הזמנות מסובסדות',
+              desc: 'הכולל ומשפחות, תשלומים חודשיים ופער סבסוד',
               icon: HeartHandshake,
               color: 'bg-purple-50 text-purple-800',
             },
@@ -416,8 +416,8 @@ export function Layout({ activeTab, onSelectTab, children }: LayoutProps) {
             },
             {
               tab: 'finance' as AdminTab,
-              title: 'הוצאות קבועות ויומן כספים',
-              desc: 'שכירות, שכר, קופת דוכן מזומן וביט',
+              title: 'הוצאות קבועות, פחת ויומן כספים',
+              desc: 'שכירות, פחת סוף יום, קופת דוכן מזומן ופייבוקס',
               icon: Repeat,
               color: 'bg-emerald-50 text-emerald-800',
             },

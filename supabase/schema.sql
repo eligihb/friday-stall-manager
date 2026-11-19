@@ -1,4 +1,4 @@
--- המטבח התימני - סכמת PostgreSQL / Supabase מלאה עם RBAC ו-RLS
+-- דוכן שישי תימני - סכמת PostgreSQL / Supabase מלאה עם RBAC ו-RLS (v1.7.0)
 
 CREATE TABLE IF NOT EXISTS users (
   id SERIAL PRIMARY KEY,
@@ -37,9 +37,29 @@ CREATE TABLE IF NOT EXISTS product_price_history (
   UNIQUE (product_id, effective_date)
 );
 
+CREATE TABLE IF NOT EXISTS subsidized_entities (
+  id SERIAL PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  phone TEXT DEFAULT '',
+  notes TEXT DEFAULT '',
+  is_active BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS subsidized_payments (
+  id SERIAL PRIMARY KEY,
+  entity_id INTEGER NOT NULL REFERENCES subsidized_entities(id) ON DELETE CASCADE,
+  date DATE NOT NULL DEFAULT CURRENT_DATE,
+  amount NUMERIC(12, 2) NOT NULL CHECK (amount > 0),
+  payment_method TEXT NOT NULL CHECK (payment_method IN ('cash', 'paybox', 'transfer')) DEFAULT 'cash',
+  notes TEXT DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS orders (
   id SERIAL PRIMARY KEY,
   user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  subsidized_entity_id INTEGER REFERENCES subsidized_entities(id) ON DELETE SET NULL,
   recipient_name TEXT NOT NULL,
   friday_date DATE NOT NULL,
   order_type TEXT NOT NULL CHECK (order_type IN ('customer', 'supplier', 'charity')),
@@ -70,7 +90,7 @@ CREATE TABLE IF NOT EXISTS transactions (
   friday_date DATE,
   type TEXT NOT NULL CHECK (type IN ('income', 'expense')),
   category TEXT NOT NULL,
-  payment_method TEXT NOT NULL CHECK (payment_method IN ('cash', 'bit', 'transfer')),
+  payment_method TEXT NOT NULL CHECK (payment_method IN ('cash', 'paybox', 'transfer')),
   amount NUMERIC(12, 2) NOT NULL CHECK (amount >= 0),
   user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
   notes TEXT DEFAULT ''
@@ -81,7 +101,7 @@ CREATE TABLE IF NOT EXISTS fixed_expenses (
   name TEXT NOT NULL,
   amount NUMERIC(12, 2) NOT NULL CHECK (amount >= 0),
   frequency TEXT NOT NULL CHECK (frequency IN ('weekly', 'monthly')),
-  payment_method TEXT NOT NULL CHECK (payment_method IN ('cash', 'bit', 'transfer')),
+  payment_method TEXT NOT NULL CHECK (payment_method IN ('cash', 'paybox', 'transfer')),
   is_active BOOLEAN NOT NULL DEFAULT TRUE
 );
 
@@ -90,6 +110,17 @@ CREATE TABLE IF NOT EXISTS friday_inventory (
   friday_date DATE NOT NULL,
   product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
   extra_stall_qty INTEGER NOT NULL DEFAULT 0,
+  UNIQUE (friday_date, product_id)
+);
+
+CREATE TABLE IF NOT EXISTS waste_logs (
+  id SERIAL PRIMARY KEY,
+  friday_date DATE NOT NULL,
+  product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  quantity INTEGER NOT NULL CHECK (quantity >= 0),
+  unit_cost NUMERIC(10, 2) NOT NULL DEFAULT 0,
+  notes TEXT DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE (friday_date, product_id)
 );
 
@@ -105,14 +136,24 @@ INSERT INTO business_settings (id, business_name, admin_whatsapp_phone, default_
 VALUES (1, 'דוכן שישי תימני', '050-5551000', 0, 'שבת שלום ומבורכת! 🕯️')
 ON CONFLICT (id) DO NOTHING;
 
+-- זריעת גופים ברירת מחדל להזמנות מסובסדות
+INSERT INTO subsidized_entities (name, phone, notes, is_active) VALUES
+  ('הכולל', '', 'חלוקה שבועית קבועה ותשלום חודשי במזומן', TRUE),
+  ('משפחה 1', '', 'משלוח שישי קבוע', TRUE),
+  ('משפחה 2', '', 'משלוח שישי קבוע', TRUE)
+ON CONFLICT (name) DO NOTHING;
+
 -- אינדקסים לביצועים מהירים
 CREATE INDEX IF NOT EXISTS idx_orders_friday_date ON orders(friday_date);
 CREATE INDEX IF NOT EXISTS idx_orders_user_id ON orders(user_id);
+CREATE INDEX IF NOT EXISTS idx_orders_subsidized_entity ON orders(subsidized_entity_id);
 CREATE INDEX IF NOT EXISTS idx_order_items_order_id ON order_items(order_id);
 CREATE INDEX IF NOT EXISTS idx_transactions_friday_date ON transactions(friday_date);
 CREATE INDEX IF NOT EXISTS idx_friday_inventory_date ON friday_inventory(friday_date);
+CREATE INDEX IF NOT EXISTS idx_waste_logs_friday_date ON waste_logs(friday_date);
+CREATE INDEX IF NOT EXISTS idx_subsidized_payments_entity ON subsidized_payments(entity_id);
 
--- זריעת מחירון המוצרים ההתחלתי (15 מוצרים מדויקים)
+-- זריעת מחירון המוצרים ההתחלתי (19 מוצרים כולל מארזי שלישייה ב-12 ₪)
 INSERT INTO products (name, cost_price, supplier_price, preorder_price, customer_price, is_active) VALUES
   ('לחוח', 2.50, 3.70, 4.00, 5.00, TRUE),
   ('סאלוף', 2.50, 3.70, 4.00, 5.00, TRUE),
@@ -143,8 +184,10 @@ ALTER TABLE order_items ENABLE ROW LEVEL SECURITY;
 ALTER TABLE transactions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE fixed_expenses ENABLE ROW LEVEL SECURITY;
 ALTER TABLE friday_inventory ENABLE ROW LEVEL SECURITY;
+ALTER TABLE waste_logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE subsidized_entities ENABLE ROW LEVEL SECURITY;
+ALTER TABLE subsidized_payments ENABLE ROW LEVEL SECURITY;
 
--- מדיניות RLS אוטומטית לסביבת Supabase (תפעל רק אם קיימת סכמת auth)
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM information_schema.schemata WHERE schema_name = 'auth') THEN
@@ -156,4 +199,3 @@ BEGIN
     END IF;
   END IF;
 END $$;
-
