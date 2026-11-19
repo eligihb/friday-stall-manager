@@ -103,23 +103,37 @@ router.get('/summary', async (req, res) => {
 
 // ==================== ניהול פחת סוף יום שישי ====================
 
+function normalizeWasteType(raw: unknown): 'none' | 'full' | 'partial' {
+  if (raw === 'none' || raw === 'partial' || raw === 'full') return raw;
+  return 'full';
+}
+
+function resolveEffectiveWastePercent(wasteType: 'none' | 'full' | 'partial', rawPercent: unknown): number {
+  if (wasteType === 'none') return 0;
+  if (wasteType === 'full') return 100;
+  const num = Number(rawPercent);
+  if (Number.isNaN(num)) return 50;
+  return Math.max(0, Math.min(100, round2(num)));
+}
+
 router.get('/waste', async (req, res) => {
   try {
     const db = await getDb();
     const fridayDate = String(req.query.friday_date || getNextFridayDate()).slice(0, 10);
 
     const activeFilter = db.isPostgres ? 'is_active = TRUE' : 'is_active = 1';
-    const products = await db.query<{ id: number; name: string; cost_price: number }>(
-      `SELECT id, name, cost_price FROM products WHERE ${activeFilter} ORDER BY sort_order ASC, id ASC`
+    const products = await db.query<{ id: number; name: string; cost_price: number; waste_type?: string | null }>(
+      `SELECT id, name, cost_price, waste_type FROM products WHERE ${activeFilter} ORDER BY sort_order ASC, id ASC`
     );
 
     const wasteRows = await db.query<{
       product_id: number;
       quantity: number;
       unit_cost: number;
+      waste_percent?: number;
       notes: string;
     }>(
-      `SELECT product_id, quantity, unit_cost, notes FROM waste_logs WHERE friday_date = ?`,
+      `SELECT product_id, quantity, unit_cost, waste_percent, notes FROM waste_logs WHERE friday_date = ?`,
       [fridayDate]
     );
 
@@ -127,19 +141,26 @@ router.get('/waste', async (req, res) => {
 
     const items = products.map((p) => {
       const w = wasteMap.get(Number(p.id));
+      const wasteType = normalizeWasteType(p.waste_type);
       const qty = w ? Number(w.quantity) : 0;
       const unitCost = w && Number(w.unit_cost) > 0 ? Number(w.unit_cost) : Number(p.cost_price);
+      const wastePercent = resolveEffectiveWastePercent(
+        wasteType,
+        w && w.waste_percent !== undefined ? w.waste_percent : wasteType === 'partial' ? 50 : 100
+      );
       return {
         product_id: Number(p.id),
         product_name: p.name,
+        waste_type: wasteType,
+        waste_percent: wastePercent,
         cost_price: round2(unitCost),
         quantity: qty,
-        line_cost: round2(qty * unitCost),
+        line_cost: round2(qty * unitCost * (wastePercent / 100)),
         notes: w?.notes || '',
       };
     });
 
-    const total_waste_units = items.reduce((s, i) => s + i.quantity, 0);
+    const total_waste_units = items.reduce((s, i) => s + (i.waste_type === 'none' ? 0 : i.quantity), 0);
     const total_waste_cost = round2(items.reduce((s, i) => s + i.line_cost, 0));
 
     res.json({
@@ -160,18 +181,26 @@ router.put('/waste', async (req, res) => {
     const fridayDate = String(req.body?.friday_date || getNextFridayDate()).slice(0, 10);
     const rawItems = Array.isArray(req.body?.items) ? req.body.items : [];
 
-    const products = await db.query<{ id: number; cost_price: number }>(
-      'SELECT id, cost_price FROM products'
+    const products = await db.query<{ id: number; cost_price: number; waste_type?: string | null }>(
+      'SELECT id, cost_price, waste_type FROM products'
     );
-    const prodCostMap = new Map(products.map((p) => [Number(p.id), Number(p.cost_price)]));
+    const prodMap = new Map(
+      products.map((p) => [
+        Number(p.id),
+        { cost_price: Number(p.cost_price), waste_type: normalizeWasteType(p.waste_type) },
+      ])
+    );
 
     for (const row of rawItems) {
       const productId = Number(row.product_id);
       const quantity = Math.max(0, Math.floor(Number(row.quantity) || 0));
       const notes = String(row.notes || '').trim();
-      if (!Number.isInteger(productId) || !prodCostMap.has(productId)) continue;
+      const prodInfo = prodMap.get(productId);
+      if (!Number.isInteger(productId) || !prodInfo) continue;
 
-      if (quantity === 0) {
+      const wastePercent = resolveEffectiveWastePercent(prodInfo.waste_type, row.waste_percent);
+
+      if (quantity === 0 || prodInfo.waste_type === 'none' || wastePercent === 0) {
         await db.run('DELETE FROM waste_logs WHERE friday_date = ? AND product_id = ?', [
           fridayDate,
           productId,
@@ -184,7 +213,7 @@ router.put('/waste', async (req, res) => {
            ORDER BY effective_date DESC LIMIT 1`,
           [productId, fridayDate]
         );
-        const unitCost = round2(hist ? Number(hist.cost_price) : prodCostMap.get(productId)!);
+        const unitCost = round2(hist ? Number(hist.cost_price) : prodInfo.cost_price);
 
         const existing = await db.get<{ id: number }>(
           'SELECT id FROM waste_logs WHERE friday_date = ? AND product_id = ?',
@@ -192,14 +221,14 @@ router.put('/waste', async (req, res) => {
         );
         if (existing) {
           await db.run(
-            'UPDATE waste_logs SET quantity = ?, unit_cost = ?, notes = ? WHERE id = ?',
-            [quantity, unitCost, notes, existing.id]
+            'UPDATE waste_logs SET quantity = ?, unit_cost = ?, waste_percent = ?, notes = ? WHERE id = ?',
+            [quantity, unitCost, wastePercent, notes, existing.id]
           );
         } else {
           await db.run(
-            `INSERT INTO waste_logs (friday_date, product_id, quantity, unit_cost, notes)
-             VALUES (?, ?, ?, ?, ?)`,
-            [fridayDate, productId, quantity, unitCost, notes]
+            `INSERT INTO waste_logs (friday_date, product_id, quantity, unit_cost, waste_percent, notes)
+             VALUES (?, ?, ?, ?, ?, ?)`,
+            [fridayDate, productId, quantity, unitCost, wastePercent, notes]
           );
         }
       }
@@ -345,9 +374,12 @@ router.get('/pnl', async (req, res) => {
       product_id: number;
       quantity: number;
       unit_cost: number;
+      waste_percent?: number;
+      waste_type?: string | null;
     }>(
-      `SELECT wl.friday_date, wl.product_id, wl.quantity, wl.unit_cost
+      `SELECT wl.friday_date, wl.product_id, wl.quantity, wl.unit_cost, wl.waste_percent, p.waste_type
        FROM waste_logs wl
+       LEFT JOIN products p ON p.id = wl.product_id
        ${wasteWhere}`,
       wasteParams
     );
@@ -358,10 +390,13 @@ router.get('/pnl', async (req, res) => {
     for (const w of wasteRows) {
       const q = Number(w.quantity || 0);
       const c = Number(w.unit_cost || 0);
+      const wt = normalizeWasteType(w.waste_type);
+      const pct = resolveEffectiveWastePercent(wt, w.waste_percent ?? 100);
+      if (pct <= 0 || q <= 0) continue;
       waste_units += q;
-      waste_cost += q * c;
+      waste_cost += q * c * (pct / 100);
       const key = `${String(w.friday_date).slice(0, 10)}_${Number(w.product_id)}`;
-      wasteByDateProd.set(key, (wasteByDateProd.get(key) || 0) + q);
+      wasteByDateProd.set(key, (wasteByDateProd.get(key) || 0) + q * (pct / 100));
     }
     waste_cost = round2(waste_cost);
 

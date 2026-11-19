@@ -13,6 +13,8 @@ export interface User {
   created_at?: string;
 }
 
+export type WasteType = 'none' | 'full' | 'partial';
+
 export interface Product {
   id: number;
   name: string;
@@ -22,6 +24,7 @@ export interface Product {
   customer_price?: number;
   image_url?: string | null;
   sort_order?: number;
+  waste_type?: WasteType;
   is_active: boolean;
 }
 
@@ -34,6 +37,7 @@ export interface AdminProduct {
   customer_price: number;
   image_url?: string | null;
   sort_order?: number;
+  waste_type?: WasteType;
   is_active: boolean;
 }
 
@@ -158,6 +162,8 @@ export interface SubsidizedOverviewResponse {
 export interface WasteLogItem {
   product_id: number;
   product_name: string;
+  waste_type: WasteType;
+  waste_percent: number;
   cost_price: number;
   quantity: number;
   line_cost: number;

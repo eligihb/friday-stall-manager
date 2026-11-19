@@ -143,6 +143,10 @@ async function initializeSchemaAndSeed(db: DbClient): Promise<void> {
     const schemaPath = path.resolve(process.cwd(), 'supabase', 'schema.sql');
     const sql = fs.readFileSync(schemaPath, 'utf-8');
     await db.exec(sql);
+    await db.exec(`
+      ALTER TABLE products ADD COLUMN IF NOT EXISTS waste_type TEXT NOT NULL DEFAULT 'full';
+      ALTER TABLE waste_logs ADD COLUMN IF NOT EXISTS waste_percent NUMERIC(5,2) NOT NULL DEFAULT 100;
+    `);
   } else {
     await db.exec(`
       CREATE TABLE IF NOT EXISTS users (
@@ -168,6 +172,7 @@ async function initializeSchemaAndSeed(db: DbClient): Promise<void> {
         customer_price REAL NOT NULL DEFAULT 0,
         image_url TEXT DEFAULT NULL,
         sort_order INTEGER NOT NULL DEFAULT 0,
+        waste_type TEXT NOT NULL DEFAULT 'full',
         is_active INTEGER NOT NULL DEFAULT 1
       );
 
@@ -265,6 +270,7 @@ async function initializeSchemaAndSeed(db: DbClient): Promise<void> {
         product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
         quantity INTEGER NOT NULL CHECK (quantity >= 0),
         unit_cost REAL NOT NULL DEFAULT 0,
+        waste_percent REAL NOT NULL DEFAULT 100,
         notes TEXT DEFAULT '',
         created_at TEXT NOT NULL DEFAULT (datetime('now')),
         UNIQUE (friday_date, product_id)
@@ -339,6 +345,14 @@ async function initializeSchemaAndSeed(db: DbClient): Promise<void> {
     if (!prodCols.some((c) => c.name === 'sort_order')) {
       await db.exec('ALTER TABLE products ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0;');
       await db.exec('UPDATE products SET sort_order = id WHERE sort_order = 0;');
+    }
+    if (!prodCols.some((c) => c.name === 'waste_type')) {
+      await db.exec("ALTER TABLE products ADD COLUMN waste_type TEXT NOT NULL DEFAULT 'full';");
+    }
+
+    const wasteCols = await db.query<{ name: string }>('PRAGMA table_info(waste_logs)');
+    if (!wasteCols.some((c) => c.name === 'waste_percent')) {
+      await db.exec('ALTER TABLE waste_logs ADD COLUMN waste_percent REAL NOT NULL DEFAULT 100;');
     }
 
     const userCols = await db.query<{ name: string }>('PRAGMA table_info(users)');

@@ -4,6 +4,13 @@ import { requireAuth, requireRole, type AuthenticatedRequest } from '../auth.ts'
 
 const router = Router();
 
+type WasteType = 'none' | 'full' | 'partial';
+
+function normalizeWasteType(raw: unknown): WasteType {
+  if (raw === 'none' || raw === 'partial' || raw === 'full') return raw;
+  return 'full';
+}
+
 interface DbProduct {
   id: number;
   name: string;
@@ -13,6 +20,7 @@ interface DbProduct {
   customer_price: number;
   image_url?: string | null;
   sort_order?: number;
+  waste_type?: string | null;
   is_active: number | boolean;
 }
 
@@ -37,6 +45,7 @@ function normalizeProduct(p: DbProduct) {
     customer_price: Number(p.customer_price),
     image_url: p.image_url || null,
     sort_order: Number(p.sort_order ?? p.id),
+    waste_type: normalizeWasteType(p.waste_type),
     is_active: Boolean(p.is_active),
   };
 }
@@ -118,6 +127,7 @@ router.post('/', requireAuth, requireRole('admin'), async (req, res) => {
     const preorder_price = Number(req.body?.preorder_price);
     const customer_price = Number(req.body?.customer_price);
     const image_url = req.body?.image_url ? String(req.body.image_url).trim() : null;
+    const waste_type = normalizeWasteType(req.body?.waste_type);
     const is_active = req.body?.is_active !== undefined ? Boolean(req.body.is_active) : true;
     const effective_date = String(req.body?.effective_date || new Date().toISOString().slice(0, 10)).slice(0, 10);
 
@@ -141,9 +151,9 @@ router.post('/', requireAuth, requireRole('admin'), async (req, res) => {
     const nextSortOrder = Number(maxRow?.max_ord ?? 0) + 1;
 
     const inserted = await db.run(
-      `INSERT INTO products (name, cost_price, supplier_price, preorder_price, customer_price, image_url, sort_order, is_active)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [name, cost_price, supplier_price, preorder_price, customer_price, image_url, nextSortOrder, db.isPostgres ? is_active : is_active ? 1 : 0]
+      `INSERT INTO products (name, cost_price, supplier_price, preorder_price, customer_price, image_url, sort_order, waste_type, is_active)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [name, cost_price, supplier_price, preorder_price, customer_price, image_url, nextSortOrder, waste_type, db.isPostgres ? is_active : is_active ? 1 : 0]
     );
 
     if (inserted.lastInsertId) {
@@ -210,6 +220,10 @@ router.put('/:id', requireAuth, requireRole('admin'), async (req, res) => {
       req.body?.image_url !== undefined
         ? String(req.body.image_url || '').trim() || null
         : existing.image_url || null;
+    const waste_type =
+      req.body?.waste_type !== undefined
+        ? normalizeWasteType(req.body.waste_type)
+        : normalizeWasteType(existing.waste_type);
     const is_active =
       req.body?.is_active !== undefined ? Boolean(req.body.is_active) : Boolean(existing.is_active);
     const today = new Date().toISOString().slice(0, 10);
@@ -252,7 +266,7 @@ router.put('/:id', requireAuth, requireRole('admin'), async (req, res) => {
     if (applyNow) {
       await db.run(
         `UPDATE products
-         SET name = ?, cost_price = ?, supplier_price = ?, preorder_price = ?, customer_price = ?, image_url = ?, is_active = ?
+         SET name = ?, cost_price = ?, supplier_price = ?, preorder_price = ?, customer_price = ?, image_url = ?, waste_type = ?, is_active = ?
          WHERE id = ?`,
         [
           name,
@@ -261,14 +275,15 @@ router.put('/:id', requireAuth, requireRole('admin'), async (req, res) => {
           preorder_price,
           customer_price,
           image_url,
+          waste_type,
           db.isPostgres ? is_active : is_active ? 1 : 0,
           id,
         ]
       );
     } else {
       await db.run(
-        `UPDATE products SET name = ?, image_url = ?, is_active = ? WHERE id = ?`,
-        [name, image_url, db.isPostgres ? is_active : is_active ? 1 : 0, id]
+        `UPDATE products SET name = ?, image_url = ?, waste_type = ?, is_active = ? WHERE id = ?`,
+        [name, image_url, waste_type, db.isPostgres ? is_active : is_active ? 1 : 0, id]
       );
     }
 

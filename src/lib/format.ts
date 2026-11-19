@@ -1,4 +1,4 @@
-import type { OrderStatus, OrderType, PaymentMethod, UserRole } from '../types';
+import type { OrderStatus, OrderType, PaymentMethod, UserRole, WasteType } from '../types';
 
 export function formatILS(value: number): string {
   const num = Number.isFinite(value) ? value : 0;
@@ -95,4 +95,10 @@ export const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
   cash: 'מזומן',
   paybox: 'פייבוקס',
   transfer: 'העברה בנקאית',
+};
+
+export const WASTE_TYPE_LABELS: Record<WasteType, string> = {
+  none: 'ללא פחת',
+  full: 'פחת מלא',
+  partial: 'פחת יחסי',
 };
