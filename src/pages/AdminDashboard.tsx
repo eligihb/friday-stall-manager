@@ -287,7 +287,7 @@ export function AdminDashboard({ onNavigate }: AdminDashboardProps) {
                   <button
                     type="button"
                     onClick={() => handleApproveOrder(ord.id)}
-                    className="col-span-8 min-h-[46px] rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-sm flex items-center justify-center gap-1.5 shadow-sm active:scale-[0.98]"
+                    className="col-span-8 min-h-[48px] rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-sm flex items-center justify-center gap-1.5 shadow-sm active:scale-[0.98]"
                   >
                     <CheckCircle2 className="w-4 h-4" />
                     <span>אשר הזמנה</span>
@@ -295,7 +295,7 @@ export function AdminDashboard({ onNavigate }: AdminDashboardProps) {
                   <button
                     type="button"
                     onClick={() => handleRejectOrder(ord.id)}
-                    className="col-span-4 min-h-[46px] rounded-xl bg-red-50 hover:bg-red-100 border border-red-200 text-red-700 font-extrabold text-xs flex items-center justify-center gap-1 active:scale-[0.98]"
+                    className="col-span-4 min-h-[48px] rounded-xl bg-red-50 hover:bg-red-100 border border-red-200 text-red-700 font-extrabold text-xs flex items-center justify-center gap-1 active:scale-[0.98]"
                   >
                     <Trash2 className="w-4 h-4" />
                     <span>מחק</span>
@@ -401,30 +401,30 @@ export function AdminDashboard({ onNavigate }: AdminDashboardProps) {
               </p>
             </div>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
             <button
               type="button"
               onClick={() => setWasteOpen(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-red-50 hover:bg-red-100 border border-red-200 text-red-800 font-bold text-xs shadow-sm"
+              className="flex-1 sm:flex-none min-h-[48px] md:min-h-[38px] inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-red-50 hover:bg-red-100 border border-red-200 text-red-800 font-bold text-xs shadow-sm"
             >
-              <AlertOctagon className="w-4 h-4" />
+              <AlertOctagon className="w-4 h-4 shrink-0" />
               <span>ניהול פחת סוף יום</span>
             </button>
             <button
               type="button"
               onClick={copyProductionWhatsApp}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-sm"
+              className="flex-1 sm:flex-none min-h-[48px] md:min-h-[38px] inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-sm"
             >
-              {copiedProd ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+              {copiedProd ? <Check className="w-4 h-4 shrink-0" /> : <Copy className="w-4 h-4 shrink-0" />}
               <span>{copiedProd ? 'הועתק!' : 'העתק לוואטסאפ'}</span>
             </button>
             <a
               href={buildWhatsAppShareUrl(productionWaText)}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-[#25D366]/15 border border-[#25D366]/40 text-emerald-900 font-bold text-xs"
+              className="min-h-[48px] md:min-h-[38px] inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#25D366]/15 border border-[#25D366]/40 text-emerald-900 font-bold text-xs"
             >
-              <Share2 className="w-4 h-4 text-[#128C7E]" />
+              <Share2 className="w-4 h-4 text-[#128C7E] shrink-0" />
               <span>שתף</span>
             </a>
           </div>
@@ -482,13 +482,13 @@ export function AdminDashboard({ onNavigate }: AdminDashboardProps) {
                       </div>
 
                       {/* פקדי +/- למלאי חופשי לדוכן */}
-                      <div className="mt-2.5 flex items-center gap-2">
+                      <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
                         <span className="text-[11px] font-bold text-slate-500">מלאי דוכן:</span>
                         <button
                           type="button"
                           disabled={savingExtraId === it.product_id || curExtra <= 0}
                           onClick={() => stepExtraMobile(it, -5)}
-                          className="w-10 h-10 rounded-xl bg-[#FAF6F0] border border-[#E8D5BE] font-extrabold text-xs text-slate-700 active:scale-95 disabled:opacity-40"
+                          className="w-12 h-12 rounded-xl bg-[#FAF6F0] border border-[#E8D5BE] font-extrabold text-xs text-slate-700 active:scale-95 disabled:opacity-40"
                         >
                           -5
                         </button>
@@ -496,19 +496,19 @@ export function AdminDashboard({ onNavigate }: AdminDashboardProps) {
                           type="button"
                           disabled={savingExtraId === it.product_id || curExtra <= 0}
                           onClick={() => stepExtraMobile(it, -1)}
-                          className="w-10 h-10 rounded-xl bg-[#FAF6F0] border border-[#E8D5BE] flex items-center justify-center active:scale-95 disabled:opacity-40"
+                          className="w-12 h-12 rounded-xl bg-[#FAF6F0] border border-[#E8D5BE] flex items-center justify-center active:scale-95 disabled:opacity-40"
                           aria-label="הפחת 1"
                         >
                           <Minus className="w-4 h-4" />
                         </button>
-                        <span className="min-w-[32px] text-center font-extrabold text-sm tabular-nums text-slate-900">
+                        <span className="min-w-[30px] text-center font-extrabold text-sm tabular-nums text-slate-900">
                           {curExtra}
                         </span>
                         <button
                           type="button"
                           disabled={savingExtraId === it.product_id}
                           onClick={() => stepExtraMobile(it, 1)}
-                          className="w-10 h-10 rounded-xl bg-[#FFF7ED] border border-[#C85A17]/40 text-[#C85A17] flex items-center justify-center active:scale-95"
+                          className="w-12 h-12 rounded-xl bg-[#FFF7ED] border border-[#C85A17]/40 text-[#C85A17] flex items-center justify-center active:scale-95"
                           aria-label="הוסף 1"
                         >
                           <Plus className="w-4 h-4" />
@@ -517,7 +517,7 @@ export function AdminDashboard({ onNavigate }: AdminDashboardProps) {
                           type="button"
                           disabled={savingExtraId === it.product_id}
                           onClick={() => stepExtraMobile(it, 5)}
-                          className="w-10 h-10 rounded-xl bg-[#C85A17] text-white font-extrabold text-xs active:scale-95"
+                          className="w-12 h-12 rounded-xl bg-[#C85A17] text-white font-extrabold text-xs active:scale-95"
                         >
                           +5
                         </button>

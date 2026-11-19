@@ -946,6 +946,7 @@ export function SettingsPage() {
                 <label className="block text-xs font-semibold text-slate-600 mb-1">סכום שהתקבל (₪)</label>
                 <input
                   type="number"
+                  inputMode="decimal"
                   step="0.01"
                   min="0.01"
                   required

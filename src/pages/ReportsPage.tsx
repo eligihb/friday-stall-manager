@@ -136,50 +136,61 @@ export function ReportsPage() {
         </div>
 
         {/* בורר תקופה */}
-        <div className="flex flex-wrap items-center gap-2 bg-white p-2 rounded-2xl border border-[#E8D5BE] shadow-soft">
-          {(
-            [
-              ['friday', 'לפי שישי'],
-              ['month', 'חודשי'],
-              ['custom', 'טווח תאריכים'],
-            ] as const
-          ).map(([m, label]) => (
-            <button
-              key={m}
-              type="button"
-              onClick={() => setMode(m)}
-              className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-colors ${
-                mode === m ? 'bg-[#C85A17] text-white' : 'text-slate-600 hover:bg-[#FAF6F0]'
-              }`}
-            >
-              {label}
-            </button>
-          ))}
+        <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-2 bg-white p-2.5 rounded-2xl border border-[#E8D5BE] shadow-soft w-full lg:w-auto max-w-full">
+          <div className="grid grid-cols-3 gap-1.5 w-full sm:w-auto">
+            {(
+              [
+                ['friday', 'לפי שישי'],
+                ['month', 'חודשי'],
+                ['custom', 'טווח תאריכים'],
+              ] as const
+            ).map(([m, label]) => (
+              <button
+                key={m}
+                type="button"
+                onClick={() => setMode(m)}
+                className={`min-h-[48px] md:min-h-[38px] px-3 py-2 rounded-xl text-xs font-bold transition-colors ${
+                  mode === m ? 'bg-[#C85A17] text-white' : 'text-slate-600 bg-[#FAF6F0] hover:bg-[#F3E9DC]'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
 
-          {mode === 'friday' && <FridaySelector value={fridayDate} onChange={setFridayDate} label="" />}
+          {mode === 'friday' && (
+            <div className="w-full sm:w-auto">
+              <FridaySelector value={fridayDate} onChange={setFridayDate} label="" />
+            </div>
+          )}
           {mode === 'month' && (
             <input
               type="month"
               value={month}
               onChange={(e) => setMonth(e.target.value)}
-              className="px-3 py-1.5 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] text-sm font-bold"
+              className="w-full sm:w-auto min-h-[48px] md:min-h-[38px] px-3 py-2 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] text-sm font-bold"
             />
           )}
           {mode === 'custom' && (
-            <div className="flex items-center gap-1.5 text-xs">
-              <input
-                type="date"
-                value={fromDate}
-                onChange={(e) => setFromDate(e.target.value)}
-                className="px-2.5 py-1.5 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] font-semibold"
-              />
-              <span className="text-slate-400">עד</span>
-              <input
-                type="date"
-                value={toDate}
-                onChange={(e) => setToDate(e.target.value)}
-                className="px-2.5 py-1.5 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] font-semibold"
-              />
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 w-full sm:w-auto text-xs">
+              <label className="flex items-center gap-2">
+                <span className="text-slate-500 font-bold shrink-0">מ-</span>
+                <input
+                  type="date"
+                  value={fromDate}
+                  onChange={(e) => setFromDate(e.target.value)}
+                  className="w-full min-h-[48px] md:min-h-[38px] px-2.5 py-2 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] font-semibold"
+                />
+              </label>
+              <label className="flex items-center gap-2">
+                <span className="text-slate-500 font-bold shrink-0">עד</span>
+                <input
+                  type="date"
+                  value={toDate}
+                  onChange={(e) => setToDate(e.target.value)}
+                  className="w-full min-h-[48px] md:min-h-[38px] px-2.5 py-2 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] font-semibold"
+                />
+              </label>
             </div>
           )}
         </div>
@@ -260,22 +271,22 @@ export function ReportsPage() {
                   </p>
                 </div>
               </div>
-              <div className="flex flex-wrap items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
                 <button
                   type="button"
                   onClick={() => setWasteOpen(true)}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-red-50 hover:bg-red-100 border border-red-200 text-xs font-bold text-red-800"
+                  className="flex-1 sm:flex-none min-h-[48px] md:min-h-[40px] inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-red-50 hover:bg-red-100 border border-red-200 text-xs font-bold text-red-800"
                 >
-                  <AlertOctagon className="w-4 h-4" />
+                  <AlertOctagon className="w-4 h-4 shrink-0" />
                   <span>עדכן פחת סוף יום</span>
                 </button>
                 <button
                   type="button"
                   onClick={exportPnlCsv}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#FAF6F0] hover:bg-[#FFF7ED] border border-[#E8D5BE] text-xs font-bold text-slate-800"
+                  className="flex-1 sm:flex-none min-h-[48px] md:min-h-[40px] inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#FAF6F0] hover:bg-[#FFF7ED] border border-[#E8D5BE] text-xs font-bold text-slate-800"
                 >
-                  <Download className="w-4 h-4 text-[#C85A17]" />
-                  <span>ייצוא P&L לאקסל (CSV)</span>
+                  <Download className="w-4 h-4 text-[#C85A17] shrink-0" />
+                  <span>ייצוא P&L (CSV)</span>
                 </button>
               </div>
             </div>
@@ -492,9 +503,9 @@ export function ReportsPage() {
               <button
                 type="button"
                 onClick={exportReconciliationCsv}
-                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#FAF6F0] hover:bg-[#FFF7ED] border border-[#E8D5BE] text-xs font-bold text-slate-800"
+                className="w-full sm:w-auto min-h-[48px] md:min-h-[40px] inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#FAF6F0] hover:bg-[#FFF7ED] border border-[#E8D5BE] text-xs font-bold text-slate-800"
               >
-                <Download className="w-4 h-4 text-[#C85A17]" />
+                <Download className="w-4 h-4 text-[#C85A17] shrink-0" />
                 <span>ייצוא התאמת קופה (CSV)</span>
               </button>
             </div>
@@ -585,9 +596,9 @@ export function ReportsPage() {
               <button
                 type="button"
                 onClick={exportBalancesCsv}
-                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#FAF6F0] hover:bg-[#FFF7ED] border border-[#E8D5BE] text-xs font-bold text-slate-800"
+                className="w-full sm:w-auto min-h-[48px] md:min-h-[40px] inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#FAF6F0] hover:bg-[#FFF7ED] border border-[#E8D5BE] text-xs font-bold text-slate-800"
               >
-                <Download className="w-4 h-4 text-[#C85A17]" />
+                <Download className="w-4 h-4 text-[#C85A17] shrink-0" />
                 <span>ייצוא חייבים וזכאים (CSV)</span>
               </button>
             </div>
@@ -597,38 +608,72 @@ export function ReportsPage() {
                 כל החשבונות מאוזנים! אין יתרות חוב או זכות פתוחות.
               </div>
             ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="bg-[#F3E9DC]/70 text-slate-700 border-b border-[#E8D5BE]">
-                      <th className="text-right py-3 px-4 font-bold">שם</th>
-                      <th className="text-right py-3 px-4 font-bold">תפקיד</th>
-                      <th className="text-right py-3 px-4 font-bold">טלפון</th>
-                      <th className="text-right py-3 px-4 font-bold">הערות</th>
-                      <th className="text-left py-3 px-4 font-bold">יתרה (חוב / זכות)</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-[#F3E9DC] tabular-nums">
-                    {report.open_balances.items.map((u) => (
-                      <tr key={u.id} className="hover:bg-[#FDFBF7]">
-                        <td className="py-3 px-4 font-bold text-slate-900">{u.name}</td>
-                        <td className="py-3 px-4 text-xs font-semibold text-slate-600">
-                          {ROLE_LABELS[u.role]}
-                        </td>
-                        <td className="py-3 px-4 text-xs text-slate-600">{u.phone || '—'}</td>
-                        <td className="py-3 px-4 text-xs text-slate-500">{u.notes || '—'}</td>
-                        <td className="py-3 px-4 text-left font-extrabold">
+              <>
+                {/* כרטיסיות חייבים וזכאים למובייל (< 768px) */}
+                <div className="md:hidden divide-y divide-[#F3E9DC]">
+                  {report.open_balances.items.map((u) => (
+                    <div key={u.id} className="p-4 space-y-1.5">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="font-bold text-base text-slate-900 truncate">{u.name}</div>
+                          <div className="text-xs text-slate-500 flex flex-wrap items-center gap-1.5 mt-0.5">
+                            <span className="px-2 py-0.5 rounded-full bg-[#FAF6F0] border border-[#E8D5BE] font-bold text-[11px] text-slate-700">
+                              {ROLE_LABELS[u.role]}
+                            </span>
+                            {u.phone && (
+                              <span className="tabular-nums" dir="ltr">
+                                {u.phone}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <div className="text-left shrink-0 tabular-nums font-extrabold text-sm">
                           {u.balance < 0 ? (
                             <span className="text-red-600">חוב {formatILS(Math.abs(u.balance))}</span>
                           ) : (
                             <span className="text-emerald-700">זכות {formatILS(u.balance)}</span>
                           )}
-                        </td>
+                        </div>
+                      </div>
+                      {u.notes && <div className="text-xs text-slate-500">{u.notes}</div>}
+                    </div>
+                  ))}
+                </div>
+
+                {/* טבלה לדסקטופ (>= 768px) */}
+                <div className="hidden md:block overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="bg-[#F3E9DC]/70 text-slate-700 border-b border-[#E8D5BE]">
+                        <th className="text-right py-3 px-4 font-bold">שם</th>
+                        <th className="text-right py-3 px-4 font-bold">תפקיד</th>
+                        <th className="text-right py-3 px-4 font-bold">טלפון</th>
+                        <th className="text-right py-3 px-4 font-bold">הערות</th>
+                        <th className="text-left py-3 px-4 font-bold">יתרה (חוב / זכות)</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                    </thead>
+                    <tbody className="divide-y divide-[#F3E9DC] tabular-nums">
+                      {report.open_balances.items.map((u) => (
+                        <tr key={u.id} className="hover:bg-[#FDFBF7]">
+                          <td className="py-3 px-4 font-bold text-slate-900">{u.name}</td>
+                          <td className="py-3 px-4 text-xs font-semibold text-slate-600">
+                            {ROLE_LABELS[u.role]}
+                          </td>
+                          <td className="py-3 px-4 text-xs text-slate-600">{u.phone || '—'}</td>
+                          <td className="py-3 px-4 text-xs text-slate-500">{u.notes || '—'}</td>
+                          <td className="py-3 px-4 text-left font-extrabold">
+                            {u.balance < 0 ? (
+                              <span className="text-red-600">חוב {formatILS(Math.abs(u.balance))}</span>
+                            ) : (
+                              <span className="text-emerald-700">זכות {formatILS(u.balance)}</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
             )}
           </div>
         </>

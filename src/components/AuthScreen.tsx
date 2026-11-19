@@ -163,6 +163,7 @@ export function AuthScreen({ onBackToStorefront }: AuthScreenProps) {
                       <Phone className="w-4 h-4 text-slate-400 absolute right-3.5 top-1/2 -translate-y-1/2" />
                       <input
                         type="tel"
+                        inputMode="tel"
                         value={phone}
                         onChange={(e) => setPhone(e.target.value)}
                         placeholder="050-0000000"

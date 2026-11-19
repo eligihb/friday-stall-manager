@@ -163,10 +163,10 @@ export function WasteTrackingSheet({
                       type="button"
                       onClick={() => stepQty(it.product_id, -1)}
                       disabled={q <= 0}
-                      className="w-9 h-9 rounded-xl bg-[#FAF6F0] border border-[#E8D5BE] flex items-center justify-center disabled:opacity-40"
+                      className="w-12 h-12 rounded-xl bg-[#FAF6F0] border border-[#E8D5BE] flex items-center justify-center disabled:opacity-40 active:scale-95 transition-transform"
                       aria-label="הפחת 1"
                     >
-                      <Minus className="w-4 h-4" />
+                      <Minus className="w-5 h-5" />
                     </button>
                     <input
                       type="number"
@@ -180,15 +180,15 @@ export function WasteTrackingSheet({
                           [it.product_id]: Math.max(0, Math.floor(Number(e.target.value) || 0)),
                         }))
                       }
-                      className="w-14 h-9 text-center rounded-xl border border-[#E8D5BE] bg-white font-extrabold tabular-nums text-sm"
+                      className="w-16 h-12 text-center rounded-xl border border-[#E8D5BE] bg-white font-extrabold tabular-nums text-base"
                     />
                     <button
                       type="button"
                       onClick={() => stepQty(it.product_id, 1)}
-                      className="w-9 h-9 rounded-xl bg-red-600 text-white flex items-center justify-center"
+                      className="w-12 h-12 rounded-xl bg-red-600 text-white flex items-center justify-center active:scale-95 transition-transform"
                       aria-label="הוסף 1"
                     >
-                      <Plus className="w-4 h-4" />
+                      <Plus className="w-5 h-5" />
                     </button>
                   </div>
                 </div>

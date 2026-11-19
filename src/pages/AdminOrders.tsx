@@ -503,6 +503,7 @@ export function AdminOrders() {
                           </button>
                           <input
                             type="number"
+                            inputMode="numeric"
                             min="0"
                             value={q}
                             onChange={(e) =>
@@ -535,6 +536,7 @@ export function AdminOrders() {
                     <label className="block text-xs font-semibold text-slate-600 mb-1">משלוח (₪)</label>
                     <input
                       type="number"
+                      inputMode="decimal"
                       min="0"
                       step="0.5"
                       dir="ltr"
@@ -547,6 +549,7 @@ export function AdminOrders() {
                     <label className="block text-xs font-semibold text-slate-600 mb-1">זיכוי/הנחה (₪)</label>
                     <input
                       type="number"
+                      inputMode="decimal"
                       min="0"
                       step="0.5"
                       dir="ltr"
@@ -559,6 +562,7 @@ export function AdminOrders() {
                     <label className="block text-xs font-semibold text-slate-600 mb-1">שולם מראש (₪)</label>
                     <input
                       type="number"
+                      inputMode="decimal"
                       min="0"
                       step="0.5"
                       dir="ltr"
@@ -636,6 +640,7 @@ export function AdminOrders() {
                 <label className="block text-xs font-semibold text-slate-700 mb-1">סה״כ ששולם עד כה (₪)</label>
                 <input
                   type="number"
+                  inputMode="decimal"
                   step="0.01"
                   min="0"
                   required

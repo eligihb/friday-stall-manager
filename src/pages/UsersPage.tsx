@@ -286,6 +286,7 @@ export function UsersPage() {
                   <label className="block text-xs font-semibold text-slate-600 mb-1">טלפון</label>
                   <input
                     type="tel"
+                    inputMode="tel"
                     value={form.phone}
                     onChange={(e) => setForm({ ...form, phone: e.target.value })}
                     className="w-full px-3 py-2 rounded-xl border border-[#E8D5BE] text-sm tabular-nums"
@@ -336,6 +337,7 @@ export function UsersPage() {
                 </label>
                 <input
                   type="number"
+                  inputMode="decimal"
                   step="0.01"
                   dir="ltr"
                   value={form.balance}
@@ -376,6 +378,7 @@ export function UsersPage() {
                 <label className="block text-xs font-semibold text-slate-600 mb-1">סכום שהתקבל (₪)</label>
                 <input
                   type="number"
+                  inputMode="decimal"
                   step="0.01"
                   min="0.01"
                   required

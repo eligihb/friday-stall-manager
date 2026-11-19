@@ -321,7 +321,7 @@ export function CharityOrdersPage() {
           <button
             type="button"
             onClick={openCreateEntity}
-            className="inline-flex items-center gap-1.5 px-3.5 min-h-[42px] rounded-xl bg-white border border-[#E8D5BE] hover:border-purple-400 text-slate-800 font-bold text-xs sm:text-sm"
+            className="flex-1 sm:flex-none inline-flex items-center justify-center gap-1.5 px-3.5 min-h-[48px] md:min-h-[42px] rounded-xl bg-white border border-[#E8D5BE] hover:border-purple-400 text-slate-800 font-bold text-xs sm:text-sm"
           >
             <Building2 className="w-4 h-4 text-purple-700" />
             <span>הוסף גוף</span>
@@ -329,7 +329,7 @@ export function CharityOrdersPage() {
           <button
             type="button"
             onClick={() => openCreateOrder()}
-            className="inline-flex items-center gap-1.5 px-4 min-h-[42px] rounded-xl bg-purple-700 hover:bg-purple-800 text-white font-bold text-xs sm:text-sm shadow-sm"
+            className="flex-1 sm:flex-none inline-flex items-center justify-center gap-1.5 px-4 min-h-[48px] md:min-h-[42px] rounded-xl bg-purple-700 hover:bg-purple-800 text-white font-bold text-xs sm:text-sm shadow-sm"
           >
             <Plus className="w-4 h-4" />
             <span>הוסף חבילה לשישי</span>
@@ -442,7 +442,7 @@ export function CharityOrdersPage() {
                 <button
                   type="button"
                   onClick={() => openCreateOrder(ent)}
-                  className="min-h-[42px] px-2.5 rounded-xl bg-purple-700 hover:bg-purple-800 text-white font-bold text-xs flex items-center justify-center gap-1.5"
+                  className="min-h-[48px] px-2.5 rounded-xl bg-purple-700 hover:bg-purple-800 text-white font-bold text-xs flex items-center justify-center gap-1.5"
                 >
                   <PackagePlus className="w-4 h-4 shrink-0" />
                   <span>חבילה לשישי</span>
@@ -450,7 +450,7 @@ export function CharityOrdersPage() {
                 <button
                   type="button"
                   onClick={() => openPaymentModal(ent)}
-                  className="min-h-[42px] px-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center justify-center gap-1.5"
+                  className="min-h-[48px] px-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center justify-center gap-1.5"
                 >
                   <Banknote className="w-4 h-4 shrink-0" />
                   <span>קלוט תשלום חודשי</span>
@@ -629,7 +629,7 @@ export function CharityOrdersPage() {
                           [p.id]: Math.max(0, (prev[p.id] || 0) - 1),
                         }))
                       }
-                      className="w-10 h-10 rounded-xl bg-[#FAF6F0] border border-[#E8D5BE] flex items-center justify-center"
+                      className="w-12 h-12 rounded-xl bg-[#FAF6F0] border border-[#E8D5BE] flex items-center justify-center active:scale-95"
                     >
                       <Minus className="w-4 h-4" />
                     </button>
@@ -639,7 +639,7 @@ export function CharityOrdersPage() {
                       onClick={() =>
                         setQuantities((prev) => ({ ...prev, [p.id]: (prev[p.id] || 0) + 1 }))
                       }
-                      className="w-10 h-10 rounded-xl bg-purple-700 text-white flex items-center justify-center"
+                      className="w-12 h-12 rounded-xl bg-purple-700 text-white flex items-center justify-center active:scale-95"
                     >
                       <Plus className="w-4 h-4" />
                     </button>
@@ -724,7 +724,7 @@ export function CharityOrdersPage() {
                     key={pm}
                     type="button"
                     onClick={() => setPayMethod(pm)}
-                    className={`min-h-[44px] rounded-xl border text-xs font-bold ${
+                    className={`min-h-[48px] rounded-xl border text-xs font-bold ${
                       payMethod === pm
                         ? 'bg-emerald-600 text-white border-emerald-600'
                         : 'bg-[#FDFBF7] text-slate-700 border-[#E8D5BE]'
@@ -782,6 +782,7 @@ export function CharityOrdersPage() {
             <label className="block text-xs font-bold text-slate-600 mb-1">טלפון (אופציונלי)</label>
             <input
               type="tel"
+              inputMode="tel"
               dir="ltr"
               value={entityPhone}
               onChange={(e) => setEntityPhone(e.target.value)}

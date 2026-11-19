@@ -140,6 +140,7 @@ export function FridayInventory() {
                       <td className="py-3 px-3 text-center">
                         <input
                           type="number"
+                          inputMode="numeric"
                           min="0"
                           value={curExtra}
                           onChange={(e) =>

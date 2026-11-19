@@ -654,15 +654,15 @@ export function ProductsCatalog() {
                     <button
                       type="button"
                       onClick={() => openHistory(p)}
-                      className="p-2 rounded-xl bg-[#FAF6F0] text-slate-600"
+                      className="min-w-[48px] min-h-[48px] rounded-xl bg-[#FAF6F0] text-slate-600 flex items-center justify-center shrink-0"
                       title="היסטוריית מחירים"
                     >
-                      <History className="w-4 h-4" />
+                      <History className="w-5 h-5" />
                     </button>
                     <button
                       type="button"
                       onClick={() => toggleActive(p)}
-                      className={`px-2.5 py-1 rounded-full text-xs font-bold ${
+                      className={`min-h-[48px] px-3.5 rounded-xl text-xs font-bold shrink-0 ${
                         p.is_active ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-600'
                       }`}
                     >
@@ -743,7 +743,7 @@ export function ProductsCatalog() {
                         type="button"
                         disabled={savingId === p.id}
                         onClick={() => initiateSaveRow(p)}
-                        className="flex-1 min-h-[44px] rounded-xl bg-[#C85A17] text-white font-bold text-sm flex items-center justify-center gap-1.5"
+                        className="flex-1 min-h-[48px] rounded-xl bg-[#C85A17] text-white font-bold text-sm flex items-center justify-center gap-1.5"
                       >
                         <Save className="w-4 h-4" />
                         <span>{savingId === p.id ? 'שומר...' : 'שמור מחירים'}</span>
@@ -751,7 +751,7 @@ export function ProductsCatalog() {
                       <button
                         type="button"
                         onClick={() => resetRow(p)}
-                        className="px-4 min-h-[44px] rounded-xl border border-[#E8D5BE] text-slate-600 text-sm font-semibold"
+                        className="px-4 min-h-[48px] rounded-xl border border-[#E8D5BE] text-slate-600 text-sm font-semibold"
                       >
                         בטל
                       </button>
@@ -835,15 +835,27 @@ export function ProductsCatalog() {
         ) : (
           <div className="divide-y divide-[#F3E9DC] border border-[#E8D5BE] rounded-2xl overflow-hidden text-xs tabular-nums">
             {historyRows.map((h) => (
-              <div key={h.id} className="p-3.5 bg-white space-y-1">
-                <div className="font-extrabold text-slate-900">
+              <div key={h.id} className="p-3.5 bg-white space-y-2">
+                <div className="font-extrabold text-sm text-slate-900">
                   בתוקף מ-{formatHebrewDate(h.effective_date)}
                 </div>
-                <div className="grid grid-cols-4 gap-2 text-slate-600">
-                  <div>עלות: {formatILS(h.cost_price)}</div>
-                  <div>ספק: {formatILS(h.supplier_price)}</div>
-                  <div>מוקדמת: {formatILS(h.preorder_price)}</div>
-                  <div>דוכן: {formatILS(h.customer_price)}</div>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-slate-700">
+                  <div className="bg-[#FAF6F0] rounded-xl px-2.5 py-2">
+                    <div className="text-[10px] text-slate-500">עלות</div>
+                    <div className="font-bold">{formatILS(h.cost_price)}</div>
+                  </div>
+                  <div className="bg-[#FAF6F0] rounded-xl px-2.5 py-2">
+                    <div className="text-[10px] text-slate-500">ספק</div>
+                    <div className="font-bold">{formatILS(h.supplier_price)}</div>
+                  </div>
+                  <div className="bg-[#FAF6F0] rounded-xl px-2.5 py-2">
+                    <div className="text-[10px] text-slate-500">מוקדמת</div>
+                    <div className="font-bold">{formatILS(h.preorder_price)}</div>
+                  </div>
+                  <div className="bg-[#FAF6F0] rounded-xl px-2.5 py-2">
+                    <div className="text-[10px] text-slate-500">דוכן</div>
+                    <div className="font-bold">{formatILS(h.customer_price)}</div>
+                  </div>
                 </div>
               </div>
             ))}

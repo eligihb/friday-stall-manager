@@ -185,7 +185,7 @@ export function OrderCard({
             onClick={() => onCycleStatus(order, nextStatus)}
             className={`${
               !isCharity && onQuickPay ? 'col-span-5' : 'col-span-8'
-            } min-h-[44px] px-2.5 rounded-xl border text-xs font-extrabold flex items-center justify-center gap-1.5 active:scale-[0.98] transition-transform ${
+            } min-h-[48px] px-2.5 rounded-xl border text-xs font-extrabold flex items-center justify-center gap-1.5 active:scale-[0.98] transition-transform ${
               sm.cls
             }`}
           >
@@ -198,7 +198,7 @@ export function OrderCard({
             <button
               type="button"
               onClick={() => onQuickPay(order)}
-              className="col-span-4 min-h-[44px] px-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] text-white text-xs font-extrabold flex items-center justify-center gap-1 shadow-sm transition-transform"
+              className="col-span-4 min-h-[48px] px-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] text-white text-xs font-extrabold flex items-center justify-center gap-1 shadow-sm transition-transform"
             >
               <CreditCard className="w-4 h-4 shrink-0" />
               <span className="truncate">{unpaid > 0 ? 'סמן כשולם' : 'תשלום'}</span>
@@ -210,7 +210,7 @@ export function OrderCard({
             href={waUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="col-span-3 min-h-[44px] px-2 rounded-xl bg-[#25D366]/15 hover:bg-[#25D366]/25 border border-[#25D366]/40 text-emerald-900 text-xs font-extrabold flex items-center justify-center gap-1 active:scale-[0.98]"
+            className="col-span-3 min-h-[48px] px-2 rounded-xl bg-[#25D366]/15 hover:bg-[#25D366]/25 border border-[#25D366]/40 text-emerald-900 text-xs font-extrabold flex items-center justify-center gap-1 active:scale-[0.98]"
             title="שלח בוואטסאפ"
           >
             <Share2 className="w-4 h-4 text-[#128C7E] shrink-0" />

@@ -212,13 +212,13 @@ export function Layout({ activeTab, onSelectTab, children }: LayoutProps) {
 
             <div className="flex items-center gap-1.5 shrink-0">
               {isAdmin && (
-                <label className="inline-flex items-center gap-1 bg-white/10 border border-white/15 rounded-xl px-2 py-1.5 text-xs font-bold text-amber-200">
+                <label className="inline-flex items-center gap-1 bg-white/10 border border-white/15 rounded-xl px-2 py-1.5 min-h-[44px] font-bold text-amber-200">
                   <Calendar className="w-3.5 h-3.5 text-amber-400 shrink-0" />
                   <select
                     value={fridayDate}
                     onChange={(e) => setFridayDate(e.target.value)}
                     aria-label="בחירת יום שישי"
-                    className="bg-transparent text-amber-100 font-bold text-xs focus:outline-none max-w-[106px] !text-[12px]"
+                    className="bg-transparent text-amber-100 font-bold text-base focus:outline-none max-w-[126px]"
                   >
                     {fridayOptions.map((f) => (
                       <option key={f} value={f} className="text-slate-900">
@@ -233,7 +233,7 @@ export function Layout({ activeTab, onSelectTab, children }: LayoutProps) {
                 <button
                   type="button"
                   onClick={() => logout()}
-                  className="p-2 rounded-xl bg-white/10 hover:bg-white/20 text-slate-200"
+                  className="min-w-[48px] min-h-[48px] rounded-xl bg-white/10 hover:bg-white/20 text-slate-200 flex items-center justify-center"
                   title="התנתקות"
                 >
                   <LogOut className="w-4 h-4" />

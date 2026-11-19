@@ -17,14 +17,31 @@
     color: #1E242B;
     overflow-x: hidden;
     max-width: 100%;
+    touch-action: manipulation;
   }
 
-  /* מניעת זום אוטומטי ב-iOS/Android בעת הקשה על שדות טופס במובייל */
+  button,
+  a,
+  input,
+  select,
+  textarea {
+    touch-action: manipulation;
+  }
+
+  /* מניעת זום אוטומטי ב-iOS/Android בעת הקשה על שדות טופס במובייל + מניעת גלילה אופקית */
   @media (max-width: 767px) {
+    html,
+    body,
+    #root {
+      overflow-x: clip;
+      max-width: 100vw;
+    }
+
     input,
     select,
     textarea {
       font-size: 16px !important;
+      max-width: 100%;
     }
   }
 }
