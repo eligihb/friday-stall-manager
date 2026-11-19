@@ -289,13 +289,28 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
   const path = parsedUrl.pathname;
   const q = parsedUrl.searchParams;
 
-  // תמיכה במיגרציה אוטומטית להגדרות, מארזי שלישייה והיסטוריית מחירים ב-localStorage
+  // תמיכה במיגרציה אוטומטית ובטוחה להגדרות, מארזי שלישייה, היסטוריית מחירים ו-v1.7.0 ב-localStorage
+  if (!db.settings) {
+    db.settings = {
+      business_name: 'דוכן שישי תימני',
+      admin_whatsapp_phone: '050-5551000',
+      default_delivery_fee: 0,
+      whatsapp_footer: 'שבת שלום ומבורכת! 🕯️',
+    };
+  }
   if (!db.settings.admin_whatsapp_phone) {
     db.settings.admin_whatsapp_phone = '050-5551000';
   }
   if (db.settings.business_name === 'המטבח התימני') {
     db.settings.business_name = 'דוכן שישי תימני';
   }
+  if (!Array.isArray(db.products)) db.products = createInitialDb().products;
+  if (!Array.isArray(db.users)) db.users = createInitialDb().users;
+  if (!Array.isArray(db.orders)) db.orders = [];
+  if (!Array.isArray(db.order_items)) db.order_items = [];
+  if (!Array.isArray(db.transactions)) db.transactions = [];
+  if (!Array.isArray(db.fixed_expenses)) db.fixed_expenses = [];
+  if (!Array.isArray(db.friday_inventory)) db.friday_inventory = [];
   const trioDefs: Array<Omit<AdminProduct, 'id' | 'is_active'>> = [
     { name: 'מארז זלביה', cost_price: 7.0, supplier_price: 9.5, preorder_price: 12.0, customer_price: 12.0 },
     { name: 'מארז לחם שום', cost_price: 6.5, supplier_price: 9.5, preorder_price: 12.0, customer_price: 12.0 },
@@ -338,14 +353,14 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
   }
   for (const t of db.transactions) {
     if ((t.payment_method as string) === 'bit') t.payment_method = 'paybox';
-    if (t.category.includes('ביט')) t.category = t.category.replace(/ביט/g, 'פייבוקס');
-    if (t.notes.includes('ביט')) t.notes = t.notes.replace(/ביט/g, 'פייבוקס');
+    if (String(t.category || '').includes('ביט')) t.category = String(t.category).replace(/ביט/g, 'פייבוקס');
+    if (String(t.notes || '').includes('ביט')) t.notes = String(t.notes).replace(/ביט/g, 'פייבוקס');
   }
   for (const f of db.fixed_expenses) {
     if ((f.payment_method as string) === 'bit') f.payment_method = 'paybox';
   }
   for (const o of db.orders) {
-    if (o.notes.includes('בביט')) o.notes = o.notes.replace(/בביט/g, 'בפייבוקס');
+    if (String(o.notes || '').includes('בביט')) o.notes = String(o.notes).replace(/בביט/g, 'בפייבוקס');
   }
   for (const p of db.products) {
     if (!db.product_price_history.some((h) => h.product_id === p.id)) {
@@ -375,6 +390,7 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
           name: p.name,
           preorder_price: p.preorder_price,
           customer_price: p.customer_price,
+          image_url: p.image_url || null,
           is_active: true,
         })),
     } as T;
