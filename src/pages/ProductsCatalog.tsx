@@ -12,6 +12,8 @@ import {
   History,
   Image as ImageIcon,
   Calendar,
+  Copy,
+  Trash2,
 } from 'lucide-react';
 import { apiFetch } from '../lib/api';
 import { formatHebrewDate, formatILS, formatPercent } from '../lib/format';
@@ -241,6 +243,46 @@ export function ProductsCatalog() {
       setProducts((prev) => prev.map((item) => (item.id === p.id ? res.product : item)));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'שגיאה בעדכון סטטוס');
+    }
+  };
+
+  const handleDuplicate = (p: AdminProduct) => {
+    const d = drafts[p.id];
+    setNewProd({
+      name: `${(d?.name || p.name).trim()} (עותק)`,
+      cost_price: d ? d.cost_price : p.cost_price.toFixed(2),
+      supplier_price: d ? d.supplier_price : p.supplier_price.toFixed(2),
+      preorder_price: d ? d.preorder_price : p.preorder_price.toFixed(2),
+      customer_price: d ? d.customer_price : p.customer_price.toFixed(2),
+      image_url: d ? d.image_url : p.image_url || '',
+      effective_date: new Date().toISOString().slice(0, 10),
+    });
+    setError('');
+    setShowAddModal(true);
+  };
+
+  const handleDeleteProduct = async (p: AdminProduct) => {
+    if (!window.confirm(`למחוק את המוצר "${p.name}" מהמחירון?`)) return;
+    setError('');
+    try {
+      await apiFetch(`/api/products/${p.id}`, { method: 'DELETE' });
+      setProducts((prev) => prev.filter((item) => item.id !== p.id));
+      setDrafts((prev) => {
+        const next = { ...prev };
+        delete next[p.id];
+        return next;
+      });
+      setToast(`המוצר "${p.name}" נמחק מהמחירון.`);
+      setTimeout(() => setToast(''), 2600);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'שגיאה במחיקת המוצר';
+      if (msg.includes('היסטוריות') && p.is_active) {
+        if (window.confirm(`${msg}\n\nהאם להשבית את "${p.name}" כעת?`)) {
+          await toggleActive(p);
+        }
+      } else {
+        setError(msg);
+      }
     }
   };
 
@@ -608,6 +650,22 @@ export function ProductsCatalog() {
                             >
                               <History className="w-4 h-4" />
                             </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDuplicate(p)}
+                              className="p-1.5 rounded-lg text-slate-400 hover:text-sky-700 hover:bg-sky-50"
+                              title="שכפל מוצר"
+                            >
+                              <Copy className="w-4 h-4" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteProduct(p)}
+                              className="p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50"
+                              title="מחק מוצר"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
                           </div>
                         </td>
                       </tr>
@@ -644,30 +702,48 @@ export function ProductsCatalog() {
                       : 'border-[#E8D5BE]/80'
                   }`}
                 >
-                  <div className="flex items-center justify-between gap-2 mb-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
                     <input
                       type="text"
                       value={d.name}
                       onChange={(e) => updateDraft(p.id, 'name', e.target.value)}
-                      className="font-bold text-base text-slate-900 bg-transparent border-b border-transparent focus:border-[#C85A17] focus:outline-none flex-1"
+                      className="font-bold text-base text-slate-900 bg-transparent border-b border-transparent focus:border-[#C85A17] focus:outline-none flex-1 min-w-[140px]"
                     />
-                    <button
-                      type="button"
-                      onClick={() => openHistory(p)}
-                      className="min-w-[48px] min-h-[48px] rounded-xl bg-[#FAF6F0] text-slate-600 flex items-center justify-center shrink-0"
-                      title="היסטוריית מחירים"
-                    >
-                      <History className="w-5 h-5" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => toggleActive(p)}
-                      className={`min-h-[48px] px-3.5 rounded-xl text-xs font-bold shrink-0 ${
-                        p.is_active ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-600'
-                      }`}
-                    >
-                      {p.is_active ? 'פעיל' : 'מושבת'}
-                    </button>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => openHistory(p)}
+                        className="min-w-[48px] min-h-[48px] rounded-xl bg-[#FAF6F0] text-slate-600 flex items-center justify-center"
+                        title="היסטוריית מחירים"
+                      >
+                        <History className="w-5 h-5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDuplicate(p)}
+                        className="min-w-[48px] min-h-[48px] rounded-xl bg-sky-50 text-sky-700 flex items-center justify-center"
+                        title="שכפל מוצר"
+                      >
+                        <Copy className="w-5 h-5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteProduct(p)}
+                        className="min-w-[48px] min-h-[48px] rounded-xl bg-red-50 text-red-600 flex items-center justify-center"
+                        title="מחק מוצר"
+                      >
+                        <Trash2 className="w-5 h-5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => toggleActive(p)}
+                        className={`min-h-[48px] px-3 rounded-xl text-xs font-bold ${
+                          p.is_active ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-600'
+                        }`}
+                      >
+                        {p.is_active ? 'פעיל' : 'מושבת'}
+                      </button>
+                    </div>
                   </div>
 
                   {rowWarnings.length > 0 && (

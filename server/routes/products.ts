@@ -281,4 +281,43 @@ router.patch('/:id/toggle', requireAuth, requireRole('admin'), async (req, res) 
   }
 });
 
+router.delete('/:id', requireAuth, requireRole('admin'), async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id)) {
+      res.status(400).json({ error: 'מזהה מוצר לא תקין' });
+      return;
+    }
+
+    const db = await getDb();
+    const existing = await db.get<DbProduct>('SELECT * FROM products WHERE id = ?', [id]);
+    if (!existing) {
+      res.status(404).json({ error: 'המוצר לא נמצא' });
+      return;
+    }
+
+    const usedInOrders = await db.get<{ cnt: number | string }>(
+      'SELECT COUNT(*) as cnt FROM order_items WHERE product_id = ?',
+      [id]
+    );
+    const orderRefs = Number(usedInOrders?.cnt ?? 0);
+    if (orderRefs > 0) {
+      res.status(409).json({
+        error: `לא ניתן למחוק את "${existing.name}" לצמיתות כי הוא מופיע ב-${orderRefs} שורות הזמנה היסטוריות. ניתן להשבית אותו כדי להסיר מהתפריט.`,
+        in_orders: true,
+      });
+      return;
+    }
+
+    await db.run('DELETE FROM waste_logs WHERE product_id = ?', [id]);
+    await db.run('DELETE FROM friday_inventory WHERE product_id = ?', [id]);
+    await db.run('DELETE FROM product_price_history WHERE product_id = ?', [id]);
+    await db.run('DELETE FROM products WHERE id = ?', [id]);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('Delete product error:', err);
+    res.status(500).json({ error: 'שגיאה במחיקת המוצר' });
+  }
+});
+
 export default router;

@@ -311,6 +311,25 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
   if (!Array.isArray(db.transactions)) db.transactions = [];
   if (!Array.isArray(db.fixed_expenses)) db.fixed_expenses = [];
   if (!Array.isArray(db.friday_inventory)) db.friday_inventory = [];
+  // תיקון אוטומטי של מזהים כפולים במוצרים (אם נוצרו במיגרציה קודמת) וסנכרון כל מוני ה-nextIds
+  let dbMutated = false;
+  const seenProdIds = new Set<number>();
+  let maxProdId = db.products.reduce((m, p) => Math.max(m, Number(p.id) || 0), 0);
+  for (const p of db.products) {
+    const pid = Number(p.id) || 0;
+    if (pid <= 0 || seenProdIds.has(pid)) {
+      maxProdId += 1;
+      p.id = maxProdId;
+      dbMutated = true;
+    }
+    seenProdIds.add(p.id);
+  }
+  const safeNextProdId = Math.max(Number(db.nextIds.products) || 1, maxProdId + 1);
+  if (db.nextIds.products !== safeNextProdId) {
+    db.nextIds.products = safeNextProdId;
+    dbMutated = true;
+  }
+
   const trioDefs: Array<Omit<AdminProduct, 'id' | 'is_active'>> = [
     { name: 'מארז זלביה', cost_price: 7.0, supplier_price: 9.5, preorder_price: 12.0, customer_price: 12.0 },
     { name: 'מארז לחם שום', cost_price: 6.5, supplier_price: 9.5, preorder_price: 12.0, customer_price: 12.0 },
@@ -320,15 +339,18 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
   for (const tp of trioDefs) {
     if (!db.products.some((p) => p.name === tp.name)) {
       db.products.push({ id: db.nextIds.products++, ...tp, is_active: true });
+      dbMutated = true;
     }
   }
   if (!db.product_price_history) {
     db.product_price_history = [];
     db.nextIds.price_history = 1;
+    dbMutated = true;
   }
-  if (!db.nextIds.price_history) {
-    db.nextIds.price_history = db.product_price_history.length + 1;
-  }
+  db.nextIds.price_history = Math.max(
+    Number(db.nextIds.price_history) || 1,
+    db.product_price_history.reduce((m, h) => Math.max(m, Number(h.id) || 0), 0) + 1
+  );
   // מיגרציות v1.7.0 ב-localStorage: פייבוקס, הזמנות מסובסדות ופחת
   if (!db.subsidized_entities) {
     db.subsidized_entities = [
@@ -337,30 +359,42 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
       { id: 3, name: 'משפחה 2', phone: '', notes: 'חבילת שישי מסובסדת', is_active: true },
     ];
     db.nextIds.subsidized_entities = 4;
+    dbMutated = true;
   }
-  if (!db.nextIds.subsidized_entities) {
-    db.nextIds.subsidized_entities = Math.max(0, ...db.subsidized_entities.map((e) => e.id)) + 1;
-  }
+  db.nextIds.subsidized_entities = Math.max(
+    Number(db.nextIds.subsidized_entities) || 1,
+    db.subsidized_entities.reduce((m, e) => Math.max(m, Number(e.id) || 0), 0) + 1
+  );
   if (!db.subsidized_payments) {
     db.subsidized_payments = [];
     db.nextIds.subsidized_payments = 1;
+    dbMutated = true;
   }
-  if (!db.nextIds.subsidized_payments) {
-    db.nextIds.subsidized_payments = Math.max(0, ...db.subsidized_payments.map((p) => p.id)) + 1;
-  }
+  db.nextIds.subsidized_payments = Math.max(
+    Number(db.nextIds.subsidized_payments) || 1,
+    db.subsidized_payments.reduce((m, p) => Math.max(m, Number(p.id) || 0), 0) + 1
+  );
   if (!db.waste_logs) {
     db.waste_logs = [];
+    dbMutated = true;
   }
+  // סנכרון מוני nextIds נוספים למניעת התנגשות מזהים
+  db.nextIds.users = Math.max(Number(db.nextIds.users) || 1, db.users.reduce((m, x) => Math.max(m, Number(x.id) || 0), 0) + 1);
+  db.nextIds.orders = Math.max(Number(db.nextIds.orders) || 1, db.orders.reduce((m, x) => Math.max(m, Number(x.id) || 0), 0) + 1);
+  db.nextIds.order_items = Math.max(Number(db.nextIds.order_items) || 1, db.order_items.reduce((m, x) => Math.max(m, Number(x.id) || 0), 0) + 1);
+  db.nextIds.transactions = Math.max(Number(db.nextIds.transactions) || 1, db.transactions.reduce((m, x) => Math.max(m, Number(x.id) || 0), 0) + 1);
+  db.nextIds.fixed_expenses = Math.max(Number(db.nextIds.fixed_expenses) || 1, db.fixed_expenses.reduce((m, x) => Math.max(m, Number(x.id) || 0), 0) + 1);
+
   for (const t of db.transactions) {
-    if ((t.payment_method as string) === 'bit') t.payment_method = 'paybox';
-    if (String(t.category || '').includes('ביט')) t.category = String(t.category).replace(/ביט/g, 'פייבוקס');
-    if (String(t.notes || '').includes('ביט')) t.notes = String(t.notes).replace(/ביט/g, 'פייבוקס');
+    if ((t.payment_method as string) === 'bit') { t.payment_method = 'paybox'; dbMutated = true; }
+    if (String(t.category || '').includes('ביט')) { t.category = String(t.category).replace(/ביט/g, 'פייבוקס'); dbMutated = true; }
+    if (String(t.notes || '').includes('ביט')) { t.notes = String(t.notes).replace(/ביט/g, 'פייבוקס'); dbMutated = true; }
   }
   for (const f of db.fixed_expenses) {
-    if ((f.payment_method as string) === 'bit') f.payment_method = 'paybox';
+    if ((f.payment_method as string) === 'bit') { f.payment_method = 'paybox'; dbMutated = true; }
   }
   for (const o of db.orders) {
-    if (String(o.notes || '').includes('בביט')) o.notes = String(o.notes).replace(/בביט/g, 'בפייבוקס');
+    if (String(o.notes || '').includes('בביט')) { o.notes = String(o.notes).replace(/בביט/g, 'בפייבוקס'); dbMutated = true; }
   }
   for (const p of db.products) {
     if (!db.product_price_history.some((h) => h.product_id === p.id)) {
@@ -374,7 +408,11 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
         customer_price: p.customer_price,
         created_at: new Date().toISOString().slice(0, 10),
       });
+      dbMutated = true;
     }
+  }
+  if (dbMutated) {
+    saveDb(db);
   }
 
   // --- PUBLIC STOREFRONT (ללא התחברות) ---
@@ -566,10 +604,20 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
 
   if (path === '/api/products' && method === 'POST') {
     requireAdmin();
+    const name = String(body.name || '').trim();
+    if (!name) throwErr('יש להזין שם מוצר', 400);
+    if (db.products.some((p) => p.name.trim() === name)) {
+      throwErr('מוצר בשם זה כבר קיים במחירון', 409);
+    }
     const effective_date = String(body.effective_date || new Date().toISOString().slice(0, 10)).slice(0, 10);
+    const nextUniqueId = Math.max(
+      Number(db.nextIds.products) || 1,
+      db.products.reduce((m, p) => Math.max(m, Number(p.id) || 0), 0) + 1
+    );
+    db.nextIds.products = nextUniqueId + 1;
     const prod: AdminProduct = {
-      id: db.nextIds.products++,
-      name: String(body.name || '').trim(),
+      id: nextUniqueId,
+      name,
       cost_price: Number(body.cost_price || 0),
       supplier_price: Number(body.supplier_price || 0),
       preorder_price: Number(body.preorder_price || 0),
@@ -657,6 +705,21 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
       }
       saveDb(db);
       return { product: prod, scheduled: !applyNow, effective_date } as T;
+    }
+    if (method === 'DELETE' && !prodMatch[2]) {
+      const orderRefs = db.order_items.filter((oi) => oi.product_id === pid).length;
+      if (orderRefs > 0) {
+        throwErr(
+          `לא ניתן למחוק את "${prod.name}" לצמיתות כי הוא מופיע ב-${orderRefs} שורות הזמנה היסטוריות. ניתן להשבית אותו כדי להסיר מהתפריט.`,
+          409
+        );
+      }
+      db.products = db.products.filter((p) => p.id !== pid);
+      db.product_price_history = (db.product_price_history || []).filter((h) => h.product_id !== pid);
+      db.friday_inventory = db.friday_inventory.filter((fi) => fi.product_id !== pid);
+      db.waste_logs = (db.waste_logs || []).filter((w) => w.product_id !== pid);
+      saveDb(db);
+      return { ok: true } as T;
     }
   }
 
