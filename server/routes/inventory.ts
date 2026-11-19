@@ -29,7 +29,7 @@ router.get('/', async (req, res) => {
     const fridayDate = String(req.query.friday_date || getNextFridayDate()).slice(0, 10);
     const db = await getDb();
 
-    const products = await db.query<ProductRow>('SELECT id, name, cost_price, customer_price, is_active FROM products ORDER BY id ASC');
+    const products = await db.query<ProductRow>('SELECT id, name, cost_price, customer_price, is_active FROM products ORDER BY sort_order ASC, id ASC');
     const orderAgg = await db.query<OrderAggRow>(
       `SELECT oi.product_id, o.order_type, SUM(oi.quantity) as qty
        FROM order_items oi

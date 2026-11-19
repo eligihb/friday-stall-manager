@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo, useCallback } from 'react';
-import { Plus, Minus } from 'lucide-react';
+import { Plus, Minus, Search, ChevronDown, ChevronUp, Users } from 'lucide-react';
 import { apiFetch } from '../lib/api';
 import { filterUsersByNameOrPhone, getPhoneLast4 } from '../lib/whatsappParser';
 import {
@@ -29,6 +29,9 @@ export function CustomerOrdersPage() {
   const [fridayDate, setFridayDate] = useState(globalFriday);
   const [statusFilter, setStatusFilter] = useState('');
   const [orders, setOrders] = useState<Order[]>([]);
+  const [recentOrdersHistory, setRecentOrdersHistory] = useState<Order[]>([]);
+  const [quickCustSearch, setQuickCustSearch] = useState('');
+  const [showAllRecentCusts, setShowAllRecentCusts] = useState(false);
   const [products, setProducts] = useState<AdminProduct[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [bizSettings, setBizSettings] = useState<BusinessSettings | undefined>(undefined);
@@ -74,13 +77,15 @@ export function CustomerOrdersPage() {
       if (fridayDate) qs.set('friday_date', fridayDate);
       if (statusFilter) qs.set('status', statusFilter);
 
-      const [ordRes, prodRes, usrRes, setRes] = await Promise.all([
+      const [ordRes, allCustOrdRes, prodRes, usrRes, setRes] = await Promise.all([
         apiFetch<{ orders: Order[] }>(`/api/orders?${qs.toString()}`),
+        apiFetch<{ orders: Order[] }>('/api/orders?order_type=customer'),
         apiFetch<{ products: AdminProduct[] }>('/api/products'),
         apiFetch<{ users: User[] }>('/api/users'),
         apiFetch<{ settings: BusinessSettings }>('/api/settings'),
       ]);
       setOrders(ordRes.orders);
+      setRecentOrdersHistory(allCustOrdRes.orders);
       setProducts(prodRes.products.filter((p) => p.is_active));
       setUsers(usrRes.users.filter((u) => u.role === 'customer'));
       setBizSettings(setRes.settings);
@@ -96,15 +101,42 @@ export function CustomerOrdersPage() {
     loadData();
   }, [loadData, refreshTick]);
 
-  const openCreateModal = () => {
+  const recentCustomers = useMemo(() => {
+    const orderRank = new Map<number, number>();
+    recentOrdersHistory.forEach((o, idx) => {
+      if (o.user_id && !orderRank.has(o.user_id)) {
+        orderRank.set(o.user_id, idx);
+      }
+    });
+    return [...users].sort((a, b) => {
+      const ra = orderRank.has(a.id) ? orderRank.get(a.id)! : 999999;
+      const rb = orderRank.has(b.id) ? orderRank.get(b.id)! : 999999;
+      if (ra !== rb) return ra - rb;
+      return b.id - a.id;
+    });
+  }, [users, recentOrdersHistory]);
+
+  const quickVisibleCustomers = useMemo(() => {
+    const base = quickCustSearch.trim()
+      ? filterUsersByNameOrPhone(quickCustSearch, recentCustomers)
+      : recentCustomers;
+    return showAllRecentCusts || quickCustSearch.trim() ? base : base.slice(0, 5);
+  }, [recentCustomers, quickCustSearch, showAllRecentCusts]);
+
+  const openCreateModal = (presetUser?: User) => {
     setEditingOrder(null);
     setFormFriday(fridayDate || getNextFridayISO());
-    setSelectedUserId('');
+    setSelectedUserId(presetUser ? String(presetUser.id) : '');
     setUserSearch('');
-    setRecipientName('');
+    setRecipientName(presetUser ? presetUser.name : '');
     setDeliveryFee(String(bizSettings?.default_delivery_fee ?? 0));
-    setDiscountMode('fixed');
-    setDiscountValue('0');
+    if (presetUser && (presetUser.discount_percent ?? 0) > 0) {
+      setDiscountMode('percent');
+      setDiscountValue(String(presetUser.discount_percent));
+    } else {
+      setDiscountMode('fixed');
+      setDiscountValue('0');
+    }
     setIncludeVat(false);
     setPaidAmount('0');
     setPaymentMethod('paybox');
@@ -278,14 +310,75 @@ export function CustomerOrdersPage() {
           <FridaySelector value={fridayDate} onChange={setFridayDate} allowAll />
           <button
             type="button"
-            onClick={openCreateModal}
-            className="inline-flex items-center gap-1.5 px-4 min-h-[42px] rounded-xl bg-[#C85A17] hover:bg-[#A9440F] text-white font-bold text-xs sm:text-sm shadow-sm"
+            onClick={() => openCreateModal()}
+            className="inline-flex items-center gap-1.5 px-4 min-h-[48px] md:min-h-[42px] rounded-xl bg-[#C85A17] hover:bg-[#A9440F] text-white font-bold text-xs sm:text-sm shadow-sm"
           >
             <Plus className="w-4 h-4" />
             <span>הזמנה חדשה</span>
           </button>
         </div>
       </div>
+
+      {/* לקוחות אחרונים (5 אחרונים + הצג עוד + חיפוש מהיר בתחילת שם) להוספת הזמנה בלחיצה */}
+      {users.length > 0 && (
+        <div className="bg-white rounded-2xl p-3.5 sm:p-4 border border-[#E8D5BE] shadow-soft space-y-2.5">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div className="flex items-center gap-1.5 text-xs font-extrabold text-slate-700">
+              <Users className="w-4 h-4 text-[#C85A17]" />
+              <span>הוספת הזמנה מהירה — 5 לקוחות אחרונים</span>
+            </div>
+            <div className="relative sm:w-64">
+              <Search className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                value={quickCustSearch}
+                onChange={(e) => setQuickCustSearch(e.target.value)}
+                placeholder="חיפוש מהיר: הקלד תחילת שם או 4 ספרות..."
+                className="w-full pr-9 pl-3 py-2 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] focus:bg-white focus:border-[#C85A17] focus:outline-none text-xs"
+              />
+            </div>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            {quickVisibleCustomers.map((u) => (
+              <button
+                key={u.id}
+                type="button"
+                onClick={() => openCreateModal(u)}
+                className="min-h-[44px] px-3 py-1.5 rounded-xl bg-[#FAF6F0] hover:bg-[#FFF7ED] border border-[#E8D5BE] hover:border-[#C85A17] text-xs font-bold text-slate-800 inline-flex items-center gap-1.5 active:scale-[0.98] transition-all"
+              >
+                <Plus className="w-3.5 h-3.5 text-[#C85A17] shrink-0" />
+                <span>{u.name}</span>
+                {getPhoneLast4(u.phone) && (
+                  <span className="text-[10px] text-slate-400 tabular-nums">#{getPhoneLast4(u.phone)}</span>
+                )}
+              </button>
+            ))}
+            {!quickCustSearch.trim() && recentCustomers.length > 5 && (
+              <button
+                type="button"
+                onClick={() => setShowAllRecentCusts((v) => !v)}
+                className="min-h-[44px] px-3 py-1.5 rounded-xl bg-white border border-dashed border-[#C85A17]/60 text-[#8A330B] text-xs font-extrabold inline-flex items-center gap-1"
+              >
+                {showAllRecentCusts ? (
+                  <>
+                    <ChevronUp className="w-3.5 h-3.5" />
+                    <span>הצג פחות</span>
+                  </>
+                ) : (
+                  <>
+                    <ChevronDown className="w-3.5 h-3.5" />
+                    <span>עוד ({recentCustomers.length - 5})</span>
+                  </>
+                )}
+              </button>
+            )}
+            {quickCustSearch.trim() && quickVisibleCustomers.length === 0 && (
+              <span className="text-xs text-slate-400 py-2">לא נמצאו לקוחות התואמים ל״{quickCustSearch}״</span>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* כרטיסי סיכום */}
       <div className="grid grid-cols-3 gap-2.5 sm:gap-3 tabular-nums">
@@ -314,14 +407,15 @@ export function CustomerOrdersPage() {
         {[
           { key: '', label: 'הכל' },
           { key: 'pending', label: 'ממתין' },
-          { key: 'ready', label: 'מוכן' },
+          { key: 'received', label: 'התקבל' },
+          { key: 'ready', label: 'מוכן למסירה' },
           { key: 'delivered', label: 'נמסר' },
         ].map((f) => (
           <button
             key={f.key}
             type="button"
             onClick={() => setStatusFilter(f.key)}
-            className={`px-3.5 py-2 rounded-xl text-xs font-bold ${
+            className={`min-h-[44px] md:min-h-[36px] px-3.5 py-2 rounded-xl text-xs font-bold ${
               statusFilter === f.key
                 ? 'bg-[#1E242B] text-white'
                 : 'bg-white border border-[#E8D5BE] text-slate-600'

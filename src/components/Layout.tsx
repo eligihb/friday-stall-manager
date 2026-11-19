@@ -105,7 +105,7 @@ export function Layout({ activeTab, onSelectTab, children }: LayoutProps) {
               </h1>
               <p className="text-xs text-amber-300/90 mt-0.5 truncate">
                 {user.role === 'admin'
-                  ? 'ניהול מאפייה ודוכן שישי'
+                  ? 'ניהול דוכן שישי ושיווק'
                   : user.role === 'supplier'
                   ? 'פורטל ספק סיטונאי'
                   : 'פורטל הזמנות לקוח'}

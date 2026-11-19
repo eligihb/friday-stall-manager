@@ -416,12 +416,15 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
   }
 
   // --- PUBLIC STOREFRONT (ללא התחברות) ---
+  const sortProducts = (list: AdminProduct[]) =>
+    [...list].sort((a, b) => (a.sort_order ?? a.id) - (b.sort_order ?? b.id) || a.id - b.id);
+
   if (path === '/api/public/storefront' && method === 'GET') {
     return {
       business_name: db.settings.business_name || 'דוכן שישי תימני',
       admin_whatsapp_phone: db.settings.admin_whatsapp_phone || '050-5551000',
       whatsapp_footer: db.settings.whatsapp_footer || 'שבת שלום ומבורכת! 🕯️',
-      products: db.products
+      products: sortProducts(db.products)
         .filter((p) => p.is_active)
         .map((p) => ({
           id: p.id,
@@ -429,6 +432,7 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
           preorder_price: p.preorder_price,
           customer_price: p.customer_price,
           image_url: p.image_url || null,
+          sort_order: p.sort_order ?? p.id,
           is_active: true,
         })),
     } as T;
@@ -584,11 +588,12 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
 
   // --- PRODUCTS ---
   if (path === '/api/products' && method === 'GET') {
-    if (me.role === 'admin') return { products: db.products } as T;
-    const active = db.products.filter((p) => p.is_active);
+    const sorted = sortProducts(db.products);
+    if (me.role === 'admin') return { products: sorted } as T;
+    const active = sorted.filter((p) => p.is_active);
     if (me.role === 'supplier') {
       return {
-        products: active.map((p) => ({ id: p.id, name: p.name, supplier_price: p.supplier_price, is_active: true })),
+        products: active.map((p) => ({ id: p.id, name: p.name, supplier_price: p.supplier_price, image_url: p.image_url || null, sort_order: p.sort_order ?? p.id, is_active: true })),
       } as T;
     }
     return {
@@ -597,9 +602,26 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
         name: p.name,
         preorder_price: p.preorder_price,
         customer_price: p.customer_price,
+        image_url: p.image_url || null,
+        sort_order: p.sort_order ?? p.id,
         is_active: true,
       })),
     } as T;
+  }
+
+  if (path === '/api/products/reorder' && method === 'PUT') {
+    requireAdmin();
+    const orderedIds = Array.isArray(body.ordered_ids)
+      ? body.ordered_ids.map((v: unknown) => Number(v)).filter((n: number) => Number.isInteger(n) && n > 0)
+      : [];
+    if (orderedIds.length === 0) throwErr('יש לספק רשימת מוצרים לסידור', 400);
+    const byId = new Map(db.products.map((p) => [p.id, p]));
+    orderedIds.forEach((pid: number, idx: number) => {
+      const p = byId.get(pid);
+      if (p) p.sort_order = idx + 1;
+    });
+    saveDb(db);
+    return { ok: true, products: sortProducts(db.products) } as T;
   }
 
   if (path === '/api/products' && method === 'POST') {
@@ -615,6 +637,7 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
       db.products.reduce((m, p) => Math.max(m, Number(p.id) || 0), 0) + 1
     );
     db.nextIds.products = nextUniqueId + 1;
+    const nextSortOrder = db.products.reduce((m, p) => Math.max(m, Number(p.sort_order ?? p.id) || 0), 0) + 1;
     const prod: AdminProduct = {
       id: nextUniqueId,
       name,
@@ -623,6 +646,7 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
       preorder_price: Number(body.preorder_price || 0),
       customer_price: Number(body.customer_price || 0),
       image_url: body.image_url ? String(body.image_url).trim() : null,
+      sort_order: nextSortOrder,
       is_active: body.is_active !== undefined ? Boolean(body.is_active) : true,
     };
     db.products.push(prod);
@@ -1139,7 +1163,7 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
       (o) => o.friday_date === fri && o.status !== 'awaiting_approval'
     );
     const orderTypeById = new Map(friOrders.map((o) => [o.id, o.order_type]));
-    const items = db.products
+    const items = sortProducts(db.products)
       .filter((p) => p.is_active)
       .map((p) => {
         let supplier_qty = 0;
@@ -1327,7 +1351,7 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
     if (path === '/api/finance/waste' && method === 'GET') {
       const fri = String(q.get('friday_date') || getNextFridayISO()).slice(0, 10);
       const wMap = new Map((db.waste_logs || []).filter((w) => w.friday_date === fri).map((w) => [w.product_id, w]));
-      const items = db.products
+      const items = sortProducts(db.products)
         .filter((p) => p.is_active)
         .map((p) => {
           const w = wMap.get(p.id);

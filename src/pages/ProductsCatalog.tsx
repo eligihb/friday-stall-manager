@@ -14,6 +14,10 @@ import {
   Calendar,
   Copy,
   Trash2,
+  GripVertical,
+  ArrowUp,
+  ArrowDown,
+  ArrowUpDown,
 } from 'lucide-react';
 import { apiFetch } from '../lib/api';
 import { formatHebrewDate, formatILS, formatPercent } from '../lib/format';
@@ -70,6 +74,9 @@ export function ProductsCatalog() {
   const [toast, setToast] = useState('');
   const [search, setSearch] = useState('');
   const [showOnlyActive, setShowOnlyActive] = useState(false);
+  const [draggedId, setDraggedId] = useState<number | null>(null);
+  const [dragOverId, setDragOverId] = useState<number | null>(null);
+  const [reordering, setReordering] = useState(false);
 
   // חלונית תאריך תחולה ואישור אזהרות בעת שמירת מחירים
   const [pendingSaveProduct, setPendingSaveProduct] = useState<AdminProduct | null>(null);
@@ -246,6 +253,52 @@ export function ProductsCatalog() {
     }
   };
 
+  const persistReorder = async (nextList: AdminProduct[], toastMsg?: string) => {
+    setProducts(nextList);
+    setReordering(true);
+    try {
+      await apiFetch('/api/products/reorder', {
+        method: 'PUT',
+        body: JSON.stringify({ ordered_ids: nextList.map((p) => p.id) }),
+      });
+      if (toastMsg) {
+        setToast(toastMsg);
+        setTimeout(() => setToast(''), 2000);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'שגיאה בשמירת סדר המוצרים');
+      await loadProducts();
+    } finally {
+      setReordering(false);
+    }
+  };
+
+  const moveProductByDrop = async (sourceId: number, targetId: number) => {
+    if (sourceId === targetId) return;
+    const list = [...products];
+    const fromIdx = list.findIndex((p) => p.id === sourceId);
+    const toIdx = list.findIndex((p) => p.id === targetId);
+    if (fromIdx < 0 || toIdx < 0) return;
+    const [moved] = list.splice(fromIdx, 1);
+    list.splice(toIdx, 0, moved);
+    await persistReorder(list, 'סדר המוצרים עודכן!');
+  };
+
+  const stepProductOrder = async (productId: number, delta: -1 | 1) => {
+    const list = [...products];
+    const idx = list.findIndex((p) => p.id === productId);
+    const nextIdx = idx + delta;
+    if (idx < 0 || nextIdx < 0 || nextIdx >= list.length) return;
+    const [moved] = list.splice(idx, 1);
+    list.splice(nextIdx, 0, moved);
+    await persistReorder(list);
+  };
+
+  const handleReverseOrder = async () => {
+    if (products.length < 2) return;
+    await persistReorder([...products].reverse(), 'סדר המוצרים התהפך!');
+  };
+
   const handleDuplicate = (p: AdminProduct) => {
     const d = drafts[p.id];
     setNewProd({
@@ -397,14 +450,26 @@ export function ProductsCatalog() {
             עריכת 4 מדרגות מחיר, תמונות מוצר, התראות חריגה (מתחת לעלות או שינוי מעל 30%), ותאריך תחולה לשימור הזמנות עבר.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => setShowAddModal(true)}
-          className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-[#C85A17] hover:bg-[#A9440F] text-white font-bold text-sm shadow-sm transition-colors"
-        >
-          <Plus className="w-4 h-4" />
-          <span>הוספת מוצר חדש</span>
-        </button>
+        <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+          <button
+            type="button"
+            disabled={reordering || products.length < 2}
+            onClick={handleReverseOrder}
+            className="flex-1 sm:flex-none min-h-[48px] md:min-h-[42px] inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-white border border-[#E8D5BE] hover:border-[#C85A17] text-slate-800 font-bold text-xs sm:text-sm shadow-sm transition-colors"
+            title="הפוך את סדר כל המוצרים"
+          >
+            <ArrowUpDown className="w-4 h-4 text-[#C85A17]" />
+            <span>הפוך סדר</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowAddModal(true)}
+            className="flex-1 sm:flex-none min-h-[48px] md:min-h-[42px] inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-[#C85A17] hover:bg-[#A9440F] text-white font-bold text-xs sm:text-sm shadow-sm transition-colors"
+          >
+            <Plus className="w-4 h-4" />
+            <span>הוספת מוצר חדש</span>
+          </button>
+        </div>
       </div>
 
       {/* כרטיסי סיכום */}
@@ -491,6 +556,7 @@ export function ProductsCatalog() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-[#F3E9DC]/70 text-slate-700 border-b border-[#E8D5BE]">
+                    <th className="text-center py-3.5 px-2 font-bold w-16">סדר</th>
                     <th className="text-right py-3.5 px-4 font-bold">שם המוצר ותמונה</th>
                     <th className="text-right py-3.5 px-2 font-bold">עלות (₪)</th>
                     <th className="text-right py-3.5 px-2 font-bold">ספק (₪)</th>
@@ -517,8 +583,29 @@ export function ProductsCatalog() {
                     return (
                       <tr
                         key={p.id}
+                        draggable={!search.trim() && !showOnlyActive}
+                        onDragStart={() => setDraggedId(p.id)}
+                        onDragOver={(e) => {
+                          e.preventDefault();
+                          if (dragOverId !== p.id) setDragOverId(p.id);
+                        }}
+                        onDragLeave={() => {
+                          if (dragOverId === p.id) setDragOverId(null);
+                        }}
+                        onDrop={(e) => {
+                          e.preventDefault();
+                          if (draggedId !== null) moveProductByDrop(draggedId, p.id);
+                          setDraggedId(null);
+                          setDragOverId(null);
+                        }}
+                        onDragEnd={() => {
+                          setDraggedId(null);
+                          setDragOverId(null);
+                        }}
                         className={`transition-colors ${
-                          !p.is_active
+                          dragOverId === p.id && draggedId !== p.id
+                            ? 'bg-amber-100/80 ring-2 ring-[#C85A17]'
+                            : !p.is_active
                             ? 'bg-slate-50/70 opacity-65'
                             : rowWarnings.length > 0
                             ? 'bg-red-50/50'
@@ -527,6 +614,36 @@ export function ProductsCatalog() {
                             : 'hover:bg-[#FDFBF7]'
                         }`}
                       >
+                        <td className="py-2.5 px-2 text-center">
+                          <div className="inline-flex items-center gap-0.5 text-slate-400">
+                            <span
+                              className="cursor-grab active:cursor-grabbing p-1 hover:text-slate-700"
+                              title="גרור לשינוי סדר"
+                            >
+                              <GripVertical className="w-4 h-4" />
+                            </span>
+                            <div className="flex flex-col">
+                              <button
+                                type="button"
+                                disabled={reordering || products[0]?.id === p.id}
+                                onClick={() => stepProductOrder(p.id, -1)}
+                                className="p-0.5 hover:text-[#C85A17] disabled:opacity-25"
+                                title="הזז למעלה"
+                              >
+                                <ArrowUp className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                disabled={reordering || products[products.length - 1]?.id === p.id}
+                                onClick={() => stepProductOrder(p.id, 1)}
+                                className="p-0.5 hover:text-[#C85A17] disabled:opacity-25"
+                                title="הזז למטה"
+                              >
+                                <ArrowDown className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </div>
+                        </td>
                         <td className="py-2.5 px-4 font-bold text-slate-900 min-w-[200px]">
                           <div className="flex items-center gap-2">
                             {d.image_url ? (
@@ -692,8 +809,26 @@ export function ProductsCatalog() {
               return (
                 <div
                   key={p.id}
+                  draggable={!search.trim() && !showOnlyActive}
+                  onDragStart={() => setDraggedId(p.id)}
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    if (dragOverId !== p.id) setDragOverId(p.id);
+                  }}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    if (draggedId !== null) moveProductByDrop(draggedId, p.id);
+                    setDraggedId(null);
+                    setDragOverId(null);
+                  }}
+                  onDragEnd={() => {
+                    setDraggedId(null);
+                    setDragOverId(null);
+                  }}
                   className={`bg-white rounded-2xl p-4 border shadow-soft ${
-                    !p.is_active
+                    dragOverId === p.id && draggedId !== p.id
+                      ? 'border-[#C85A17] ring-2 ring-[#C85A17]/40 bg-amber-50/40'
+                      : !p.is_active
                       ? 'border-slate-200 opacity-70'
                       : rowWarnings.length > 0
                       ? 'border-red-300 bg-red-50/30'
@@ -703,41 +838,62 @@ export function ProductsCatalog() {
                   }`}
                 >
                   <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
-                    <input
-                      type="text"
-                      value={d.name}
-                      onChange={(e) => updateDraft(p.id, 'name', e.target.value)}
-                      className="font-bold text-base text-slate-900 bg-transparent border-b border-transparent focus:border-[#C85A17] focus:outline-none flex-1 min-w-[140px]"
-                    />
-                    <div className="flex items-center gap-1.5 shrink-0">
+                    <div className="flex items-center gap-1.5 flex-1 min-w-[140px]">
+                      <GripVertical className="w-4 h-4 text-slate-400 shrink-0 cursor-grab" />
+                      <input
+                        type="text"
+                        value={d.name}
+                        onChange={(e) => updateDraft(p.id, 'name', e.target.value)}
+                        className="font-bold text-base text-slate-900 bg-transparent border-b border-transparent focus:border-[#C85A17] focus:outline-none flex-1 min-w-0"
+                      />
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button
+                        type="button"
+                        disabled={reordering || products[0]?.id === p.id}
+                        onClick={() => stepProductOrder(p.id, -1)}
+                        className="min-w-[44px] min-h-[48px] rounded-xl bg-[#FAF6F0] text-slate-600 flex items-center justify-center disabled:opacity-30"
+                        title="הזז למעלה"
+                      >
+                        <ArrowUp className="w-4 h-4" />
+                      </button>
+                      <button
+                        type="button"
+                        disabled={reordering || products[products.length - 1]?.id === p.id}
+                        onClick={() => stepProductOrder(p.id, 1)}
+                        className="min-w-[44px] min-h-[48px] rounded-xl bg-[#FAF6F0] text-slate-600 flex items-center justify-center disabled:opacity-30"
+                        title="הזז למטה"
+                      >
+                        <ArrowDown className="w-4 h-4" />
+                      </button>
                       <button
                         type="button"
                         onClick={() => openHistory(p)}
-                        className="min-w-[48px] min-h-[48px] rounded-xl bg-[#FAF6F0] text-slate-600 flex items-center justify-center"
+                        className="min-w-[44px] min-h-[48px] rounded-xl bg-[#FAF6F0] text-slate-600 flex items-center justify-center"
                         title="היסטוריית מחירים"
                       >
-                        <History className="w-5 h-5" />
+                        <History className="w-4 h-4" />
                       </button>
                       <button
                         type="button"
                         onClick={() => handleDuplicate(p)}
-                        className="min-w-[48px] min-h-[48px] rounded-xl bg-sky-50 text-sky-700 flex items-center justify-center"
+                        className="min-w-[44px] min-h-[48px] rounded-xl bg-sky-50 text-sky-700 flex items-center justify-center"
                         title="שכפל מוצר"
                       >
-                        <Copy className="w-5 h-5" />
+                        <Copy className="w-4 h-4" />
                       </button>
                       <button
                         type="button"
                         onClick={() => handleDeleteProduct(p)}
-                        className="min-w-[48px] min-h-[48px] rounded-xl bg-red-50 text-red-600 flex items-center justify-center"
+                        className="min-w-[44px] min-h-[48px] rounded-xl bg-red-50 text-red-600 flex items-center justify-center"
                         title="מחק מוצר"
                       >
-                        <Trash2 className="w-5 h-5" />
+                        <Trash2 className="w-4 h-4" />
                       </button>
                       <button
                         type="button"
                         onClick={() => toggleActive(p)}
-                        className={`min-h-[48px] px-3 rounded-xl text-xs font-bold ${
+                        className={`min-h-[48px] px-2.5 rounded-xl text-xs font-bold ${
                           p.is_active ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-600'
                         }`}
                       >

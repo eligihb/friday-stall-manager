@@ -159,22 +159,38 @@ export function getPhoneLast4(phone?: string): string {
 }
 
 /**
- * התאמת לקוח או ספק לפי שם מלא/חלקי או 4 ספרות אחרונות של הטלפון (למשל 1015, 9917, 9613)
+ * התאמת לקוח או ספק לפי תחילת שם (עדיפות ראשונה), שם חלקי או 4 ספרות אחרונות של הטלפון
  */
 export function filterUsersByNameOrPhone(query: string, users: User[]): User[] {
   const q = query.trim().toLowerCase();
   if (!q) return users;
   const qDigits = q.replace(/\D/g, '');
 
-  return users.filter((u) => {
-    if (u.name.toLowerCase().includes(q)) return true;
+  const scored: Array<{ user: User; score: number }> = [];
+  for (const u of users) {
+    const nameLower = u.name.trim().toLowerCase();
     const phoneDigits = String(u.phone || '').replace(/\D/g, '');
-    if (qDigits.length >= 2 && phoneDigits) {
-      if (phoneDigits.endsWith(qDigits) || phoneDigits.includes(qDigits)) return true;
+    let score = 0;
+
+    if (nameLower.startsWith(q)) {
+      score = 4;
+    } else if (nameLower.split(/\s+/).some((word) => word.startsWith(q))) {
+      score = 3;
+    } else if (qDigits.length >= 2 && phoneDigits && phoneDigits.endsWith(qDigits)) {
+      score = 3;
+    } else if (nameLower.includes(q)) {
+      score = 2;
+    } else if (qDigits.length >= 2 && phoneDigits && phoneDigits.includes(qDigits)) {
+      score = 1;
+    } else if (u.email.toLowerCase().includes(q)) {
+      score = 1;
     }
-    if (u.email.toLowerCase().includes(q)) return true;
-    return false;
-  });
+
+    if (score > 0) scored.push({ user: u, score });
+  }
+
+  scored.sort((a, b) => b.score - a.score);
+  return scored.map((s) => s.user);
 }
 
 export function detectUserInMessage(rawText: string, users: User[]): User | null {

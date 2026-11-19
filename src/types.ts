@@ -21,6 +21,7 @@ export interface Product {
   preorder_price?: number;
   customer_price?: number;
   image_url?: string | null;
+  sort_order?: number;
   is_active: boolean;
 }
 
@@ -32,6 +33,7 @@ export interface AdminProduct {
   preorder_price: number;
   customer_price: number;
   image_url?: string | null;
+  sort_order?: number;
   is_active: boolean;
 }
 
@@ -57,7 +59,7 @@ export interface OrderItem {
 }
 
 export type OrderType = 'customer' | 'supplier' | 'charity';
-export type OrderStatus = 'awaiting_approval' | 'pending' | 'ready' | 'delivered';
+export type OrderStatus = 'awaiting_approval' | 'pending' | 'received' | 'ready' | 'delivered';
 
 export interface Order {
   id: number;

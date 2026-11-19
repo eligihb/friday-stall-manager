@@ -11,6 +11,7 @@ import {
   Trash2,
   Share2,
   Search,
+  FileText,
 } from 'lucide-react';
 import { apiFetch } from '../lib/api';
 import { filterUsersByNameOrPhone, getPhoneLast4 } from '../lib/whatsappParser';
@@ -25,11 +26,13 @@ import {
 import { buildWhatsAppShareUrl, formatSupplierLedgerWhatsApp } from '../lib/whatsappFormat';
 import { useFriday } from '../context/FridayContext';
 import { BottomSheet } from '../components/BottomSheet';
-import type { AdminProduct, Order, OrderStatus, PaymentMethod, Transaction, User } from '../types';
+import { SupplierInvoiceSheet, getPaymentVisualState } from '../components/SupplierInvoiceSheet';
+import type { AdminProduct, BusinessSettings, Order, OrderStatus, PaymentMethod, Transaction, User } from '../types';
 
 const NEXT_STATUS: Record<OrderStatus, OrderStatus> = {
-  awaiting_approval: 'pending',
-  pending: 'ready',
+  awaiting_approval: 'received',
+  pending: 'received',
+  received: 'ready',
   ready: 'delivered',
   delivered: 'pending',
 };
@@ -37,6 +40,9 @@ const NEXT_STATUS: Record<OrderStatus, OrderStatus> = {
 export function SupplierOrdersPage() {
   const { fridayDate: globalFriday, refreshTick } = useFriday();
   const [suppliers, setSuppliers] = useState<User[]>([]);
+  const [recentSupplierOrders, setRecentSupplierOrders] = useState<Order[]>([]);
+  const [bizSettings, setBizSettings] = useState<BusinessSettings | undefined>(undefined);
+  const [invoiceOrder, setInvoiceOrder] = useState<Order | null>(null);
   const [supplierSearch, setSupplierSearch] = useState('');
   const [selectedSupplierId, setSelectedSupplierId] = useState<number | null>(null);
   const [products, setProducts] = useState<AdminProduct[]>([]);
@@ -78,13 +84,17 @@ export function SupplierOrdersPage() {
   const loadSuppliers = useCallback(async () => {
     setLoading(true);
     try {
-      const [usrRes, prodRes] = await Promise.all([
+      const [usrRes, prodRes, ordRes, setRes] = await Promise.all([
         apiFetch<{ users: User[] }>('/api/users'),
         apiFetch<{ products: AdminProduct[] }>('/api/products'),
+        apiFetch<{ orders: Order[] }>('/api/orders?order_type=supplier'),
+        apiFetch<{ settings: BusinessSettings }>('/api/settings'),
       ]);
       const sups = usrRes.users.filter((u) => u.role === 'supplier');
       setSuppliers(sups);
+      setRecentSupplierOrders(ordRes.orders);
       setProducts(prodRes.products.filter((p) => p.is_active));
+      setBizSettings(setRes.settings);
       setSelectedSupplierId((cur) => cur ?? (sups[0]?.id ?? null));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'שגיאה בטעינת הספקים');
@@ -129,15 +139,48 @@ export function SupplierOrdersPage() {
     return computed.reverse();
   }, [ledger]);
 
+  const recentSuppliers = useMemo(() => {
+    const rank = new Map<number, number>();
+    recentSupplierOrders.forEach((o, idx) => {
+      if (o.user_id && !rank.has(o.user_id)) rank.set(o.user_id, idx);
+    });
+    return [...suppliers].sort((a, b) => {
+      const ra = rank.has(a.id) ? rank.get(a.id)! : 999999;
+      const rb = rank.has(b.id) ? rank.get(b.id)! : 999999;
+      if (ra !== rb) return ra - rb;
+      return b.id - a.id;
+    });
+  }, [suppliers, recentSupplierOrders]);
+
   const filteredSuppliers = useMemo(
-    () => filterUsersByNameOrPhone(supplierSearch, suppliers),
-    [supplierSearch, suppliers]
+    () => filterUsersByNameOrPhone(supplierSearch, recentSuppliers),
+    [supplierSearch, recentSuppliers]
   );
 
   const selectedSupplier = useMemo(
     () => suppliers.find((s) => s.id === selectedSupplierId) || null,
     [suppliers, selectedSupplierId]
   );
+
+  const quickStartSupplierOrder = (sup: User) => {
+    setSelectedSupplierId(sup.id);
+    setEditingOrder(null);
+    setOrderFriday(globalFriday || getNextFridayISO());
+    setOrderDeliveryFee('0');
+    if ((sup.discount_percent ?? 0) > 0) {
+      setOrderDiscountMode('percent');
+      setOrderCredit(String(sup.discount_percent));
+    } else {
+      setOrderDiscountMode('fixed');
+      setOrderCredit('0');
+    }
+    setOrderIncludeVat(false);
+    setOrderPaid('0');
+    setOrderPayMethod('transfer');
+    setOrderNotes('');
+    setQuantities({});
+    setOrderModalOpen(true);
+  };
 
   const getSupplierUnitPrice = (p: AdminProduct) => {
     const ov = selectedSupplier?.custom_prices?.[p.id];
@@ -347,60 +390,78 @@ export function SupplierOrdersPage() {
         </div>
       ) : (
         <>
-          {/* חיפוש ספק מהיר לפי שם או 4 ספרות אחרונות */}
-          <div className="relative max-w-sm">
-            <Search className="w-4 h-4 text-slate-400 absolute right-3.5 top-1/2 -translate-y-1/2" />
-            <input
-              type="text"
-              value={supplierSearch}
-              onChange={(e) => setSupplierSearch(e.target.value)}
-              placeholder="חיפוש ספק לפי שם או 4 ספרות אחרונות..."
-              className="w-full pr-10 pl-4 py-2 rounded-xl border border-[#E8D5BE] bg-white text-sm"
-            />
-          </div>
+          {/* סרגל ספקים אחרונים (תמיד מוצג בשתי שורות קבועות להוספה מהירה בלחיצה) */}
+          <div className="bg-white rounded-2xl p-3.5 sm:p-4 border border-[#E8D5BE] shadow-soft space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5 text-xs font-extrabold text-slate-700">
+                <Store className="w-4 h-4 text-[#C85A17]" />
+                <span>ספקים אחרונים שעבדתי איתם (לחיצה לפתיחת כרטסת או ״+״ להזמנה מיידית)</span>
+              </div>
+              <div className="relative sm:w-64">
+                <Search className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={supplierSearch}
+                  onChange={(e) => setSupplierSearch(e.target.value)}
+                  placeholder="חיפוש ספק לפי תחילת שם או 4 ספרות..."
+                  className="w-full pr-9 pl-3 py-2 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] text-xs"
+                />
+              </div>
+            </div>
 
-          {/* רצועת ספקים נגללת בנוחות במובייל ורשת בדסקטופ */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
-            {filteredSuppliers.map((sup) => {
-              const selected = sup.id === selectedSupplierId;
-              const isDebt = sup.balance < 0;
-              return (
-                <button
-                  key={sup.id}
-                  type="button"
-                  onClick={() => setSelectedSupplierId(sup.id)}
-                  className={`text-right p-3.5 rounded-2xl border transition-all ${
-                    selected
-                      ? 'bg-[#1E242B] text-white border-[#1E242B] shadow-card'
-                      : 'bg-white border-[#E8D5BE] hover:border-[#C85A17] text-slate-900 shadow-soft'
-                  }`}
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2 font-bold text-sm">
-                      <Store className={`w-4 h-4 ${selected ? 'text-amber-400' : 'text-[#C85A17]'}`} />
-                      <span>{sup.name}</span>
-                    </div>
-                    <span
-                      className={`text-xs font-extrabold tabular-nums px-2.5 py-0.5 rounded-full ${
-                        isDebt
-                          ? selected
-                            ? 'bg-red-500/25 text-red-200'
-                            : 'bg-red-50 text-red-700'
-                          : selected
-                          ? 'bg-emerald-500/25 text-emerald-200'
-                          : 'bg-emerald-50 text-emerald-700'
-                      }`}
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
+              {filteredSuppliers.slice(0, 8).map((sup) => {
+                const selected = sup.id === selectedSupplierId;
+                const isDebt = sup.balance < 0;
+                return (
+                  <div
+                    key={sup.id}
+                    className={`rounded-2xl border transition-all flex items-stretch overflow-hidden ${
+                      selected
+                        ? 'bg-[#1E242B] text-white border-[#1E242B] shadow-card'
+                        : 'bg-[#FAF6F0] border-[#E8D5BE] hover:border-[#C85A17] text-slate-900'
+                    }`}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => setSelectedSupplierId(sup.id)}
+                      className="flex-1 min-w-0 text-right p-2.5 flex flex-col justify-between gap-1"
                     >
-                      {isDebt
-                        ? `חוב ${formatILS(Math.abs(sup.balance))}`
-                        : sup.balance > 0
-                        ? `זכות ${formatILS(sup.balance)}`
-                        : 'מאוזן'}
-                    </span>
+                      <div className="font-bold text-xs sm:text-sm truncate">{sup.name}</div>
+                      <div
+                        className={`text-[10px] font-extrabold tabular-nums ${
+                          isDebt
+                            ? selected
+                              ? 'text-red-300'
+                              : 'text-red-700'
+                            : selected
+                            ? 'text-emerald-300'
+                            : 'text-emerald-700'
+                        }`}
+                      >
+                        {isDebt
+                          ? `חוב ${formatILS(Math.abs(sup.balance))}`
+                          : sup.balance > 0
+                          ? `זכות ${formatILS(sup.balance)}`
+                          : 'מאוזן'}
+                      </div>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => quickStartSupplierOrder(sup)}
+                      className={`px-3 min-w-[44px] flex items-center justify-center border-r transition-colors ${
+                        selected
+                          ? 'bg-[#C85A17] hover:bg-[#A9440F] border-white/10 text-white'
+                          : 'bg-[#FFF7ED] hover:bg-[#C85A17] text-[#C85A17] hover:text-white border-[#E8D5BE]'
+                      }`}
+                      title={`הזמנה חדשה ל-${sup.name}`}
+                    >
+                      <Plus className="w-4 h-4" />
+                    </button>
                   </div>
-                </button>
-              );
-            })}
+                );
+              })}
+            </div>
           </div>
 
           {ledger && (
@@ -487,7 +548,9 @@ export function SupplierOrdersPage() {
                     אין עדיין הזמנות לספק זה.
                   </div>
                 ) : (
-                  ledgerRowsWithRunning.map((o) => (
+                  ledgerRowsWithRunning.map((o) => {
+                    const payState = getPaymentVisualState(o);
+                    return (
                     <div
                       key={o.id}
                       className="bg-white rounded-2xl border border-[#E8D5BE] shadow-soft p-4 space-y-3"
@@ -497,13 +560,13 @@ export function SupplierOrdersPage() {
                           <div className="font-bold text-slate-900">{formatFridayLabel(o.friday_date)}</div>
                           <div className="text-xs text-slate-400 tabular-nums">הזמנה #{o.id}</div>
                         </div>
-                        <div className="text-left tabular-nums">
+                        <div className="text-left tabular-nums space-y-1">
                           <div className="font-extrabold text-base text-slate-900">
                             {formatILS(o.total_amount)}
                           </div>
-                          <div className="text-[11px] font-bold text-red-600">
-                            חוב מצטבר: {formatILS(o.runningDebt)}
-                          </div>
+                          <span className={`inline-block px-2 py-0.5 rounded-full text-[11px] font-extrabold border ${payState.badgeCls}`}>
+                            {payState.label}
+                          </span>
                         </div>
                       </div>
 
@@ -515,45 +578,59 @@ export function SupplierOrdersPage() {
                           >
                             <span className="text-[#C85A17] font-extrabold">{it.quantity}</span>
                             <span>{it.product_name}</span>
+                            <span className="text-slate-400 font-normal">({formatILS(it.unit_price_snapshot)})</span>
                           </span>
                         ))}
                       </div>
 
-                      <div className="flex items-center justify-between text-xs tabular-nums pt-2 border-t border-[#F3E9DC]">
-                        <div className="flex gap-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2 text-xs tabular-nums pt-2 border-t border-[#F3E9DC]">
+                        <div className="flex flex-wrap gap-2.5">
                           <span className="text-emerald-700 font-bold">שולם: {formatILS(o.paid_amount)}</span>
                           {o.credit_discount > 0 && (
                             <span className="text-amber-700 font-bold">
                               זכות: {formatILS(o.credit_discount)}
                             </span>
                           )}
+                          <span className="text-red-600 font-bold">
+                            חוב מצטבר: {formatILS(o.runningDebt)}
+                          </span>
                         </div>
-                        <div className="flex items-center gap-1">
+                        <div className="flex items-center gap-1.5 w-full sm:w-auto justify-end">
+                          <button
+                            type="button"
+                            onClick={() => setInvoiceOrder(o)}
+                            className="min-h-[44px] px-3 rounded-xl bg-[#1E242B] text-white font-bold inline-flex items-center gap-1.5"
+                            title="חשבונית, הדפסה ושליחה"
+                          >
+                            <FileText className="w-4 h-4" />
+                            <span>חשבונית</span>
+                          </button>
                           <button
                             type="button"
                             onClick={() => handleCycleStatus(o)}
-                            className="px-2.5 py-1.5 rounded-lg bg-[#FAF6F0] border border-[#E8D5BE] font-bold text-slate-800"
+                            className="min-h-[44px] px-3 rounded-xl bg-[#FAF6F0] border border-[#E8D5BE] font-bold text-slate-800"
                           >
                             {ORDER_STATUS_LABELS[o.status]}
                           </button>
                           <button
                             type="button"
                             onClick={() => openEditSupplierOrder(o)}
-                            className="p-2 rounded-lg text-slate-500 hover:bg-slate-100"
+                            className="min-w-[44px] min-h-[44px] rounded-xl text-slate-500 hover:bg-slate-100 flex items-center justify-center"
                           >
                             <Edit3 className="w-4 h-4" />
                           </button>
                           <button
                             type="button"
                             onClick={() => handleDeleteOrder(o.id)}
-                            className="p-2 rounded-lg text-slate-400 hover:text-red-600"
+                            className="min-w-[44px] min-h-[44px] rounded-xl text-slate-400 hover:text-red-600 flex items-center justify-center"
                           >
                             <Trash2 className="w-4 h-4" />
                           </button>
                         </div>
                       </div>
                     </div>
-                  ))
+                  );
+                  })
                 )}
               </div>
 
@@ -581,17 +658,22 @@ export function SupplierOrdersPage() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-[#F3E9DC] tabular-nums">
-                        {ledgerRowsWithRunning.map((o) => (
+                        {ledgerRowsWithRunning.map((o) => {
+                          const payState = getPaymentVisualState(o);
+                          return (
                           <tr key={o.id} className="hover:bg-[#FDFBF7]">
                             <td className="py-3 px-4 font-bold text-slate-900 whitespace-nowrap">
                               <div>{formatFridayLabel(o.friday_date)}</div>
                               <div className="text-[11px] text-slate-400">#{o.id}</div>
                             </td>
                             <td className="py-3 px-4 text-xs text-slate-700 max-w-xs">
-                              {o.items.map((it) => `${it.quantity} ${it.product_name}`).join(' · ')}
+                              {o.items.map((it) => `${it.quantity} ${it.product_name} (${formatILS(it.unit_price_snapshot)})`).join(' · ')}
                             </td>
                             <td className="py-3 px-3 text-left font-extrabold text-slate-900">
-                              {formatILS(o.total_amount)}
+                              <div>{formatILS(o.total_amount)}</div>
+                              <span className={`inline-block mt-0.5 px-2 py-0.5 rounded-full text-[10px] font-extrabold border ${payState.badgeCls}`}>
+                                {payState.label}
+                              </span>
                             </td>
                             <td className="py-3 px-3 text-left font-bold text-amber-700">
                               {o.credit_discount > 0 ? formatILS(o.credit_discount) : '—'}
@@ -614,6 +696,15 @@ export function SupplierOrdersPage() {
                             <td className="py-3 px-3 text-center whitespace-nowrap">
                               <button
                                 type="button"
+                                onClick={() => setInvoiceOrder(o)}
+                                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-[#1E242B] hover:bg-slate-800 text-white text-xs font-bold ml-1"
+                                title="חשבונית, הדפסה ושליחה"
+                              >
+                                <FileText className="w-3.5 h-3.5" />
+                                <span>חשבונית</span>
+                              </button>
+                              <button
+                                type="button"
                                 onClick={() => openEditSupplierOrder(o)}
                                 className="p-1.5 rounded-lg text-slate-500 hover:bg-slate-100"
                               >
@@ -628,7 +719,8 @@ export function SupplierOrdersPage() {
                               </button>
                             </td>
                           </tr>
-                        ))}
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
@@ -967,6 +1059,14 @@ export function SupplierOrdersPage() {
           </button>
         </form>
       </BottomSheet>
+
+      {/* תצוגת חשבונית ספק להדפסה / וואטסאפ / מייל */}
+      <SupplierInvoiceSheet
+        order={invoiceOrder}
+        supplier={ledger?.user || selectedSupplier}
+        bizSettings={bizSettings}
+        onClose={() => setInvoiceOrder(null)}
+      />
     </div>
   );
 }

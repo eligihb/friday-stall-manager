@@ -42,6 +42,7 @@ export function WhatsAppOrderParser({
   const [customerTier, setCustomerTier] = useState<'preorder_price' | 'customer_price'>('preorder_price');
   const [userMode, setUserMode] = useState<'existing' | 'new'>('existing');
   const [userSearch, setUserSearch] = useState('');
+  const [showMoreQuickUsers, setShowMoreQuickUsers] = useState(false);
   const [selectedUserId, setSelectedUserId] = useState('');
   const [recipientName, setRecipientName] = useState('');
   const [newUserPhone, setNewUserPhone] = useState('');
@@ -404,6 +405,52 @@ export function WhatsAppOrderParser({
 
                 {userMode === 'existing' ? (
                   <div className="space-y-2">
+                    {/* בחירה מהירה בלחיצה: 2 שורות ספקים אחרונים / 5 לקוחות אחרונים + עוד */}
+                    {filteredUsers.length > 0 && (
+                      <div className="space-y-1.5">
+                        <div
+                          className={
+                            orderType === 'supplier'
+                              ? 'grid grid-cols-2 sm:grid-cols-3 gap-1.5'
+                              : 'flex flex-wrap gap-1.5'
+                          }
+                        >
+                          {(orderType === 'supplier'
+                            ? filteredUsers.slice(0, 6)
+                            : showMoreQuickUsers || userSearch.trim()
+                            ? filteredUsers
+                            : filteredUsers.slice(0, 5)
+                          ).map((u) => {
+                            const active = String(u.id) === selectedUserId;
+                            return (
+                              <button
+                                key={u.id}
+                                type="button"
+                                onClick={() => applySelectedUser(u)}
+                                className={`min-h-[40px] px-2.5 py-1 rounded-xl border text-xs font-bold truncate transition-colors ${
+                                  active
+                                    ? 'bg-[#C85A17] text-white border-[#C85A17]'
+                                    : 'bg-[#FAF6F0] hover:bg-[#FFF7ED] text-slate-800 border-[#E8D5BE]'
+                                }`}
+                              >
+                                {u.name}
+                                {getPhoneLast4(u.phone) ? ` #${getPhoneLast4(u.phone)}` : ''}
+                              </button>
+                            );
+                          })}
+                          {orderType !== 'supplier' && !userSearch.trim() && filteredUsers.length > 5 && (
+                            <button
+                              type="button"
+                              onClick={() => setShowMoreQuickUsers((v) => !v)}
+                              className="min-h-[40px] px-2.5 py-1 rounded-xl border border-dashed border-[#C85A17]/60 text-[#8A330B] text-xs font-extrabold"
+                            >
+                              {showMoreQuickUsers ? 'פחות' : `עוד (${filteredUsers.length - 5})`}
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
                     <div className="relative">
                       <Search className="w-3.5 h-3.5 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2" />
                       <input
@@ -422,7 +469,7 @@ export function WhatsAppOrderParser({
                             applySelectedUser(matches[0]);
                           }
                         }}
-                        placeholder="חפש לפי שם או 4 ספרות אחרונות (לדוגמה: 1015, 9917)"
+                        placeholder="חפש בהקלדת תחילת שם או 4 ספרות אחרונות (1015, 9917)"
                         className="w-full pr-9 pl-3 py-2 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] text-xs"
                       />
                     </div>

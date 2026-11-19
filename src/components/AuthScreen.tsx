@@ -58,7 +58,7 @@ export function AuthScreen({ onBackToStorefront }: AuthScreenProps) {
         <div className="relative z-10">
           <div className="inline-flex items-center gap-3 bg-white/10 backdrop-blur-sm border border-white/15 px-4 py-2 rounded-full mb-8">
             <Flame className="w-5 h-5 text-amber-400" />
-            <span className="text-sm font-medium text-amber-100">מאפייה סיטונאית ודוכן שישי</span>
+            <span className="text-sm font-medium text-amber-100">דוכן שישי ושיווק סיטונאי</span>
             <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-amber-400/20 text-amber-200 tabular-nums">
               {APP_VERSION}
             </span>
@@ -68,7 +68,7 @@ export function AuthScreen({ onBackToStorefront }: AuthScreenProps) {
             {APP_BRAND_NAME}
           </h1>
           <p className="text-cream-200/90 text-base lg:text-lg leading-relaxed max-w-md">
-            כניסת צוות ניהול וספקים סיטונאיים — ניהול מחירון, אישור הזמנות שישי, ריכוז אפייה, תזרים כספי ופורטל ספקים.
+            כניסת צוות ניהול וספקים סיטונאיים — ניהול מחירון, אישור הזמנות שישי, סיכום רכש מהמאפייה, תזרים כספי ופורטל ספקים.
           </p>
           {onBackToStorefront && (
             <button

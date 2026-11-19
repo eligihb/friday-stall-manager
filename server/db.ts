@@ -167,6 +167,7 @@ async function initializeSchemaAndSeed(db: DbClient): Promise<void> {
         preorder_price REAL NOT NULL DEFAULT 0,
         customer_price REAL NOT NULL DEFAULT 0,
         image_url TEXT DEFAULT NULL,
+        sort_order INTEGER NOT NULL DEFAULT 0,
         is_active INTEGER NOT NULL DEFAULT 1
       );
 
@@ -215,7 +216,7 @@ async function initializeSchemaAndSeed(db: DbClient): Promise<void> {
         vat_amount REAL NOT NULL DEFAULT 0,
         total_amount REAL NOT NULL DEFAULT 0,
         paid_amount REAL NOT NULL DEFAULT 0,
-        status TEXT NOT NULL CHECK (status IN ('awaiting_approval', 'pending', 'ready', 'delivered')) DEFAULT 'pending',
+        status TEXT NOT NULL CHECK (status IN ('awaiting_approval', 'pending', 'received', 'ready', 'delivered')) DEFAULT 'pending',
         notes TEXT DEFAULT '',
         created_at TEXT NOT NULL DEFAULT (datetime('now'))
       );
@@ -303,7 +304,7 @@ async function initializeSchemaAndSeed(db: DbClient): Promise<void> {
           credit_discount REAL NOT NULL DEFAULT 0,
           total_amount REAL NOT NULL DEFAULT 0,
           paid_amount REAL NOT NULL DEFAULT 0,
-          status TEXT NOT NULL CHECK (status IN ('awaiting_approval', 'pending', 'ready', 'delivered')) DEFAULT 'pending',
+          status TEXT NOT NULL CHECK (status IN ('awaiting_approval', 'pending', 'received', 'ready', 'delivered')) DEFAULT 'pending',
           notes TEXT DEFAULT '',
           created_at TEXT NOT NULL DEFAULT (datetime('now'))
         );
@@ -330,10 +331,14 @@ async function initializeSchemaAndSeed(db: DbClient): Promise<void> {
       "UPDATE business_settings SET business_name = 'דוכן שישי תימני' WHERE id = 1 AND business_name = 'המטבח התימני'"
     );
 
-    // מיגרציות עמודות v1.6.0 (image_url, הנחה/תמחור מותאם, מע״מ)
+    // מיגרציות עמודות v1.6.0–v1.9.0 (image_url, sort_order, הנחה/תמחור מותאם, מע״מ, סטטוס 'received')
     const prodCols = await db.query<{ name: string }>('PRAGMA table_info(products)');
     if (!prodCols.some((c) => c.name === 'image_url')) {
       await db.exec('ALTER TABLE products ADD COLUMN image_url TEXT DEFAULT NULL;');
+    }
+    if (!prodCols.some((c) => c.name === 'sort_order')) {
+      await db.exec('ALTER TABLE products ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0;');
+      await db.exec('UPDATE products SET sort_order = id WHERE sort_order = 0;');
     }
 
     const userCols = await db.query<{ name: string }>('PRAGMA table_info(users)');
@@ -412,6 +417,43 @@ async function initializeSchemaAndSeed(db: DbClient): Promise<void> {
         FROM fixed_expenses;
         DROP TABLE fixed_expenses;
         ALTER TABLE fixed_expenses_new RENAME TO fixed_expenses;
+        PRAGMA foreign_keys = ON;
+      `);
+    }
+
+    // מיגרציית v1.9.0: הוספת סטטוס 'received' ("התקבל") לטבלת orders ב-SQLite
+    const ordDefV19 = await db.get<{ sql: string }>(
+      "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'orders'"
+    );
+    if (ordDefV19?.sql && !ordDefV19.sql.includes("'received'")) {
+      await db.exec(`
+        PRAGMA foreign_keys = OFF;
+        CREATE TABLE orders_v19 (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+          subsidized_entity_id INTEGER REFERENCES subsidized_entities(id) ON DELETE SET NULL,
+          recipient_name TEXT NOT NULL,
+          friday_date TEXT NOT NULL,
+          order_type TEXT NOT NULL CHECK (order_type IN ('customer', 'supplier', 'charity')),
+          delivery_fee REAL NOT NULL DEFAULT 0,
+          credit_discount REAL NOT NULL DEFAULT 0,
+          discount_percent REAL NOT NULL DEFAULT 0,
+          include_vat INTEGER NOT NULL DEFAULT 0,
+          vat_amount REAL NOT NULL DEFAULT 0,
+          total_amount REAL NOT NULL DEFAULT 0,
+          paid_amount REAL NOT NULL DEFAULT 0,
+          status TEXT NOT NULL CHECK (status IN ('awaiting_approval', 'pending', 'received', 'ready', 'delivered')) DEFAULT 'pending',
+          notes TEXT DEFAULT '',
+          created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        INSERT INTO orders_v19 (id, user_id, subsidized_entity_id, recipient_name, friday_date, order_type, delivery_fee, credit_discount, discount_percent, include_vat, vat_amount, total_amount, paid_amount, status, notes, created_at)
+        SELECT id, user_id, subsidized_entity_id, recipient_name, friday_date, order_type, delivery_fee, credit_discount, discount_percent, include_vat, vat_amount, total_amount, paid_amount, status, notes, created_at
+        FROM orders;
+        DROP TABLE orders;
+        ALTER TABLE orders_v19 RENAME TO orders;
+        CREATE INDEX IF NOT EXISTS idx_orders_friday_date ON orders(friday_date);
+        CREATE INDEX IF NOT EXISTS idx_orders_user_id ON orders(user_id);
+        CREATE INDEX IF NOT EXISTS idx_orders_subsidized_entity ON orders(subsidized_entity_id);
         PRAGMA foreign_keys = ON;
       `);
     }

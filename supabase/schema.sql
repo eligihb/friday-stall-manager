@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS products (
   preorder_price NUMERIC(10, 2) NOT NULL DEFAULT 0,
   customer_price NUMERIC(10, 2) NOT NULL DEFAULT 0,
   image_url TEXT DEFAULT NULL,
+  sort_order INTEGER NOT NULL DEFAULT 0,
   is_active BOOLEAN NOT NULL DEFAULT TRUE
 );
 
@@ -70,7 +71,7 @@ CREATE TABLE IF NOT EXISTS orders (
   vat_amount NUMERIC(12, 2) NOT NULL DEFAULT 0,
   total_amount NUMERIC(12, 2) NOT NULL DEFAULT 0,
   paid_amount NUMERIC(12, 2) NOT NULL DEFAULT 0,
-  status TEXT NOT NULL CHECK (status IN ('awaiting_approval', 'pending', 'ready', 'delivered')) DEFAULT 'pending',
+  status TEXT NOT NULL CHECK (status IN ('awaiting_approval', 'pending', 'received', 'ready', 'delivered')) DEFAULT 'pending',
   notes TEXT DEFAULT '',
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

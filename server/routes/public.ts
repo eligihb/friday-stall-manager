@@ -35,7 +35,7 @@ router.get('/storefront', async (_req, res) => {
     const db = await getDb();
     const activeFilter = db.isPostgres ? 'is_active = TRUE' : 'is_active = 1';
     const products = await db.query<DbProduct>(
-      `SELECT id, name, preorder_price, customer_price, image_url, is_active FROM products WHERE ${activeFilter} ORDER BY id ASC`
+      `SELECT id, name, preorder_price, customer_price, image_url, is_active FROM products WHERE ${activeFilter} ORDER BY sort_order ASC, id ASC`
     );
     const settings = await db.get<DbSettings>('SELECT * FROM business_settings WHERE id = 1');
 

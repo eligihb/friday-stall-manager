@@ -12,6 +12,7 @@ interface DbProduct {
   preorder_price: number;
   customer_price: number;
   image_url?: string | null;
+  sort_order?: number;
   is_active: number | boolean;
 }
 
@@ -35,6 +36,7 @@ function normalizeProduct(p: DbProduct) {
     preorder_price: Number(p.preorder_price),
     customer_price: Number(p.customer_price),
     image_url: p.image_url || null,
+    sort_order: Number(p.sort_order ?? p.id),
     is_active: Boolean(p.is_active),
   };
 }
@@ -45,13 +47,13 @@ router.get('/', requireAuth, async (req: AuthenticatedRequest, res) => {
     const role = req.user!.role;
 
     if (role === 'admin') {
-      const rows = await db.query<DbProduct>('SELECT * FROM products ORDER BY id ASC');
+      const rows = await db.query<DbProduct>('SELECT * FROM products ORDER BY sort_order ASC, id ASC');
       res.json({ products: rows.map(normalizeProduct) });
       return;
     }
 
     const activeFilter = db.isPostgres ? 'is_active = TRUE' : 'is_active = 1';
-    const rows = await db.query<DbProduct>(`SELECT * FROM products WHERE ${activeFilter} ORDER BY id ASC`);
+    const rows = await db.query<DbProduct>(`SELECT * FROM products WHERE ${activeFilter} ORDER BY sort_order ASC, id ASC`);
 
     if (role === 'supplier') {
       res.json({
@@ -135,10 +137,13 @@ router.post('/', requireAuth, requireRole('admin'), async (req, res) => {
       return;
     }
 
+    const maxRow = await db.get<{ max_ord: number }>('SELECT COALESCE(MAX(sort_order), 0) as max_ord FROM products');
+    const nextSortOrder = Number(maxRow?.max_ord ?? 0) + 1;
+
     const inserted = await db.run(
-      `INSERT INTO products (name, cost_price, supplier_price, preorder_price, customer_price, image_url, is_active)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [name, cost_price, supplier_price, preorder_price, customer_price, image_url, db.isPostgres ? is_active : is_active ? 1 : 0]
+      `INSERT INTO products (name, cost_price, supplier_price, preorder_price, customer_price, image_url, sort_order, is_active)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [name, cost_price, supplier_price, preorder_price, customer_price, image_url, nextSortOrder, db.isPostgres ? is_active : is_active ? 1 : 0]
     );
 
     if (inserted.lastInsertId) {
@@ -154,6 +159,27 @@ router.post('/', requireAuth, requireRole('admin'), async (req, res) => {
   } catch (err) {
     console.error('Create product error:', err);
     res.status(500).json({ error: 'שגיאה בהוספת מוצר חדש' });
+  }
+});
+
+router.put('/reorder', requireAuth, requireRole('admin'), async (req, res) => {
+  try {
+    const orderedIds = Array.isArray(req.body?.ordered_ids)
+      ? req.body.ordered_ids.map((v: unknown) => Number(v)).filter((n: number) => Number.isInteger(n) && n > 0)
+      : [];
+    if (orderedIds.length === 0) {
+      res.status(400).json({ error: 'יש לספק רשימת מזהי מוצרים לסידור' });
+      return;
+    }
+    const db = await getDb();
+    for (let idx = 0; idx < orderedIds.length; idx++) {
+      await db.run('UPDATE products SET sort_order = ? WHERE id = ?', [idx + 1, orderedIds[idx]]);
+    }
+    const rows = await db.query<DbProduct>('SELECT * FROM products ORDER BY sort_order ASC, id ASC');
+    res.json({ ok: true, products: rows.map(normalizeProduct) });
+  } catch (err) {
+    console.error('Reorder products error:', err);
+    res.status(500).json({ error: 'שגיאה בעדכון סדר המוצרים' });
   }
 });
 

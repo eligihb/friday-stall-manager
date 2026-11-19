@@ -182,7 +182,7 @@ export function AdminOrders() {
         <div>
           <h2 className="font-serif text-3xl font-bold text-slateink-800">הזמנות שישי</h2>
           <p className="text-sm text-slate-600 mt-1">
-            ניהול הזמנות לקוחות, ספקים סיטונאיים וחלוקת חסד, כולל גבייה וסטטוסי הכנה.
+            ניהול הזמנות לקוחות, ספקים סיטונאיים והזמנות מסובסדות, כולל גבייה וסטטוסי מסירה.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">

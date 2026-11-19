@@ -25,6 +25,7 @@ import { WhatsAppOrderParser } from '../components/WhatsAppOrderParser';
 import { OrderCard } from '../components/OrderCard';
 import { QuickPaymentSheet } from '../components/QuickPaymentSheet';
 import { WasteTrackingSheet } from '../components/WasteTrackingSheet';
+import { SupplierInvoiceSheet } from '../components/SupplierInvoiceSheet';
 import type { AdminTab } from '../components/Layout';
 import type {
   AdminProduct,
@@ -54,6 +55,7 @@ export function AdminDashboard({ onNavigate }: AdminDashboardProps) {
   const [copiedProd, setCopiedProd] = useState(false);
   const [boardFilter, setBoardFilter] = useState<string>('');
   const [payOrder, setPayOrder] = useState<Order | null>(null);
+  const [invoiceOrder, setInvoiceOrder] = useState<Order | null>(null);
   const [wasteOpen, setWasteOpen] = useState(false);
   const [loading, setLoading] = useState(true);
 
@@ -239,7 +241,7 @@ export function AdminDashboard({ onNavigate }: AdminDashboardProps) {
                   הזמנות ממתינות לאישור ({awaitingOrders.length})
                 </h3>
                 <p className="text-xs text-amber-950/80">
-                  הזמנות אלו התקבלו מהתפריט הציבורי ואינן נספרות בכמויות הייצור והמאפייה עד שתאשר אותן.
+                  הזמנות אלו התקבלו מהתפריט הציבורי ואינן נספרות בסיכום הרכש מהמאפייה עד שתאשר אותן.
                 </p>
               </div>
             </div>
@@ -431,7 +433,7 @@ export function AdminDashboard({ onNavigate }: AdminDashboardProps) {
         </div>
 
         {loading ? (
-          <div className="p-8 text-center text-slate-400">טוען ריכוז ייצור...</div>
+          <div className="p-8 text-center text-slate-400">טוען סיכום רכש מהמאפייה...</div>
         ) : (
           <>
             {/* תצוגת מובייל: צ׳קליסט אנכי עם כפתורי +/- גדולים למלאי חופשי לדוכן */}
@@ -524,9 +526,9 @@ export function AdminDashboard({ onNavigate }: AdminDashboardProps) {
                       </div>
                     </div>
 
-                    {/* תג כמות סופית גדולה לייצור */}
+                    {/* תג כמות סופית גדולה לרכש */}
                     <div className="shrink-0 text-center bg-[#FFF7ED] border border-[#E8D5BE] rounded-2xl px-3 py-2.5 min-w-[68px] tabular-nums">
-                      <div className="text-[10px] font-bold text-slate-500">לייצור</div>
+                      <div className="text-[10px] font-bold text-slate-500">לרכש</div>
                       <div className="text-2xl font-extrabold text-[#8A330B] leading-tight mt-0.5">
                         {totalProduce}
                       </div>
@@ -668,14 +670,15 @@ export function AdminDashboard({ onNavigate }: AdminDashboardProps) {
             {[
               { key: '', label: `הכל (${orders.length})` },
               { key: 'pending', label: `ממתין (${orders.filter((o) => o.status === 'pending').length})` },
-              { key: 'ready', label: `מוכן (${orders.filter((o) => o.status === 'ready').length})` },
+              { key: 'received', label: `התקבל (${orders.filter((o) => o.status === 'received').length})` },
+              { key: 'ready', label: `מוכן למסירה (${orders.filter((o) => o.status === 'ready').length})` },
               { key: 'delivered', label: `נמסר (${orders.filter((o) => o.status === 'delivered').length})` },
             ].map((tab) => (
               <button
                 key={tab.key}
                 type="button"
                 onClick={() => setBoardFilter(tab.key)}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-colors ${
+                className={`min-h-[44px] md:min-h-[36px] px-3 py-1.5 rounded-xl text-xs font-bold transition-colors ${
                   boardFilter === tab.key
                     ? 'bg-[#1E242B] text-white'
                     : 'bg-white border border-[#E8D5BE] text-slate-600'
@@ -700,6 +703,7 @@ export function AdminDashboard({ onNavigate }: AdminDashboardProps) {
                 bizSettings={bizSettings}
                 onCycleStatus={handleCycleStatus}
                 onQuickPay={(o) => setPayOrder(o)}
+                onOpenInvoice={order.order_type === 'supplier' ? (o) => setInvoiceOrder(o) : undefined}
               />
             ))}
           </div>
@@ -711,6 +715,14 @@ export function AdminDashboard({ onNavigate }: AdminDashboardProps) {
         order={payOrder}
         onClose={() => setPayOrder(null)}
         onConfirm={handleConfirmQuickPay}
+      />
+
+      {/* תצוגת חשבונית ספק להדפסה / וואטסאפ / מייל */}
+      <SupplierInvoiceSheet
+        order={invoiceOrder}
+        supplier={invoiceOrder?.user_id ? users.find((u) => u.id === invoiceOrder.user_id) || null : null}
+        bizSettings={bizSettings}
+        onClose={() => setInvoiceOrder(null)}
       />
 
       {/* חלונית ניהול פחת סוף יום שישי */}

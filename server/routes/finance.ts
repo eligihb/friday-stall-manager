@@ -110,7 +110,7 @@ router.get('/waste', async (req, res) => {
 
     const activeFilter = db.isPostgres ? 'is_active = TRUE' : 'is_active = 1';
     const products = await db.query<{ id: number; name: string; cost_price: number }>(
-      `SELECT id, name, cost_price FROM products WHERE ${activeFilter} ORDER BY id ASC`
+      `SELECT id, name, cost_price FROM products WHERE ${activeFilter} ORDER BY sort_order ASC, id ASC`
     );
 
     const wasteRows = await db.query<{
