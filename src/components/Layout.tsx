@@ -49,7 +49,7 @@ const ADMIN_NAV: NavItem[] = [
   { id: 'users', label: 'לקוחות וספקים', icon: Users },
   { id: 'products', label: 'מחירון מוצרים', icon: Tag },
   { id: 'finance', label: 'הכנסות, הוצאות וקבועות', icon: Wallet },
-  { id: 'reports', label: 'דוחות ורווח והפסד', icon: BarChart3 },
+  { id: 'reports', label: 'דוחות וניתוח נתונים', icon: BarChart3 },
   { id: 'settings', label: 'הגדרות ומשתמשים', icon: Settings },
 ];
 

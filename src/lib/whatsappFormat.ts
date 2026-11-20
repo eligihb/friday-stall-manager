@@ -34,6 +34,23 @@ export function formatProductionWhatsApp(
   return lines.join('\n');
 }
 
+export function getAppBaseUrl(): string {
+  if (typeof window === 'undefined') return '';
+  return `${window.location.origin}${window.location.pathname}`;
+}
+
+export function buildCustomerPortalUrl(customerId: number): string {
+  return `${getAppBaseUrl()}#/c/${customerId}`;
+}
+
+export function buildQuickApproveUrl(orderId: number): string {
+  return `${getAppBaseUrl()}#/approve-quick/${orderId}`;
+}
+
+export function buildAdminOrderViewUrl(orderId: number): string {
+  return `${getAppBaseUrl()}#/order/${orderId}`;
+}
+
 export function formatOrderWhatsApp(order: Order, settings?: Partial<BusinessSettings>): string {
   const bizName = settings?.business_name || 'דוכן שישי תימני';
   const footer = settings?.whatsapp_footer ?? 'שבת שלום ומבורכת! 🕯️';
@@ -61,6 +78,9 @@ export function formatOrderWhatsApp(order: Order, settings?: Partial<BusinessSet
   }
   lines.push(`📌 סטטוס: ${ORDER_STATUS_LABELS[order.status]}`);
   if (order.notes) lines.push(`📝 הערות: ${order.notes}`);
+  if (order.user_id) {
+    lines.push(`🔗 לאזור האישי ומעקב חי אחר ההזמנה: ${buildCustomerPortalUrl(order.user_id)}`);
+  }
   if (footer) lines.push(`\n${footer}`);
   return lines.join('\n');
 }
@@ -105,6 +125,11 @@ export function formatPublicApprovalWhatsApp(payload: {
   lines.push(`💳 *סה״כ לתשלום: ${formatILS(payload.total_amount)}*`);
   if (payload.notes) lines.push(`📝 הערה: ${payload.notes}`);
   lines.push(`⏳ סטטוס: ממתין לאישור מנהל`);
+  lines.push(``);
+  lines.push(`✅ *אישור מיידי להזמנה:*`);
+  lines.push(buildQuickApproveUrl(payload.id));
+  lines.push(`👁️ *צפייה ועריכה ביישומון:*`);
+  lines.push(buildAdminOrderViewUrl(payload.id));
   return lines.join('\n');
 }
 

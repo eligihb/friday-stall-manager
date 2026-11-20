@@ -16,6 +16,7 @@ import { formatILS, formatPercent, getNextFridayISO, ROLE_LABELS } from '../lib/
 import { downloadCsv } from '../lib/csvExport';
 import { FridaySelector } from '../components/FridaySelector';
 import { WasteTrackingSheet } from '../components/WasteTrackingSheet';
+import { AnalyticsSection } from '../components/AnalyticsSection';
 import type { PnlReportResponse } from '../types';
 
 export function ReportsPage() {
@@ -129,9 +130,9 @@ export function ReportsPage() {
     <div className="space-y-6">
       <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
         <div>
-          <h2 className="font-serif text-3xl font-bold text-slateink-800">דוחות ורווח והפסד</h2>
+          <h2 className="font-serif text-3xl font-bold text-slateink-800">דוחות וניתוח נתונים</h2>
           <p className="text-sm text-slate-600 mt-1">
-            דוח רווח והפסד מסחרי (כולל פחת סוף יום), התאמת קופה (מזומן, פייבוקס והעברה) וסעיף הוצאות מסובסדות נפרד.
+            דירוג מוצרים, השוואת תקופות, גרף מגמות, ודוח רווח והפסד מלא (כולל פחת והתאמת קופה).
           </p>
         </div>
 
@@ -678,6 +679,15 @@ export function ReportsPage() {
           </div>
         </>
       )}
+
+      {/* מודול ניתוח נתונים: השוואת תקופות, גרף מגמות ודירוג ביצועי מוצרים */}
+      <AnalyticsSection
+        mode={mode}
+        fridayDate={fridayDate}
+        month={month}
+        fromDate={fromDate}
+        toDate={toDate}
+      />
 
       <WasteTrackingSheet
         open={wasteOpen}

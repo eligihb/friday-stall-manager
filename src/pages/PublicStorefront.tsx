@@ -22,6 +22,7 @@ import {
 } from '../lib/format';
 import { getFridayPricingStatus } from '../lib/pricingCutoff';
 import { buildWhatsAppShareUrl, formatPublicApprovalWhatsApp } from '../lib/whatsappFormat';
+import { isProductInStock, loadStockMap } from '../lib/stockState';
 import { APP_BRAND_NAME, APP_VERSION } from '../lib/version';
 import { BottomSheet } from '../components/BottomSheet';
 
@@ -65,6 +66,7 @@ export function PublicStorefront({ onOpenStaffLogin }: PublicStorefrontProps) {
   const [fridayDate, setFridayDate] = useState(getNextFridayISO());
   const [cart, setCart] = useState<Record<number, number>>({});
   const [checkoutOpen, setCheckoutOpen] = useState(false);
+  const [stockMap] = useState(() => loadStockMap());
 
   // פרטי לקוח שמורים ב-localStorage לביקורים הבאים
   const [customerName, setCustomerName] = useState(() => {
@@ -337,6 +339,7 @@ export function PublicStorefront({ onOpenStaffLogin }: PublicStorefrontProps) {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {products.map((p) => {
               const qty = cart[p.id] || 0;
+              const inStock = isProductInStock(p.id, stockMap);
               const activePrice = getActivePrice(p);
               const discountAmount =
                 pricing.isPreorder && p.customer_price > p.preorder_price
@@ -347,7 +350,9 @@ export function PublicStorefront({ onOpenStaffLogin }: PublicStorefrontProps) {
                 <div
                   key={p.id}
                   className={`rounded-2xl p-4 border transition-all flex items-center justify-between gap-3 ${
-                    qty > 0
+                    !inStock
+                      ? 'bg-slate-50 border-slate-200 opacity-70'
+                      : qty > 0
                       ? 'bg-[#FFF7ED] border-[#C85A17] shadow-card'
                       : 'bg-white border-[#E8D5BE]/85 shadow-soft'
                   }`}
@@ -361,7 +366,18 @@ export function PublicStorefront({ onOpenStaffLogin }: PublicStorefrontProps) {
                       />
                     )}
                     <div className="min-w-0 flex-1">
-                      <div className="font-extrabold text-base text-slate-900 truncate">{p.name}</div>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="font-extrabold text-base text-slate-900 truncate">{p.name}</span>
+                        <span
+                          className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold ${
+                            inStock
+                              ? 'bg-emerald-100 text-emerald-800'
+                              : 'bg-red-100 text-red-700'
+                          }`}
+                        >
+                          {inStock ? 'במלאי' : 'אזל מהמלאי'}
+                        </span>
+                      </div>
                       <div className="flex items-center gap-2 mt-1 flex-wrap tabular-nums">
                         <span className="text-lg font-extrabold text-[#C85A17]">
                           {formatILS(activePrice)}
@@ -380,32 +396,36 @@ export function PublicStorefront({ onOpenStaffLogin }: PublicStorefrontProps) {
                     </div>
                   </div>
 
-                  {/* כפתורי + / - גדולים לאגודל */}
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    {qty > 0 && (
-                      <>
-                        <button
-                          type="button"
-                          onClick={() => stepItem(p.id, -1)}
-                          className="w-11 h-11 rounded-2xl bg-white border border-[#E8D5BE] flex items-center justify-center active:scale-95 transition-transform"
-                          aria-label={`הפחת ${p.name}`}
-                        >
-                          <Minus className="w-4 h-4 text-slate-700" />
-                        </button>
-                        <span className="min-w-[28px] text-center font-extrabold text-base tabular-nums text-slate-900">
-                          {qty}
-                        </span>
-                      </>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => stepItem(p.id, 1)}
-                      className="w-11 h-11 rounded-2xl bg-[#C85A17] hover:bg-[#A9440F] text-white flex items-center justify-center shadow-sm active:scale-95 transition-transform"
-                      aria-label={`הוסף ${p.name}`}
-                    >
-                      <Plus className="w-5 h-5" />
-                    </button>
-                  </div>
+                  {/* כפתורי + / - גדולים לאגודל (חסומים אם אזל מהמלאי) */}
+                  {inStock ? (
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      {qty > 0 && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => stepItem(p.id, -1)}
+                            className="w-11 h-11 rounded-2xl bg-white border border-[#E8D5BE] flex items-center justify-center active:scale-95 transition-transform"
+                            aria-label={`הפחת ${p.name}`}
+                          >
+                            <Minus className="w-4 h-4 text-slate-700" />
+                          </button>
+                          <span className="min-w-[28px] text-center font-extrabold text-base tabular-nums text-slate-900">
+                            {qty}
+                          </span>
+                        </>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => stepItem(p.id, 1)}
+                        className="w-11 h-11 rounded-2xl bg-[#C85A17] hover:bg-[#A9440F] text-white flex items-center justify-center shadow-sm active:scale-95 transition-transform"
+                        aria-label={`הוסף ${p.name}`}
+                      >
+                        <Plus className="w-5 h-5" />
+                      </button>
+                    </div>
+                  ) : (
+                    <span className="text-xs font-extrabold text-red-600 shrink-0">לא זמין</span>
+                  )}
                 </div>
               );
             })}

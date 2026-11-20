@@ -9,9 +9,10 @@ import {
   BookOpen,
   FileText,
   CheckCircle2,
+  Link2,
 } from 'lucide-react';
 import { formatFridayLabel, formatILS, ORDER_STATUS_LABELS, ORDER_TYPE_LABELS } from '../lib/format';
-import { buildWhatsAppShareUrl, formatOrderWhatsApp } from '../lib/whatsappFormat';
+import { buildCustomerPortalUrl, buildWhatsAppShareUrl, formatOrderWhatsApp } from '../lib/whatsappFormat';
 import { getPaymentVisualState } from './SupplierInvoiceSheet';
 import type { BusinessSettings, Order, OrderStatus, OrderType } from '../types';
 
@@ -46,6 +47,14 @@ export function OrderCard({
   onOpenLedger,
 }: OrderCardProps) {
   const [copied, setCopied] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
+
+  const handleCopyCustomerLink = async () => {
+    if (!order.user_id) return;
+    await navigator.clipboard.writeText(buildCustomerPortalUrl(order.user_id));
+    setCopiedLink(true);
+    setTimeout(() => setCopiedLink(false), 1800);
+  };
 
   const unpaid = Math.max(0, order.total_amount - order.paid_amount);
   const isCharity = order.order_type === 'charity';
@@ -281,16 +290,29 @@ export function OrderCard({
           </a>
         </div>
 
-        {/* שורת כלים משנית קטנה (העתקה / עריכה / כרטסת / מחיקה) */}
+        {/* שורת כלים משנית קטנה (העתקה / קישור לקוח / עריכה / כרטסת / מחיקה) */}
         <div className="flex items-center justify-between pt-0.5 text-xs text-slate-500">
-          <button
-            type="button"
-            onClick={handleCopy}
-            className="inline-flex items-center gap-1 py-1.5 px-2 rounded-lg hover:bg-[#FAF6F0] font-semibold"
-          >
-            {copied ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
-            <span>{copied ? 'הועתק!' : 'העתק טקסט'}</span>
-          </button>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={handleCopy}
+              className="inline-flex items-center gap-1 py-1.5 px-2 rounded-lg hover:bg-[#FAF6F0] font-semibold"
+            >
+              {copied ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+              <span>{copied ? 'הועתק!' : 'העתק טקסט'}</span>
+            </button>
+            {order.user_id && (
+              <button
+                type="button"
+                onClick={handleCopyCustomerLink}
+                className="inline-flex items-center gap-1 py-1.5 px-2 rounded-lg hover:bg-[#FFF7ED] text-[#8A330B] font-bold"
+                title="העתק קישור לאזור האישי של הלקוח"
+              >
+                {copiedLink ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Link2 className="w-3.5 h-3.5" />}
+                <span>{copiedLink ? 'קישור הועתק!' : 'העתק קישור לקוח'}</span>
+              </button>
+            )}
+          </div>
 
           <div className="flex items-center gap-1">
             {order.user_id && onOpenLedger && (

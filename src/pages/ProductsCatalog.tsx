@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import { apiFetch } from '../lib/api';
 import { formatHebrewDate, formatILS, formatPercent } from '../lib/format';
+import { isProductInStock, loadStockMap, saveStockMap, type ProductStockEntry } from '../lib/stockState';
 import { BottomSheet } from '../components/BottomSheet';
 import type { AdminProduct, ProductPriceHistoryEntry } from '../types';
 
@@ -103,6 +104,17 @@ export function ProductsCatalog() {
   const [unlockedIds, setUnlockedIds] = useState<Record<number, boolean>>({});
   const [unlockWarningProduct, setUnlockWarningProduct] = useState<AdminProduct | null>(null);
   const [deleteWarningProduct, setDeleteWarningProduct] = useState<AdminProduct | null>(null);
+  const [stockModalOpen, setStockModalOpen] = useState(false);
+  const [stockMap, setStockMap] = useState<Record<number, ProductStockEntry>>(() => loadStockMap());
+
+  const updateProductStock = (productId: number, patch: Partial<ProductStockEntry>) => {
+    setStockMap((prev) => {
+      const current = prev[productId] || { in_stock: true };
+      const next = { ...prev, [productId]: { ...current, ...patch } };
+      saveStockMap(next);
+      return next;
+    });
+  };
 
   // חלונית תאריך תחולה ואישור אזהרות בעת שמירת מחירים
   const [pendingSaveProduct, setPendingSaveProduct] = useState<AdminProduct | null>(null);
@@ -499,6 +511,14 @@ export function ProductsCatalog() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+          <button
+            type="button"
+            onClick={() => setStockModalOpen(true)}
+            className="flex-1 sm:flex-none min-h-[48px] md:min-h-[42px] inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-50 border border-emerald-300 hover:bg-emerald-100 text-emerald-900 font-bold text-xs sm:text-sm shadow-sm transition-colors"
+          >
+            <Package className="w-4 h-4 text-emerald-700" />
+            <span>עדכן מלאי</span>
+          </button>
           <button
             type="button"
             disabled={reordering || products.length < 2}
@@ -1428,6 +1448,69 @@ export function ProductsCatalog() {
             </div>
           </div>
         )}
+      </BottomSheet>
+      {/* חלונית עדכון מלאי מהיר למנהל (הלקוח רואה רק זמינות: במלאי / אזל) */}
+      <BottomSheet
+        open={stockModalOpen}
+        onClose={() => setStockModalOpen(false)}
+        title="עדכון מלאי זמין למוצרים"
+        subtitle="הלקוח רואה רק ״במלאי״ או ״אזל מהמלאי״ ללא חשיפת כמויות"
+        maxWidthClass="md:max-w-xl"
+      >
+        <div className="space-y-2.5 max-h-[65dvh] overflow-y-auto">
+          {products
+            .filter((p) => p.is_active)
+            .map((p) => {
+              const inStock = isProductInStock(p.id, stockMap);
+              const entry = stockMap[p.id];
+              return (
+                <div
+                  key={p.id}
+                  className="p-3 rounded-2xl bg-[#FAF6F0] border border-[#E8D5BE] flex items-center justify-between gap-3"
+                >
+                  <div className="min-w-0">
+                    <div className="font-bold text-sm text-slate-900 truncate">{p.name}</div>
+                    <span
+                      className={`inline-block mt-0.5 px-2 py-0.5 rounded-full text-[10px] font-extrabold ${
+                        inStock ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-700'
+                      }`}
+                    >
+                      {inStock ? 'מוצג ללקוח: במלאי' : 'מוצג ללקוח: אזל מהמלאי (חסום)'}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <input
+                      type="number"
+                      min="0"
+                      dir="ltr"
+                      placeholder="כמות פנימית"
+                      value={entry?.qty ?? ''}
+                      onChange={(e) => {
+                        const raw = e.target.value;
+                        const num = raw === '' ? undefined : Math.max(0, Math.floor(Number(raw)));
+                        updateProductStock(p.id, {
+                          qty: num,
+                          in_stock: num === undefined ? true : num > 0,
+                        });
+                      }}
+                      className="w-24 px-2.5 py-1.5 rounded-xl border border-[#E8D5BE] bg-white text-left text-xs font-bold tabular-nums"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => updateProductStock(p.id, { in_stock: !inStock })}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-extrabold border transition-colors ${
+                        inStock
+                          ? 'bg-emerald-600 text-white border-emerald-600'
+                          : 'bg-red-600 text-white border-red-600'
+                      }`}
+                    >
+                      {inStock ? 'במלאי' : 'אזל'}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+        </div>
       </BottomSheet>
     </div>
   );
