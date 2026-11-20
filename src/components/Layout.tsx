@@ -15,6 +15,7 @@ import {
   Calendar,
   Repeat,
   ChevronLeft,
+  Users,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useFriday } from '../context/FridayContext';
@@ -28,6 +29,7 @@ export type AdminTab =
   | 'customer-orders'
   | 'supplier-orders'
   | 'charity-orders'
+  | 'users'
   | 'products'
   | 'finance'
   | 'reports'
@@ -44,6 +46,7 @@ const ADMIN_NAV: NavItem[] = [
   { id: 'customer-orders', label: 'הזמנות לקוחות', icon: ShoppingBag },
   { id: 'supplier-orders', label: 'הזמנות ספקים', icon: Store },
   { id: 'charity-orders', label: 'הזמנות מסובסדות', icon: HeartHandshake },
+  { id: 'users', label: 'לקוחות וספקים', icon: Users },
   { id: 'products', label: 'מחירון מוצרים', icon: Tag },
   { id: 'finance', label: 'הכנסות, הוצאות וקבועות', icon: Wallet },
   { id: 'reports', label: 'דוחות ורווח והפסד', icon: BarChart3 },
@@ -55,6 +58,7 @@ const TAB_TITLES: Record<AdminTab, string> = {
   'customer-orders': 'הזמנות לקוחות',
   'supplier-orders': 'הזמנות ספקים',
   'charity-orders': 'הזמנות מסובסדות',
+  users: 'לקוחות וספקים',
   products: 'מחירון מוצרים',
   finance: 'כספים וקופה',
   reports: 'דוחות ורווח והפסד',

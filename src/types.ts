@@ -8,6 +8,7 @@ export interface User {
   role: UserRole;
   balance: number;
   notes: string;
+  is_active?: boolean;
   discount_percent?: number;
   custom_prices?: Record<number, number>;
   created_at?: string;
@@ -34,6 +35,7 @@ export interface AdminProduct {
   cost_price: number;
   supplier_price: number;
   preorder_price: number;
+  subsidized_price?: number;
   customer_price: number;
   image_url?: string | null;
   sort_order?: number;

@@ -10,6 +10,8 @@ import {
   Building2,
   Receipt,
   PackagePlus,
+  Package,
+  Search,
 } from 'lucide-react';
 import { apiFetch } from '../lib/api';
 import {
@@ -30,6 +32,49 @@ import type {
   SubsidizedEntity,
   SubsidizedOverviewResponse,
 } from '../types';
+
+interface CharityBundleTemplate {
+  id: string;
+  name: string;
+  items: Record<number, number>;
+}
+
+const BUNDLE_TEMPLATES_KEY = 'fsm_charity_bundle_templates';
+const RECIPIENTS_POOL_KEY = 'fsm_charity_recipients_pool';
+
+function loadBundleTemplates(): CharityBundleTemplate[] {
+  try {
+    const raw = localStorage.getItem(BUNDLE_TEMPLATES_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveBundleTemplates(list: CharityBundleTemplate[]) {
+  try {
+    localStorage.setItem(BUNDLE_TEMPLATES_KEY, JSON.stringify(list));
+  } catch {
+    // ignore
+  }
+}
+
+function loadRecipientsPool(): string[] {
+  try {
+    const raw = localStorage.getItem(RECIPIENTS_POOL_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveRecipientsPool(list: string[]) {
+  try {
+    localStorage.setItem(RECIPIENTS_POOL_KEY, JSON.stringify(list));
+  } catch {
+    // ignore
+  }
+}
 
 export function CharityOrdersPage() {
   const { fridayDate: globalFriday, refreshTick } = useFriday();
@@ -54,6 +99,17 @@ export function CharityOrdersPage() {
   const [notes, setNotes] = useState('');
   const [quantities, setQuantities] = useState<Record<number, number>>({});
   const [savingOrder, setSavingOrder] = useState(false);
+
+  // תבניות מארז מסובסד ומאגר שמות מקבלים קבוע (סבב)
+  const [bundleTemplates, setBundleTemplates] = useState<CharityBundleTemplate[]>(() => loadBundleTemplates());
+  const [recipientsPool, setRecipientsPool] = useState<string[]>(() => loadRecipientsPool());
+  const [bundleModalOpen, setBundleModalOpen] = useState(false);
+  const [newBundleName, setNewBundleName] = useState('');
+  const [newBundleItems, setNewBundleItems] = useState<Record<number, number>>({});
+  const [selectedTemplateId, setSelectedTemplateId] = useState('');
+  const [bundleCount, setBundleCount] = useState(1);
+  const [bundleRecipients, setBundleRecipients] = useState<string[]>(['']);
+  const [recipientSearch, setRecipientSearch] = useState('');
 
   // חלונית קליטת תשלום חודשי מגוף מסובסד (מקזז עלות סבסוד)
   const [payEntity, setPayEntity] = useState<SubsidizedEntity | null>(null);
@@ -124,7 +180,79 @@ export function CharityOrdersPage() {
     setRecipientName(targetEnt ? targetEnt.name : '');
     setNotes('');
     setQuantities({});
+    setSelectedTemplateId('');
+    setBundleCount(1);
+    setBundleRecipients(['']);
+    setRecipientSearch('');
     setOrderModalOpen(true);
+  };
+
+  const applyBundleTemplate = (templateId: string, count: number) => {
+    setSelectedTemplateId(templateId);
+    const tpl = bundleTemplates.find((t) => t.id === templateId);
+    if (!tpl) return;
+    const nextQty: Record<number, number> = {};
+    for (const [pid, q] of Object.entries(tpl.items)) {
+      if (q > 0) nextQty[Number(pid)] = q * count;
+    }
+    setQuantities(nextQty);
+  };
+
+  const handleBundleCountChange = (nextCount: number) => {
+    const safeCount = Math.max(1, Math.min(30, nextCount));
+    setBundleCount(safeCount);
+    setBundleRecipients((prev) => {
+      const copy = [...prev];
+      while (copy.length < safeCount) copy.push('');
+      return copy.slice(0, safeCount);
+    });
+    if (selectedTemplateId) {
+      applyBundleTemplate(selectedTemplateId, safeCount);
+    }
+  };
+
+  const handleSaveBundleTemplate = (e: React.FormEvent) => {
+    e.preventDefault();
+    const name = newBundleName.trim();
+    if (!name) return;
+    const cleaned: Record<number, number> = {};
+    for (const [pid, q] of Object.entries(newBundleItems)) {
+      if (q > 0) cleaned[Number(pid)] = q;
+    }
+    if (Object.keys(cleaned).length === 0) return;
+    const next = [...bundleTemplates, { id: String(Date.now()), name, items: cleaned }];
+    setBundleTemplates(next);
+    saveBundleTemplates(next);
+    setNewBundleName('');
+    setNewBundleItems({});
+    showToast(`תבנית המארז "${name}" נשמרה!`);
+  };
+
+  const handleDeleteBundleTemplate = (id: string) => {
+    const next = bundleTemplates.filter((t) => t.id !== id);
+    setBundleTemplates(next);
+    saveBundleTemplates(next);
+  };
+
+  const togglePoolRecipient = (name: string) => {
+    setBundleRecipients((prev) => {
+      const idx = prev.indexOf(name);
+      if (idx >= 0) {
+        const copy = [...prev];
+        copy[idx] = '';
+        return copy;
+      }
+      const emptyIdx = prev.findIndex((r) => !r.trim());
+      if (emptyIdx >= 0) {
+        const copy = [...prev];
+        copy[emptyIdx] = name;
+        return copy;
+      }
+      const next = [...prev, name];
+      setBundleCount(next.length);
+      if (selectedTemplateId) applyBundleTemplate(selectedTemplateId, next.length);
+      return next;
+    });
   };
 
   const openEditOrder = (o: Order) => {
@@ -161,11 +289,28 @@ export function CharityOrdersPage() {
     setSavingOrder(true);
     setError('');
     try {
+      const assignedNames = bundleRecipients.map((r) => r.trim()).filter(Boolean);
+      if (assignedNames.length > 0) {
+        const mergedPool = Array.from(new Set([...recipientsPool, ...assignedNames]));
+        setRecipientsPool(mergedPool);
+        saveRecipientsPool(mergedPool);
+      }
+      const bundleSummary =
+        assignedNames.length > 0
+          ? `מארזים (${bundleCount}): ${bundleRecipients
+              .map((r, i) => (r.trim() ? `#${i + 1} ${r.trim()}` : null))
+              .filter(Boolean)
+              .join(', ')}`
+          : bundleCount > 1
+          ? `${bundleCount} מארזים`
+          : '';
+      const combinedNotes = [notes.trim(), bundleSummary].filter(Boolean).join(' | ');
+
       const payload = {
         friday_date: formFriday,
         subsidized_entity_id: selectedEntityId ? Number(selectedEntityId) : null,
         recipient_name: recipientName.trim(),
-        notes: notes.trim(),
+        notes: combinedNotes,
         items,
       };
       if (editingOrder) {
@@ -318,6 +463,14 @@ export function CharityOrdersPage() {
         </div>
 
         <div className="flex flex-wrap items-center justify-between md:justify-end gap-2">
+          <button
+            type="button"
+            onClick={() => setBundleModalOpen(true)}
+            className="flex-1 sm:flex-none inline-flex items-center justify-center gap-1.5 px-3.5 min-h-[48px] md:min-h-[42px] rounded-xl bg-purple-50 border border-purple-300 hover:bg-purple-100 text-purple-900 font-bold text-xs sm:text-sm"
+          >
+            <Package className="w-4 h-4 text-purple-700" />
+            <span>הגדר מארז</span>
+          </button>
           <button
             type="button"
             onClick={openCreateEntity}
@@ -593,7 +746,7 @@ export function CharityOrdersPage() {
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-slate-600 mb-1">שם מקבל החבילה</label>
+            <label className="block text-xs font-semibold text-slate-600 mb-1">שם מקבל החבילה / גוף</label>
             <input
               type="text"
               required
@@ -603,6 +756,109 @@ export function CharityOrdersPage() {
               className="w-full px-3 py-2.5 rounded-xl border border-[#E8D5BE]"
             />
           </div>
+
+          {/* בחירת תבנית מארז, כמות מארזים ושיוך שמות מקבלים (סבב) */}
+          {!editingOrder && (
+            <div className="p-3.5 rounded-2xl bg-purple-50/60 border border-purple-200 space-y-3">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                <div className="sm:col-span-2">
+                  <label className="block text-xs font-bold text-purple-900 mb-1">טען תבנית מארז</label>
+                  <select
+                    value={selectedTemplateId}
+                    onChange={(e) => applyBundleTemplate(e.target.value, bundleCount)}
+                    className="w-full px-3 py-2 rounded-xl border border-purple-200 bg-white text-xs font-bold"
+                  >
+                    <option value="">ללא תבנית (בחירה ידנית למטה)</option>
+                    {bundleTemplates.map((tpl) => (
+                      <option key={tpl.id} value={tpl.id}>
+                        {tpl.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-purple-900 mb-1">כמות מארזים</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="30"
+                    value={bundleCount}
+                    onChange={(e) => handleBundleCountChange(Number(e.target.value) || 1)}
+                    className="w-full px-3 py-2 rounded-xl border border-purple-200 bg-white text-center font-bold text-sm tabular-nums"
+                  />
+                </div>
+              </div>
+
+              {/* שיוך שם מקבל ספציפי לכל מארז */}
+              <div className="space-y-1.5">
+                <div className="text-[11px] font-bold text-purple-900">
+                  שיוך שם מקבל לכל מארז (אופציונלי — נשמר אוטומטית לסבב השבועות הבאים):
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-32 overflow-y-auto">
+                  {bundleRecipients.map((nameVal, idx) => (
+                    <input
+                      key={idx}
+                      type="text"
+                      value={nameVal}
+                      onChange={(e) => {
+                        const copy = [...bundleRecipients];
+                        copy[idx] = e.target.value;
+                        setBundleRecipients(copy);
+                      }}
+                      placeholder={`שם מקבל למארז #${idx + 1}`}
+                      className="px-2.5 py-1.5 rounded-xl border border-purple-200 bg-white text-xs"
+                    />
+                  ))}
+                </div>
+              </div>
+
+              {/* מאגר שמות קבוע לסבב עם חיפוש ו-Checkboxes */}
+              {recipientsPool.length > 0 && (
+                <div className="pt-2 border-t border-purple-200 space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[11px] font-bold text-purple-900">
+                      בחירה מהירה ממאגר המקבלים ({recipientsPool.length}):
+                    </span>
+                    <div className="relative w-44">
+                      <Search className="w-3 h-3 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="text"
+                        value={recipientSearch}
+                        onChange={(e) => setRecipientSearch(e.target.value)}
+                        placeholder="חיפוש שם..."
+                        className="w-full pr-7 pl-2 py-1 rounded-lg border border-purple-200 bg-white text-[11px]"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto">
+                    {recipientsPool
+                      .filter((n) => !recipientSearch.trim() || n.includes(recipientSearch.trim()))
+                      .map((name) => {
+                        const checked = bundleRecipients.includes(name);
+                        return (
+                          <label
+                            key={name}
+                            className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs font-bold cursor-pointer select-none ${
+                              checked
+                                ? 'bg-purple-700 text-white border-purple-700'
+                                : 'bg-white text-slate-700 border-purple-200 hover:bg-purple-50'
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => togglePoolRecipient(name)}
+                              className="w-3.5 h-3.5 accent-purple-600"
+                            />
+                            <span>{name}</span>
+                          </label>
+                        );
+                      })}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           <div className="max-h-60 overflow-y-auto border border-[#E8D5BE] rounded-2xl divide-y divide-[#F3E9DC]">
             {products.map((p) => {
@@ -808,6 +1064,101 @@ export function CharityOrdersPage() {
             {savingEntity ? 'שומר...' : editingEntity ? 'עדכן פרטים' : 'הוסף גוף מסובסד'}
           </button>
         </form>
+      </BottomSheet>
+
+      {/* חלונית הגדרת תבניות מארז מסובסד */}
+      <BottomSheet
+        open={bundleModalOpen}
+        onClose={() => setBundleModalOpen(false)}
+        title="הגדרת תבניות מארז מסובסד"
+        subtitle="הגדר תכולת מארז קבועה כדי לטעון אותה במהירות בכל יום שישי"
+        maxWidthClass="md:max-w-xl"
+      >
+        <div className="space-y-4">
+          {bundleTemplates.length > 0 && (
+            <div className="space-y-2">
+              <div className="text-xs font-extrabold text-slate-700">תבניות שמורות ({bundleTemplates.length})</div>
+              {bundleTemplates.map((tpl) => (
+                <div
+                  key={tpl.id}
+                  className="p-3 rounded-2xl bg-[#FAF6F0] border border-[#E8D5BE] flex items-center justify-between gap-2"
+                >
+                  <div className="min-w-0">
+                    <div className="font-bold text-sm text-slate-900">{tpl.name}</div>
+                    <div className="text-xs text-slate-500 truncate">
+                      {Object.entries(tpl.items)
+                        .map(([pid, q]) => {
+                          const pr = products.find((x) => x.id === Number(pid));
+                          return `${q}× ${pr ? pr.name : `#${pid}`}`;
+                        })
+                        .join(' · ')}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteBundleTemplate(tpl.id)}
+                    className="p-2 rounded-xl text-slate-400 hover:text-red-600 hover:bg-red-50"
+                    title="מחק תבנית"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <form onSubmit={handleSaveBundleTemplate} className="space-y-3 pt-2 border-t border-[#F3E9DC]">
+            <div className="text-xs font-extrabold text-purple-900">יצירת תבנית מארז חדשה</div>
+            <input
+              type="text"
+              required
+              value={newBundleName}
+              onChange={(e) => setNewBundleName(e.target.value)}
+              placeholder="שם התבנית (לדוגמה: מארז שבת משפחתי)"
+              className="w-full px-3.5 py-2.5 rounded-xl border border-[#E8D5BE] text-sm"
+            />
+            <div className="max-h-52 overflow-y-auto border border-[#E8D5BE] rounded-2xl divide-y divide-[#F3E9DC]">
+              {products.map((p) => {
+                const q = newBundleItems[p.id] || 0;
+                return (
+                  <div key={p.id} className="flex items-center justify-between px-3 py-2 bg-white">
+                    <span className="text-xs font-bold text-slate-800">{p.name}</span>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setNewBundleItems((prev) => ({
+                            ...prev,
+                            [p.id]: Math.max(0, (prev[p.id] || 0) - 1),
+                          }))
+                        }
+                        className="w-8 h-8 rounded-lg bg-[#FAF6F0] border border-[#E8D5BE] flex items-center justify-center"
+                      >
+                        <Minus className="w-3.5 h-3.5" />
+                      </button>
+                      <span className="w-7 text-center text-xs font-extrabold tabular-nums">{q}</span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setNewBundleItems((prev) => ({ ...prev, [p.id]: (prev[p.id] || 0) + 1 }))
+                        }
+                        className="w-8 h-8 rounded-lg bg-purple-700 text-white flex items-center justify-center"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <button
+              type="submit"
+              className="w-full py-2.5 rounded-xl bg-purple-700 hover:bg-purple-800 text-white font-extrabold text-sm"
+            >
+              שמור תבנית מארז
+            </button>
+          </form>
+        </div>
       </BottomSheet>
     </div>
   );

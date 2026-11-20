@@ -18,6 +18,8 @@ import {
   ArrowUp,
   ArrowDown,
   ArrowUpDown,
+  Lock,
+  Unlock,
 } from 'lucide-react';
 import { apiFetch } from '../lib/api';
 import { formatHebrewDate, formatILS, formatPercent } from '../lib/format';
@@ -29,8 +31,28 @@ interface DraftPrices {
   cost_price: string;
   supplier_price: string;
   preorder_price: string;
+  subsidized_price: string;
   customer_price: string;
   image_url: string;
+}
+
+const SUBSIDIZED_PRICES_KEY = 'fsm_product_subsidized_prices';
+function loadSubsidizedPrices(): Record<number, number> {
+  try {
+    const raw = localStorage.getItem(SUBSIDIZED_PRICES_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+function saveSubsidizedPrice(productId: number, price: number) {
+  const map = loadSubsidizedPrices();
+  map[productId] = price;
+  try {
+    localStorage.setItem(SUBSIDIZED_PRICES_KEY, JSON.stringify(map));
+  } catch {
+    // ignore
+  }
 }
 
 function getPriceWarnings(
@@ -77,6 +99,10 @@ export function ProductsCatalog() {
   const [draggedId, setDraggedId] = useState<number | null>(null);
   const [dragOverId, setDragOverId] = useState<number | null>(null);
   const [reordering, setReordering] = useState(false);
+  const [showWithVat, setShowWithVat] = useState(false);
+  const [unlockedIds, setUnlockedIds] = useState<Record<number, boolean>>({});
+  const [unlockWarningProduct, setUnlockWarningProduct] = useState<AdminProduct | null>(null);
+  const [deleteWarningProduct, setDeleteWarningProduct] = useState<AdminProduct | null>(null);
 
   // חלונית תאריך תחולה ואישור אזהרות בעת שמירת מחירים
   const [pendingSaveProduct, setPendingSaveProduct] = useState<AdminProduct | null>(null);
@@ -105,13 +131,16 @@ export function ProductsCatalog() {
       setLoading(true);
       const data = await apiFetch<{ products: AdminProduct[] }>('/api/products');
       setProducts(data.products);
+      const subMap = loadSubsidizedPrices();
       const map: Record<number, DraftPrices> = {};
       for (const p of data.products) {
+        const subPrice = p.subsidized_price ?? subMap[p.id] ?? p.cost_price;
         map[p.id] = {
           name: p.name,
           cost_price: p.cost_price.toFixed(2),
           supplier_price: p.supplier_price.toFixed(2),
           preorder_price: p.preorder_price.toFixed(2),
+          subsidized_price: Number(subPrice).toFixed(2),
           customer_price: p.customer_price.toFixed(2),
           image_url: p.image_url || '',
         };
@@ -132,11 +161,13 @@ export function ProductsCatalog() {
   const isRowDirty = (p: AdminProduct): boolean => {
     const d = drafts[p.id];
     if (!d) return false;
+    const origSub = p.subsidized_price ?? loadSubsidizedPrices()[p.id] ?? p.cost_price;
     return (
       d.name.trim() !== p.name ||
       Number(d.cost_price) !== p.cost_price ||
       Number(d.supplier_price) !== p.supplier_price ||
       Number(d.preorder_price) !== p.preorder_price ||
+      Number(d.subsidized_price) !== Number(origSub) ||
       Number(d.customer_price) !== p.customer_price ||
       (d.image_url.trim() || '') !== (p.image_url || '')
     );
@@ -145,10 +176,12 @@ export function ProductsCatalog() {
   const didPricesChange = (p: AdminProduct): boolean => {
     const d = drafts[p.id];
     if (!d) return false;
+    const origSub = p.subsidized_price ?? loadSubsidizedPrices()[p.id] ?? p.cost_price;
     return (
       Number(d.cost_price) !== p.cost_price ||
       Number(d.supplier_price) !== p.supplier_price ||
       Number(d.preorder_price) !== p.preorder_price ||
+      Number(d.subsidized_price) !== Number(origSub) ||
       Number(d.customer_price) !== p.customer_price
     );
   };
@@ -161,6 +194,7 @@ export function ProductsCatalog() {
   };
 
   const resetRow = (p: AdminProduct) => {
+    const origSub = p.subsidized_price ?? loadSubsidizedPrices()[p.id] ?? p.cost_price;
     setDrafts((prev) => ({
       ...prev,
       [p.id]: {
@@ -168,10 +202,12 @@ export function ProductsCatalog() {
         cost_price: p.cost_price.toFixed(2),
         supplier_price: p.supplier_price.toFixed(2),
         preorder_price: p.preorder_price.toFixed(2),
+        subsidized_price: Number(origSub).toFixed(2),
         customer_price: p.customer_price.toFixed(2),
         image_url: p.image_url || '',
       },
     }));
+    setUnlockedIds((prev) => ({ ...prev, [p.id]: false }));
   };
 
   const initiateSaveRow = (p: AdminProduct) => {
@@ -198,6 +234,7 @@ export function ProductsCatalog() {
             cost_price: Number(d.cost_price),
             supplier_price: Number(d.supplier_price),
             preorder_price: Number(d.preorder_price),
+            subsidized_price: Number(d.subsidized_price),
             customer_price: Number(d.customer_price),
             image_url: d.image_url.trim() || null,
             is_active: p.is_active,
@@ -205,6 +242,7 @@ export function ProductsCatalog() {
           }),
         }
       );
+      saveSubsidizedPrice(p.id, Number(d.subsidized_price) || 0);
       setProducts((prev) => prev.map((item) => (item.id === p.id ? res.product : item)));
       setDrafts((prev) => ({
         ...prev,
@@ -213,10 +251,12 @@ export function ProductsCatalog() {
           cost_price: res.product.cost_price.toFixed(2),
           supplier_price: res.product.supplier_price.toFixed(2),
           preorder_price: res.product.preorder_price.toFixed(2),
+          subsidized_price: Number(d.subsidized_price).toFixed(2),
           customer_price: res.product.customer_price.toFixed(2),
           image_url: res.product.image_url || '',
         },
       }));
+      setUnlockedIds((prev) => ({ ...prev, [p.id]: false }));
       setPendingSaveProduct(null);
       setSavedId(p.id);
       if (res.scheduled) {
@@ -314,8 +354,13 @@ export function ProductsCatalog() {
     setShowAddModal(true);
   };
 
-  const handleDeleteProduct = async (p: AdminProduct) => {
-    if (!window.confirm(`למחוק את המוצר "${p.name}" מהמחירון?`)) return;
+  const handleDeleteProduct = (p: AdminProduct) => {
+    setDeleteWarningProduct(p);
+  };
+
+  const confirmDeleteProduct = async () => {
+    const p = deleteWarningProduct;
+    if (!p) return;
     setError('');
     try {
       await apiFetch(`/api/products/${p.id}`, { method: 'DELETE' });
@@ -325,10 +370,12 @@ export function ProductsCatalog() {
         delete next[p.id];
         return next;
       });
+      setDeleteWarningProduct(null);
       setToast(`המוצר "${p.name}" נמחק מהמחירון.`);
       setTimeout(() => setToast(''), 2600);
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'שגיאה במחיקת המוצר';
+      setDeleteWarningProduct(null);
       if (msg.includes('היסטוריות') && p.is_active) {
         if (window.confirm(`${msg}\n\nהאם להשבית את "${p.name}" כעת?`)) {
           await toggleActive(p);
@@ -365,6 +412,7 @@ export function ProductsCatalog() {
           cost_price: res.product.cost_price.toFixed(2),
           supplier_price: res.product.supplier_price.toFixed(2),
           preorder_price: res.product.preorder_price.toFixed(2),
+          subsidized_price: res.product.cost_price.toFixed(2),
           customer_price: res.product.customer_price.toFixed(2),
           image_url: res.product.image_url || '',
         },
@@ -529,6 +577,15 @@ export function ProductsCatalog() {
           />
           <span>הצג מוצרים פעילים בלבד</span>
         </label>
+        <label className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-[#FFF7ED] border border-[#E8D5BE] text-xs font-extrabold text-[#8A330B] cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={showWithVat}
+            onChange={(e) => setShowWithVat(e.target.checked)}
+            className="w-4 h-4 rounded accent-[#C85A17]"
+          />
+          <span>{showWithVat ? 'כולל מע״מ (+18%)' : 'לפני מע״מ (+ מע״מ 18%)'}</span>
+        </label>
       </div>
 
       {toast && (
@@ -561,9 +618,10 @@ export function ProductsCatalog() {
                     <th className="text-right py-3.5 px-2 font-bold">עלות (₪)</th>
                     <th className="text-right py-3.5 px-2 font-bold">ספק (₪)</th>
                     <th className="text-right py-3.5 px-2 font-bold">מוקדמת (₪)</th>
+                    <th className="text-right py-3.5 px-2 font-bold">מסובסד (₪)</th>
                     <th className="text-right py-3.5 px-2 font-bold">דוכן (₪)</th>
                     <th className="text-right py-3.5 px-2.5 font-bold">ריווח ספק</th>
-                    <th className="text-right py-3.5 px-2.5 font-bold">ריווח לקוח</th>
+                    <th className="text-right py-3.5 px-2.5 font-bold">רווח נקי (₪)</th>
                     <th className="text-center py-3.5 px-2 font-bold">פעיל</th>
                     <th className="text-center py-3.5 px-3 font-bold">פעולות</th>
                   </tr>
@@ -681,24 +739,38 @@ export function ProductsCatalog() {
                             </div>
                           )}
                         </td>
-                        {(['cost_price', 'supplier_price', 'preorder_price', 'customer_price'] as const).map(
-                          (field) => (
-                            <td key={field} className="py-2.5 px-1.5">
-                              <input
-                                type="number"
-                                inputMode="decimal"
-                                step="0.01"
-                                min="0"
-                                value={d[field]}
-                                onChange={(e) => updateDraft(p.id, field, e.target.value)}
-                                onKeyDown={(e) => {
-                                  if (e.key === 'Enter' && dirty) initiateSaveRow(p);
-                                }}
-                                className="w-20 px-2 py-1.5 rounded-lg border border-[#E8D5BE] bg-[#FDFBF7] focus:bg-white focus:border-[#C85A17] focus:outline-none text-left tabular-nums font-semibold"
-                                dir="ltr"
-                              />
-                            </td>
-                          )
+                        {(['cost_price', 'supplier_price', 'preorder_price', 'subsidized_price', 'customer_price'] as const).map(
+                          (field) => {
+                            const unlocked = !!unlockedIds[p.id];
+                            const valNum = Number(d[field]) || 0;
+                            return (
+                              <td key={field} className="py-2.5 px-1.5">
+                                <input
+                                  type="number"
+                                  inputMode="decimal"
+                                  step="0.01"
+                                  min="0"
+                                  disabled={!unlocked}
+                                  value={d[field]}
+                                  onChange={(e) => updateDraft(p.id, field, e.target.value)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter' && dirty) initiateSaveRow(p);
+                                  }}
+                                  className={`w-20 px-2 py-1.5 rounded-lg border text-left tabular-nums font-semibold ${
+                                    unlocked
+                                      ? 'border-[#C85A17] bg-white focus:outline-none'
+                                      : 'border-[#E8D5BE] bg-slate-100/80 text-slate-600 cursor-not-allowed'
+                                  }`}
+                                  dir="ltr"
+                                />
+                                {showWithVat && (
+                                  <div className="text-[10px] text-slate-500 tabular-nums mt-0.5 text-left" dir="ltr">
+                                    +מע״מ: {formatILS(valNum * 1.18)}
+                                  </div>
+                                )}
+                              </td>
+                            );
+                          }
                         )}
                         <td className="py-2.5 px-2.5 tabular-nums">
                           <div className={`font-bold ${supProfit < 0 ? 'text-red-600' : 'text-amber-700'}`}>
@@ -733,7 +805,17 @@ export function ProductsCatalog() {
                         </td>
                         <td className="py-2.5 px-3 text-center whitespace-nowrap">
                           <div className="inline-flex items-center gap-1">
-                            {dirty ? (
+                            {!unlockedIds[p.id] ? (
+                              <button
+                                type="button"
+                                onClick={() => setUnlockWarningProduct(p)}
+                                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-[#FFF7ED] hover:bg-[#FFEDD5] border border-[#C85A17]/40 text-[#8A330B] text-xs font-bold"
+                                title="פתיחת נעילת מחירים לעריכה"
+                              >
+                                <Lock className="w-3.5 h-3.5" />
+                                <span>ערוך מחיר</span>
+                              </button>
+                            ) : dirty ? (
                               <>
                                 <button
                                   type="button"
@@ -913,31 +995,62 @@ export function ProductsCatalog() {
                     </div>
                   )}
 
+                  <div className="mb-2.5 flex items-center justify-between">
+                    <span className="text-[11px] font-bold text-slate-500">
+                      {unlockedIds[p.id] ? 'מצב עריכה פתוח' : 'המחירים נעולים לעריכה'}
+                    </span>
+                    {!unlockedIds[p.id] && (
+                      <button
+                        type="button"
+                        onClick={() => setUnlockWarningProduct(p)}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[#FFF7ED] border border-[#C85A17]/40 text-[#8A330B] text-xs font-bold"
+                      >
+                        <Lock className="w-3.5 h-3.5" />
+                        <span>ערוך מחיר</span>
+                      </button>
+                    )}
+                  </div>
+
                   <div className="grid grid-cols-2 gap-2.5">
                     {(
                       [
                         ['cost_price', 'מחיר עלות'],
                         ['supplier_price', 'מחיר ספק'],
                         ['preorder_price', 'הזמנה מוקדמת'],
+                        ['subsidized_price', 'מחיר מסובסד'],
                         ['customer_price', 'מחיר לקוח (דוכן)'],
                       ] as const
-                    ).map(([field, label]) => (
-                      <div key={field}>
-                        <label className="block text-[11px] font-semibold text-slate-500 mb-1">
-                          {label} (₪)
-                        </label>
-                        <input
-                          type="number"
-                          inputMode="decimal"
-                          step="0.01"
-                          min="0"
-                          dir="ltr"
-                          value={d[field]}
-                          onChange={(e) => updateDraft(p.id, field, e.target.value)}
-                          className="w-full px-3 py-2.5 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] text-left tabular-nums font-bold text-sm focus:bg-white focus:border-[#C85A17] focus:outline-none"
-                        />
-                      </div>
-                    ))}
+                    ).map(([field, label]) => {
+                      const unlocked = !!unlockedIds[p.id];
+                      const valNum = Number(d[field]) || 0;
+                      return (
+                        <div key={field}>
+                          <label className="block text-[11px] font-semibold text-slate-500 mb-1">
+                            {label} (₪)
+                          </label>
+                          <input
+                            type="number"
+                            inputMode="decimal"
+                            step="0.01"
+                            min="0"
+                            dir="ltr"
+                            disabled={!unlocked}
+                            value={d[field]}
+                            onChange={(e) => updateDraft(p.id, field, e.target.value)}
+                            className={`w-full px-3 py-2.5 rounded-xl border text-left tabular-nums font-bold text-sm ${
+                              unlocked
+                                ? 'border-[#C85A17] bg-white focus:outline-none'
+                                : 'border-[#E8D5BE] bg-slate-100/80 text-slate-600 cursor-not-allowed'
+                            }`}
+                          />
+                          {showWithVat && (
+                            <div className="text-[10px] text-slate-500 tabular-nums mt-0.5 text-left" dir="ltr">
+                              +מע״מ: {formatILS(valNum * 1.18)}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
 
                   <div className="mt-2.5">
@@ -1242,6 +1355,79 @@ export function ProductsCatalog() {
             {creating ? 'מוסיף...' : 'הוסף למחירון'}
           </button>
         </form>
+      </BottomSheet>
+      {/* חלונית אזהרה לפני פתיחת עריכת מחיר */}
+      <BottomSheet
+        open={!!unlockWarningProduct}
+        onClose={() => setUnlockWarningProduct(null)}
+        title="אזהרה — פתיחת עריכת מחיר"
+      >
+        {unlockWarningProduct && (
+          <div className="space-y-4">
+            <div className="p-3.5 rounded-2xl bg-amber-50 border border-amber-300 text-amber-900 text-sm flex items-start gap-2.5">
+              <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5 text-amber-700" />
+              <div>
+                אתה עומד לפתוח לעריכה את מחירי המוצר <strong>{unlockWarningProduct.name}</strong>.
+                שינוי מחיר יישמר עם תאריך תחולה (Effective Date) וישפיע על הזמנות חדשות מאותו תאריך ואילך.
+              </div>
+            </div>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setUnlockWarningProduct(null)}
+                className="px-4 py-2 rounded-xl border border-[#E8D5BE] text-sm font-bold text-slate-600"
+              >
+                ביטול
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setUnlockedIds((prev) => ({ ...prev, [unlockWarningProduct.id]: true }));
+                  setUnlockWarningProduct(null);
+                }}
+                className="inline-flex items-center gap-1.5 px-5 py-2 rounded-xl bg-[#C85A17] hover:bg-[#A9440F] text-white text-sm font-bold"
+              >
+                <Unlock className="w-4 h-4" />
+                <span>פתח לעריכה</span>
+              </button>
+            </div>
+          </div>
+        )}
+      </BottomSheet>
+
+      {/* חלונית אזהרה לפני מחיקת מוצר */}
+      <BottomSheet
+        open={!!deleteWarningProduct}
+        onClose={() => setDeleteWarningProduct(null)}
+        title="אזהרה — מחיקת מוצר מהמחירון"
+      >
+        {deleteWarningProduct && (
+          <div className="space-y-4">
+            <div className="p-3.5 rounded-2xl bg-red-50 border border-red-200 text-red-800 text-sm flex items-start gap-2.5">
+              <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5 text-red-600" />
+              <div>
+                האם אתה בטוח שברצונך למחוק את המוצר <strong>{deleteWarningProduct.name}</strong> מהמחירון?
+                פעולה זו אינה ניתנת לביטול.
+              </div>
+            </div>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setDeleteWarningProduct(null)}
+                className="px-4 py-2 rounded-xl border border-[#E8D5BE] text-sm font-bold text-slate-600"
+              >
+                ביטול
+              </button>
+              <button
+                type="button"
+                onClick={confirmDeleteProduct}
+                className="px-5 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white text-sm font-bold"
+              >
+                מחק לצמיתות
+              </button>
+            </div>
+          </div>
+        )}
       </BottomSheet>
     </div>
   );
