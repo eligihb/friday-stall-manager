@@ -1,18 +1,18 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
-  MessageSquareText,
   Sparkles,
-  UserPlus,
   Plus,
   Minus,
   Trash2,
   CheckCircle2,
   AlertTriangle,
   Send,
-  Search,
+  Clock,
+  UserCheck,
 } from 'lucide-react';
 import { apiFetch } from '../lib/api';
-import { formatILS, ORDER_TYPE_LABELS, PAYMENT_METHOD_LABELS } from '../lib/format';
+import { formatILS, PAYMENT_METHOD_LABELS } from '../lib/format';
+import { getFridayPricingStatus } from '../lib/pricingCutoff';
 import { filterUsersByNameOrPhone, getPhoneLast4, parseWhatsAppMessage } from '../lib/whatsappParser';
 import type { AdminProduct, OrderType, PaymentMethod, User } from '../types';
 
@@ -21,7 +21,6 @@ interface WhatsAppOrderParserProps {
   products: AdminProduct[];
   users: User[];
   compact?: boolean;
-  mode?: 'regular' | 'quick';
   onUserCreated?: (user: User) => void;
   onOrderCreated: () => Promise<void>;
 }
@@ -35,13 +34,16 @@ interface ParsedOrderLine {
   overrideUnitPrice?: number;
 }
 
+type PricingMode = 'preorder' | 'stall' | 'supplier' | 'charity';
+type EntityTypeChoice = 'customer' | 'supplier' | 'other';
+
 const DEFAULT_FLAVORS = ['רגיל', 'שום', 'שומשום', 'זעתר'];
 
 function supportsFlavors(name: string): boolean {
   return name.includes('פרנה גדולה') || name.includes('פיתה מלבנית');
 }
 
-function getBundleTotal(productName: string, quantity: number, baseUnitPrice: number): number | null {
+function getBundleTotal(productName: string, quantity: number): number | null {
   if (quantity <= 0) return null;
   if (
     productName.includes('פיתה מלבנית') ||
@@ -55,44 +57,49 @@ function getBundleTotal(productName: string, quantity: number, baseUnitPrice: nu
     return packs6 * 20 + packs3 * 12 + singles * 5;
   }
   if (productName.includes("ג'חנון") || productName.includes('גחנון')) {
-    if (quantity >= 5) {
-      return quantity * 8;
-    }
-    return quantity * 9;
+    return quantity >= 5 ? quantity * 8 : quantity * 9;
   }
   return null;
 }
-
-const SAMPLE_MESSAGE = 'אליאב שלום, 2 פיתות, 3 פרנה, 2 זלביה, 1 לחם שום, 130 לחוח, תודה שבת שלום';
 
 export function WhatsAppOrderParser({
   fridayDate,
   products,
   users,
   compact = false,
-  mode = 'quick',
   onUserCreated,
   onOrderCreated,
 }: WhatsAppOrderParserProps) {
+  const cutoffStatus = useMemo(() => getFridayPricingStatus(fridayDate), [fridayDate]);
+  const [overridePreorderCutoff, setOverridePreorderCutoff] = useState(false);
+
   const [rawText, setRawText] = useState('');
   const [parsedItems, setParsedItems] = useState<ParsedOrderLine[]>([]);
   const [unmatched, setUnmatched] = useState<string[]>([]);
   const [hasParsed, setHasParsed] = useState(false);
 
-  const [orderType, setOrderType] = useState<OrderType>('customer');
-  const [customerTier, setCustomerTier] = useState<'preorder_price' | 'customer_price'>('preorder_price');
-  const [userMode, setUserMode] = useState<'existing' | 'new'>('existing');
-  const [userSearch, setUserSearch] = useState('');
-  const [showMoreQuickUsers, setShowMoreQuickUsers] = useState(false);
+  // תמחור אחיד: הזמנה מוקדמת | מחיר דוכן | מחיר ספק | מסובסד
+  const [pricingMode, setPricingMode] = useState<PricingMode>(() =>
+    cutoffStatus.isPreorder ? 'preorder' : 'stall'
+  );
+
+  useEffect(() => {
+    if (pricingMode === 'preorder' && !cutoffStatus.isPreorder && !overridePreorderCutoff) {
+      setPricingMode('stall');
+    }
+  }, [cutoffStatus.isPreorder, overridePreorderCutoff, pricingMode]);
+
+  const orderType: OrderType =
+    pricingMode === 'supplier' ? 'supplier' : pricingMode === 'charity' ? 'charity' : 'customer';
+  const customerTier: 'preorder_price' | 'customer_price' =
+    pricingMode === 'preorder' ? 'preorder_price' : 'customer_price';
+
+  // Smart Autocomplete: שם + טלפון + סוג משתמש
+  const [entityType, setEntityType] = useState<EntityTypeChoice>('customer');
   const [selectedUserId, setSelectedUserId] = useState('');
   const [recipientName, setRecipientName] = useState('');
-  const [newUserPhone, setNewUserPhone] = useState('');
-  const [newEntityOpen, setNewEntityOpen] = useState(false);
-  const [newEntityRole, setNewEntityRole] = useState<'customer' | 'supplier' | 'other'>('customer');
-  const [newEntityName, setNewEntityName] = useState('');
-  const [newEntityPhone, setNewEntityPhone] = useState('');
-  const [newEntityNotes, setNewEntityNotes] = useState('');
-  const [creatingEntity, setCreatingEntity] = useState(false);
+  const [recipientPhone, setRecipientPhone] = useState('');
+  const [showSuggestions, setShowSuggestions] = useState(false);
 
   const [deliveryFee, setDeliveryFee] = useState('0');
   const [discountMode, setDiscountMode] = useState<'fixed' | 'percent'>('fixed');
@@ -121,11 +128,50 @@ export function WhatsAppOrderParser({
     }
     setSelectedUserId(String(u.id));
     setRecipientName(u.name);
-    if (u.role === 'supplier') setOrderType('supplier');
-    else if (u.role === 'customer' && orderType === 'supplier') setOrderType('customer');
+    setRecipientPhone(u.phone || '');
+    setShowSuggestions(false);
+    if (u.role === 'supplier') {
+      setEntityType('supplier');
+      setPricingMode('supplier');
+    } else {
+      setEntityType('customer');
+      if (pricingMode === 'supplier') {
+        setPricingMode(cutoffStatus.isPreorder || overridePreorderCutoff ? 'preorder' : 'stall');
+      }
+    }
     if ((u.discount_percent ?? 0) > 0) {
       setDiscountMode('percent');
       setDiscountValue(String(u.discount_percent));
+    }
+  };
+
+  // הצעות השלמה אוטומטית לפי שם או 4 ספרות אחרונות של הטלפון
+  const autocompleteMatches = useMemo(() => {
+    const query = recipientName.trim() || recipientPhone.trim();
+    const pool = users.filter((u) => u.role !== 'admin');
+    if (!query) return pool.slice(0, 6);
+    return filterUsersByNameOrPhone(query, pool).slice(0, 6);
+  }, [users, recipientName, recipientPhone]);
+
+  const handleNameChange = (val: string) => {
+    setRecipientName(val);
+    setSelectedUserId('');
+    setShowSuggestions(true);
+    const digits = val.replace(/\D/g, '');
+    if (digits.length === 4) {
+      const matches = filterUsersByNameOrPhone(digits, users.filter((u) => u.role !== 'admin'));
+      if (matches.length === 1) applySelectedUser(matches[0]);
+    }
+  };
+
+  const handlePhoneChange = (val: string) => {
+    setRecipientPhone(val);
+    setSelectedUserId('');
+    setShowSuggestions(true);
+    const digits = val.replace(/\D/g, '');
+    if (digits.length >= 4) {
+      const matches = filterUsersByNameOrPhone(digits.slice(-4), users.filter((u) => u.role !== 'admin'));
+      if (matches.length === 1) applySelectedUser(matches[0]);
     }
   };
 
@@ -166,7 +212,7 @@ export function WhatsAppOrderParser({
     }
     const baseUnit = getUnitPrice(prod);
     if (item.applyBundle && orderType === 'customer') {
-      const bundle = getBundleTotal(prod.name, item.quantity, baseUnit);
+      const bundle = getBundleTotal(prod.name, item.quantity);
       if (bundle !== null) return bundle;
     }
     return Math.round(baseUnit * item.quantity * 100) / 100;
@@ -203,16 +249,6 @@ export function WhatsAppOrderParser({
     }, 0);
   }, [parsedItems, productMap]);
 
-  const filteredUsers = useMemo(() => {
-    const roleScoped =
-      orderType === 'supplier'
-        ? users.filter((u) => u.role === 'supplier')
-        : orderType === 'customer'
-        ? users.filter((u) => u.role !== 'admin')
-        : [];
-    return filterUsersByNameOrPhone(userSearch, roleScoped);
-  }, [users, orderType, userSearch]);
-
   const handleAddManualProduct = () => {
     const pid = Number(addProductId);
     if (!pid) return;
@@ -239,48 +275,6 @@ export function WhatsAppOrderParser({
     setAddProductId('');
   };
 
-  const handleQuickCreateEntity = async () => {
-    const name = newEntityName.trim();
-    if (!name) {
-      setError('יש להזין שם פרטי ומשפחה.');
-      return;
-    }
-    setCreatingEntity(true);
-    setError('');
-    try {
-      const apiRole = newEntityRole === 'supplier' ? 'supplier' : 'customer';
-      const notesPrefix = newEntityRole === 'other' ? '[אחר] ' : '';
-      const created = await apiFetch<{ id: number; user?: User }>('/api/users', {
-        method: 'POST',
-        body: JSON.stringify({
-          name,
-          phone: newEntityPhone.trim(),
-          role: apiRole,
-          notes: `${notesPrefix}${newEntityNotes.trim()}`.trim(),
-        }),
-      });
-      const newUser: User = created.user || {
-        id: created.id,
-        name,
-        phone: newEntityPhone.trim(),
-        email: '',
-        role: apiRole,
-        balance: 0,
-        notes: `${notesPrefix}${newEntityNotes.trim()}`.trim(),
-      };
-      onUserCreated?.(newUser);
-      applySelectedUser(newUser);
-      setNewEntityName('');
-      setNewEntityPhone('');
-      setNewEntityNotes('');
-      setNewEntityOpen(false);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'שגיאה ביצירת ישות חדשה');
-    } finally {
-      setCreatingEntity(false);
-    }
-  };
-
   const handleSaveOrder = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
@@ -288,13 +282,14 @@ export function WhatsAppOrderParser({
 
     const validItems = parsedItems.filter((i) => i.quantity > 0);
     if (validItems.length === 0) {
-      setError('אין פריטים בהזמנה — הדבק הודעת וואטסאפ ולחץ על ״פענח הודעה״ או הוסף פריט ידנית.');
+      setError('אין פריטים בהזמנה — הדבק הודעת וואטסאפ או הוסף פריט ידנית.');
       return;
     }
 
-    const finalRecipient = recipientName.trim();
-    if (!finalRecipient && !selectedUserId) {
-      setError('יש לבחור לקוח/ספק קיים או להזין שם מקבל ההזמנה.');
+    const finalName = recipientName.trim();
+    const finalPhone = recipientPhone.trim();
+    if (!finalName && !selectedUserId) {
+      setError('יש להזין שם מזמין או לבחור לקוח/ספק קיים.');
       return;
     }
 
@@ -302,17 +297,40 @@ export function WhatsAppOrderParser({
     try {
       let userId: number | null = selectedUserId ? Number(selectedUserId) : null;
 
-      if (orderType !== 'charity' && userMode === 'new' && finalRecipient) {
-        const createdUser = await apiFetch<{ id: number; user: User }>('/api/users', {
-          method: 'POST',
-          body: JSON.stringify({
-            name: finalRecipient,
-            phone: newUserPhone.trim(),
-            role: orderType === 'supplier' ? 'supplier' : 'customer',
-            notes: 'נוצר אוטומטית מקליטת הזמנה בוואטסאפ',
-          }),
-        });
-        userId = createdUser.id;
+      // שמירה אוטומטית של משתמש חדש אם הוקלד שם/טלפון שאינם קיימים במערכת
+      if (orderType !== 'charity' && !userId && finalName) {
+        const existingMatch = users.find(
+          (u) =>
+            u.name.trim().toLowerCase() === finalName.toLowerCase() ||
+            (finalPhone.replace(/\D/g, '').length >= 7 &&
+              String(u.phone || '').replace(/\D/g, '') === finalPhone.replace(/\D/g, ''))
+        );
+        if (existingMatch) {
+          userId = existingMatch.id;
+        } else {
+          const apiRole = entityType === 'supplier' || orderType === 'supplier' ? 'supplier' : 'customer';
+          const notesPrefix = entityType === 'other' ? '[אחר] ' : '';
+          const createdRes = await apiFetch<{ id: number; user?: User }>('/api/users', {
+            method: 'POST',
+            body: JSON.stringify({
+              name: finalName,
+              phone: finalPhone,
+              role: apiRole,
+              notes: `${notesPrefix}נשמר אוטומטית מהזמנה`.trim(),
+            }),
+          });
+          userId = createdRes.id;
+          const createdUser: User = createdRes.user || {
+            id: createdRes.id,
+            name: finalName,
+            phone: finalPhone,
+            email: '',
+            role: apiRole,
+            balance: 0,
+            notes: `${notesPrefix}נשמר אוטומטית מהזמנה`.trim(),
+          };
+          onUserCreated?.(createdUser);
+        }
       }
 
       const flavorNotes = validItems
@@ -342,7 +360,7 @@ export function WhatsAppOrderParser({
           order_type: orderType,
           price_tier: customerTier,
           user_id: orderType === 'charity' ? null : userId,
-          recipient_name: finalRecipient || users.find((u) => u.id === userId)?.name || 'הזמנה',
+          recipient_name: finalName || selectedUser?.name || 'הזמנה',
           delivery_fee: orderType === 'charity' ? 0 : Number(deliveryFee) || 0,
           credit_discount: orderType === 'charity' ? 0 : discountMode === 'fixed' ? discVal : 0,
           discount_percent: orderType === 'charity' ? 0 : discountMode === 'percent' ? Math.min(100, discVal) : 0,
@@ -359,16 +377,14 @@ export function WhatsAppOrderParser({
       setUnmatched([]);
       setHasParsed(false);
       setSelectedUserId('');
-      setUserSearch('');
       setRecipientName('');
-      setNewUserPhone('');
+      setRecipientPhone('');
       setDeliveryFee('0');
       setDiscountValue('0');
       setIncludeVat(false);
       setPaidAmount('0');
       setNotes('');
-      setUserMode('existing');
-      setSuccess('ההזמנה נקלטה בהצלחה ועודכנה בסיכום הרכש מהמאפייה ובלוח הליקוט!');
+      setSuccess('ההזמנה נשמרה בהצלחה!');
       await onOrderCreated();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'שגיאה בשמירת ההזמנה');
@@ -378,734 +394,484 @@ export function WhatsAppOrderParser({
   };
 
   return (
-    <div
-      className={
-        compact
-          ? 'space-y-4'
-          : 'bg-white rounded-3xl border border-[#E8D5BE] shadow-soft overflow-hidden'
-      }
-    >
-      {!compact && (
-        <div className="bg-gradient-to-l from-[#1E242B] to-[#3A2419] px-5 py-4 flex flex-wrap items-center justify-between gap-3 text-white">
-          <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl bg-emerald-500/20 border border-emerald-400/30 flex items-center justify-center text-emerald-300">
-              <MessageSquareText className="w-5 h-5" />
-            </div>
-            <div>
-              <h3 className="font-serif text-xl font-bold leading-tight">קליטת הזמנה חכמה מוואטסאפ</h3>
-              <p className="text-xs text-amber-200/85">
-                מסנן ברכות אוטומטית, ממפה פיתות←סאלוף ומארזי 12 ₪, ומזהה לקוחות/ספקים לפי שם או 4 ספרות אחרונות.
-              </p>
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={() => {
-              setRawText(SAMPLE_MESSAGE);
-              runParse(SAMPLE_MESSAGE);
-            }}
-            className="text-xs font-bold px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-amber-200 border border-white/15 transition-colors"
-          >
-            טען הודעה לדוגמה
-          </button>
+    <form onSubmit={handleSaveOrder} className={compact ? 'space-y-4' : 'space-y-5'}>
+      {success && (
+        <div className="p-3 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold flex items-center gap-2">
+          <CheckCircle2 className="w-4 h-4 shrink-0" />
+          <span>{success}</span>
+        </div>
+      )}
+      {error && (
+        <div className="p-3 rounded-2xl bg-red-50 border border-red-200 text-red-700 text-xs font-bold">
+          {error}
         </div>
       )}
 
-      <form onSubmit={handleSaveOrder} className={compact ? 'space-y-4' : 'p-5 space-y-5'}>
-        {compact && (
-          <div className="flex justify-end">
-            <button
-              type="button"
-              onClick={() => {
-                setRawText(SAMPLE_MESSAGE);
-                runParse(SAMPLE_MESSAGE);
-              }}
-              className="text-xs font-bold px-3 py-1.5 rounded-xl bg-[#FFF7ED] border border-[#E8D5BE] text-[#C85A17]"
-            >
-              טען הודעה לדוגמה
-            </button>
-          </div>
-        )}
+      {/* 1. תיבה קומפקטית להדבקת הודעת וואטסאפ */}
+      <div className="p-3 rounded-2xl bg-[#FAF6F0] border border-[#E8D5BE] space-y-2">
+        <label className="block text-xs font-extrabold text-slate-700">
+          הדבקת טקסט חופשי מוואטסאפ (אופציונלי)
+        </label>
+        <textarea
+          rows={2}
+          value={rawText}
+          onChange={(e) => setRawText(e.target.value)}
+          placeholder='לדוגמה: "2 סלוף. לחוך. *וחלבה** גדול, 3 זעתר"'
+          className="w-full p-2.5 rounded-xl border border-[#E8D5BE] bg-white focus:border-[#C85A17] focus:outline-none text-xs leading-relaxed"
+        />
+        <button
+          type="button"
+          onClick={() => runParse(rawText)}
+          disabled={!rawText.trim()}
+          className="w-full py-2 px-3 rounded-xl bg-[#1E242B] hover:bg-slate-800 disabled:opacity-40 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition-colors"
+        >
+          <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+          <span>פענח הודעה</span>
+        </button>
 
-        {success && (
-          <div className="p-3.5 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm font-bold flex items-center gap-2">
-            <CheckCircle2 className="w-4 h-4 shrink-0" />
-            <span>{success}</span>
+        {unmatched.length > 0 && (
+          <div className="p-2.5 rounded-xl bg-red-100 border border-red-400 text-red-800 text-xs font-bold space-y-1">
+            <div className="flex items-center gap-1.5 font-extrabold">
+              <AlertTriangle className="w-4 h-4 text-red-700 shrink-0" />
+              <span>לא זוהו אוטומטית:</span>
+            </div>
+            <div className="flex flex-wrap gap-1">
+              {unmatched.map((seg, idx) => (
+                <span key={idx} className="px-2 py-0.5 rounded bg-red-200/80 border border-red-400">
+                  {seg}
+                </span>
+              ))}
+            </div>
           </div>
         )}
-        {error && (
-          <div className="p-3.5 rounded-2xl bg-red-50 border border-red-200 text-red-700 text-sm font-bold">
-            {error}
-          </div>
-        )}
+      </div>
 
-        <div className={compact ? 'space-y-4' : 'grid grid-cols-1 lg:grid-cols-12 gap-5'}>
-          {/* אזור הדבקת הודעת וואטסאפ */}
-          {mode !== 'regular' && (
-            <div className={compact ? 'space-y-3' : 'lg:col-span-5 space-y-3'}>
-              <label className="block text-xs font-bold text-slate-700">
-                טקסט הודעת הוואטסאפ הגולמית
-              </label>
-              <textarea
-                rows={4}
-                value={rawText}
-                onChange={(e) => setRawText(e.target.value)}
-                placeholder='לדוגמה: "אליאב שלום, 2 פיתות, 3 פרנה, 2 זלביה, 1 לחם שום, 130 לחוח"'
-                className="w-full p-3.5 rounded-2xl border border-[#E8D5BE] bg-[#FDFBF7] focus:bg-white focus:border-[#C85A17] focus:ring-2 focus:ring-[#C85A17]/20 focus:outline-none text-sm leading-relaxed"
+      {/* 2. בחירת סוג תמחור (Pricing Mode Pills) + כלל 06:00 */}
+      <div className="space-y-2">
+        <div className="flex items-center justify-between gap-2">
+          <label className="text-xs font-extrabold text-slate-700">סוג תמחור</label>
+          {!cutoffStatus.isPreorder && (
+            <label className="inline-flex items-center gap-1.5 text-[11px] font-bold text-[#8A330B] cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={overridePreorderCutoff}
+                onChange={(e) => {
+                  const checked = e.target.checked;
+                  setOverridePreorderCutoff(checked);
+                  if (checked) setPricingMode('preorder');
+                }}
+                className="w-3.5 h-3.5 accent-[#C85A17]"
               />
-              <button
-                type="button"
-                onClick={() => runParse(rawText)}
-                className="w-full py-2.5 px-4 rounded-xl bg-[#1E242B] hover:bg-slate-800 text-white font-bold text-sm flex items-center justify-center gap-2 transition-colors"
-              >
-                <Sparkles className="w-4 h-4 text-amber-400" />
-                <span>פענח הודעה אוטומטית</span>
-              </button>
+              <Clock className="w-3 h-3" />
+              <span>אשר מוקדמת אחרי 06:00</span>
+            </label>
+          )}
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+          {(
+            [
+              ['preorder', 'הזמנה מוקדמת', !cutoffStatus.isPreorder && !overridePreorderCutoff],
+              ['stall', 'מחיר דוכן', false],
+              ['supplier', 'מחיר ספק', false],
+              ['charity', 'מסובסד', false],
+            ] as const
+          ).map(([modeKey, label, isDisabled]) => (
+            <button
+              key={modeKey}
+              type="button"
+              disabled={isDisabled}
+              onClick={() => {
+                setPricingMode(modeKey);
+                if (modeKey === 'supplier') setEntityType('supplier');
+                else if (modeKey !== 'charity' && entityType === 'supplier') setEntityType('customer');
+              }}
+              className={`py-2 px-2 rounded-xl text-xs font-extrabold border transition-all ${
+                pricingMode === modeKey
+                  ? 'bg-[#C85A17] text-white border-[#C85A17] shadow-sm'
+                  : isDisabled
+                  ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed'
+                  : 'bg-[#FDFBF7] text-slate-700 border-[#E8D5BE] hover:bg-[#FFF7ED]'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
 
-              {unmatched.length > 0 && (
-                <div className="p-3 rounded-xl bg-red-100 border border-red-400 text-red-800 text-xs font-bold">
-                  <div className="font-extrabold flex items-center gap-1.5 mb-1">
-                    <AlertTriangle className="w-4 h-4 text-red-700 shrink-0" />
-                    <span>שורות/קטעים שלא זוהו אוטומטית:</span>
-                  </div>
-                  <div className="space-y-1">
-                    {unmatched.map((line, idx) => (
-                      <div key={idx} className="px-2 py-1 rounded bg-red-200/70 border border-red-400">
-                        {line}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
+      {/* 3. Smart Autocomplete למזמין (שם + טלפון + סוג משתמש) */}
+      <div className="space-y-2 relative">
+        <div className="flex items-center justify-between gap-2">
+          <label className="text-xs font-extrabold text-slate-700">פרטי מזמין (זיהוי ושמירה אוטומטית)</label>
+          {orderType !== 'charity' && (
+            <div className="flex items-center gap-1 bg-[#FAF6F0] p-0.5 rounded-lg border border-[#E8D5BE]">
+              {(
+                [
+                  ['customer', 'לקוח'],
+                  ['supplier', 'ספק'],
+                  ['other', 'אחר'],
+                ] as const
+              ).map(([et, lbl]) => (
+                <button
+                  key={et}
+                  type="button"
+                  onClick={() => {
+                    setEntityType(et);
+                    if (et === 'supplier') setPricingMode('supplier');
+                  }}
+                  className={`px-2 py-0.5 rounded-md text-[11px] font-bold ${
+                    entityType === et ? 'bg-[#1E242B] text-white' : 'text-slate-600'
+                  }`}
+                >
+                  {lbl}
+                </button>
+              ))}
             </div>
           )}
+        </div>
 
-          {/* פרטי שיוך ההזמנה, הנחה, משלוח ומע״מ */}
-          <div className={compact ? 'space-y-3.5' : 'lg:col-span-7 space-y-3.5'}>
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1.5">סוג ההזמנה ומדרגת מחיר</label>
-              <div className="grid grid-cols-3 gap-2">
-                {(['customer', 'supplier', 'charity'] as const).map((t) => (
-                  <button
-                    key={t}
-                    type="button"
-                    onClick={() => {
-                      setOrderType(t);
-                      setSelectedUserId('');
-                      if (t === 'charity') setUserMode('existing');
-                    }}
-                    className={`py-2 px-2 rounded-xl text-xs font-bold border transition-all ${
-                      orderType === t
-                        ? 'bg-[#C85A17] text-white border-[#C85A17] shadow-sm'
-                        : 'bg-[#FDFBF7] text-slate-700 border-[#E8D5BE] hover:bg-[#FFF7ED]'
-                    }`}
-                  >
-                    {ORDER_TYPE_LABELS[t]}
-                  </button>
-                ))}
-              </div>
-            </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <input
+            type="text"
+            required
+            value={recipientName}
+            onFocus={() => setShowSuggestions(true)}
+            onChange={(e) => handleNameChange(e.target.value)}
+            placeholder="שם מלא (או 4 ספרות טלפון)"
+            className="px-3 py-2 rounded-xl border border-[#E8D5BE] bg-white text-sm font-semibold"
+          />
+          <input
+            type="tel"
+            inputMode="tel"
+            value={recipientPhone}
+            onFocus={() => setShowSuggestions(true)}
+            onChange={(e) => handlePhoneChange(e.target.value)}
+            placeholder="טלפון נייד"
+            className="px-3 py-2 rounded-xl border border-[#E8D5BE] bg-white text-sm tabular-nums"
+          />
+        </div>
 
-            {orderType === 'customer' && (
-              <div className="flex gap-2 text-xs">
-                <button
-                  type="button"
-                  onClick={() => setCustomerTier('preorder_price')}
-                  className={`flex-1 py-1.5 rounded-lg font-bold border ${
-                    customerTier === 'preorder_price'
-                      ? 'bg-amber-50 border-amber-500 text-amber-900'
-                      : 'border-[#E8D5BE] text-slate-500'
-                  }`}
+        {selectedUser ? (
+          <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-[11px] font-bold">
+            <UserCheck className="w-3.5 h-3.5" />
+            <span>משויך למשתמש קיים: {selectedUser.name}</span>
+          </div>
+        ) : recipientName.trim() && orderType !== 'charity' ? (
+          <div className="text-[11px] text-amber-800 font-semibold">
+            משתמש חדש — יישמר אוטומטית ברשימת המשתמשים בעת שמירת ההזמנה.
+          </div>
+        ) : null}
+
+        {showSuggestions && orderType !== 'charity' && autocompleteMatches.length > 0 && !selectedUser && (
+          <div className="flex flex-wrap gap-1.5 pt-0.5">
+            {autocompleteMatches.map((u) => (
+              <button
+                key={u.id}
+                type="button"
+                onClick={() => applySelectedUser(u)}
+                className="px-2.5 py-1 rounded-xl border border-[#E8D5BE] bg-[#FAF6F0] hover:bg-[#FFF7ED] text-xs font-bold text-slate-800"
+              >
+                {u.name}
+                {getPhoneLast4(u.phone) ? ` #${getPhoneLast4(u.phone)}` : ''}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* 4. פריטי ההזמנה + בחירת טעמים + מבצע כמות + עריכת מחיר ידנית */}
+      <div className="border-t border-[#F3E9DC] pt-3 space-y-2.5">
+        <div className="flex items-center justify-between gap-2">
+          <h4 className="text-xs font-extrabold text-slate-800">פריטים בהזמנה ({parsedItems.length})</h4>
+          <div className="flex items-center gap-1.5">
+            <select
+              value={addProductId}
+              onChange={(e) => setAddProductId(e.target.value)}
+              className="px-2.5 py-1.5 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] text-xs font-semibold max-w-[190px]"
+            >
+              <option value="">+ הוסף מוצר...</option>
+              {activeProducts.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name} ({formatILS(getUnitPrice(p))})
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              onClick={handleAddManualProduct}
+              disabled={!addProductId}
+              className="p-1.5 rounded-xl bg-[#C85A17] text-white disabled:opacity-40"
+            >
+              <Plus className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+
+        {parsedItems.length === 0 ? (
+          <div className="py-4 px-3 rounded-2xl bg-[#FAF6F0] border border-dashed border-[#E8D5BE] text-center text-xs text-slate-500">
+            {hasParsed
+              ? 'לא זוהו מוצרים בהודעה. ניתן להוסיף מוצרים ידנית למעלה.'
+              : 'הדבק הודעת וואטסאפ או בחר מוצר מהרשימה למעלה.'}
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {parsedItems.map((it) => {
+              const prod = productMap.get(it.product_id);
+              if (!prod) return null;
+              const baseUnitPrice = getUnitPrice(prod);
+              const hasFlavors = supportsFlavors(prod.name);
+              const bundleAvailable =
+                orderType === 'customer' && getBundleTotal(prod.name, it.quantity) !== null;
+              const lineTotal = getLineTotal(it, prod);
+              const flavorList = prod.flavors && prod.flavors.length > 0 ? prod.flavors : DEFAULT_FLAVORS;
+
+              return (
+                <div
+                  key={it.lineId}
+                  className="p-2.5 rounded-2xl bg-[#FAF6F0] border border-[#E8D5BE] space-y-2"
                 >
-                  מחירון הזמנה מוקדמת
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setCustomerTier('customer_price')}
-                  className={`flex-1 py-1.5 rounded-lg font-bold border ${
-                    customerTier === 'customer_price'
-                      ? 'bg-amber-50 border-amber-500 text-amber-900'
-                      : 'border-[#E8D5BE] text-slate-500'
-                  }`}
-                >
-                  מחירון דוכן רגיל
-                </button>
-              </div>
-            )}
-
-            {/* שיוך ללקוח/ספק עם חיפוש לפי שם או 4 ספרות אחרונות + יצירה מהירה */}
-            {orderType !== 'charity' ? (
-              <div className="space-y-2">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <label className="text-xs font-bold text-slate-700">
-                    {orderType === 'supplier' ? 'שיוך לספק' : 'שיוך ללקוח'} (שם או 4 ספרות אחרונות)
-                  </label>
-                  <div className="flex items-center gap-1.5">
-                    {(['customer', 'supplier', 'other'] as const).map((r) => {
-                      const label = r === 'customer' ? 'לקוח חדש' : r === 'supplier' ? 'ספק חדש' : 'אחר';
-                      return (
-                        <button
-                          key={r}
-                          type="button"
-                          onClick={() => {
-                            setNewEntityRole(r);
-                            setNewEntityOpen(true);
-                          }}
-                          className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-[#FFF7ED] border border-[#E8D5BE] text-[11px] font-bold text-[#C85A17] hover:bg-[#FFEDD5]"
-                        >
-                          <UserPlus className="w-3 h-3" />
-                          <span>{label}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {newEntityOpen && (
-                  <div className="p-3 rounded-2xl bg-[#FFF7ED] border border-[#C85A17]/40 space-y-2.5">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-extrabold text-[#8A330B]">
-                        יצירת{' '}
-                        {newEntityRole === 'customer'
-                          ? 'לקוח חדש'
-                          : newEntityRole === 'supplier'
-                          ? 'ספק חדש'
-                          : 'אחר'}
-                      </span>
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="font-bold text-sm text-slate-900 truncate">
+                        {prod.name}
+                        {it.flavor ? ` (${it.flavor})` : ''}
+                      </div>
+                      <div className="text-[11px] text-slate-500 tabular-nums">
+                        {it.overrideUnitPrice !== undefined
+                          ? `${formatILS(it.overrideUnitPrice)} (ידני) × ${it.quantity} = `
+                          : bundleAvailable && it.applyBundle
+                          ? `מבצע כמות (${it.quantity} יח׳) = `
+                          : `${formatILS(baseUnitPrice)} × ${it.quantity} = `}
+                        <span className="font-bold text-[#8A330B]">{formatILS(lineTotal)}</span>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
                       <button
                         type="button"
-                        onClick={() => setNewEntityOpen(false)}
-                        className="text-xs font-bold text-slate-500 hover:text-slate-800"
+                        onClick={() =>
+                          setParsedItems((prev) =>
+                            prev.map((row) =>
+                              row.lineId === it.lineId
+                                ? { ...row, quantity: Math.max(1, row.quantity - 1) }
+                                : row
+                            )
+                          )
+                        }
+                        className="w-8 h-8 rounded-xl bg-white border border-[#E8D5BE] flex items-center justify-center"
                       >
-                        ביטול
+                        <Minus className="w-3.5 h-3.5" />
+                      </button>
+                      <input
+                        type="number"
+                        inputMode="numeric"
+                        min="1"
+                        value={it.quantity}
+                        onChange={(e) => {
+                          const nextQty = Math.max(1, Math.floor(Number(e.target.value) || 1));
+                          setParsedItems((prev) =>
+                            prev.map((row) => (row.lineId === it.lineId ? { ...row, quantity: nextQty } : row))
+                          );
+                        }}
+                        className="w-11 h-8 text-center rounded-xl border border-[#E8D5BE] bg-white font-bold text-xs tabular-nums"
+                      />
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setParsedItems((prev) =>
+                            prev.map((row) =>
+                              row.lineId === it.lineId ? { ...row, quantity: row.quantity + 1 } : row
+                            )
+                          )
+                        }
+                        className="w-8 h-8 rounded-xl bg-[#C85A17] text-white flex items-center justify-center"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setParsedItems((prev) => prev.filter((row) => row.lineId !== it.lineId))
+                        }
+                        className="w-7 h-8 rounded-xl text-slate-400 hover:text-red-600 flex items-center justify-center"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
                       </button>
                     </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      <input
-                        type="text"
-                        value={newEntityName}
-                        onChange={(e) => setNewEntityName(e.target.value)}
-                        placeholder="שם פרטי ומשפחה"
-                        className="px-3 py-2 rounded-xl border border-[#E8D5BE] bg-white text-xs font-semibold"
-                      />
-                      <input
-                        type="tel"
-                        inputMode="tel"
-                        value={newEntityPhone}
-                        onChange={(e) => setNewEntityPhone(e.target.value)}
-                        placeholder="טלפון"
-                        className="px-3 py-2 rounded-xl border border-[#E8D5BE] bg-white text-xs tabular-nums"
-                      />
-                      <select
-                        value={newEntityRole}
-                        onChange={(e) =>
-                          setNewEntityRole(e.target.value as 'customer' | 'supplier' | 'other')
-                        }
-                        className="px-3 py-2 rounded-xl border border-[#E8D5BE] bg-white text-xs font-semibold"
-                      >
-                        <option value="customer">סוג משתמש: לקוח</option>
-                        <option value="supplier">סוג משתמש: ספק</option>
-                        <option value="other">סוג משתמש: אחר</option>
-                      </select>
-                      <input
-                        type="text"
-                        value={newEntityNotes}
-                        onChange={(e) => setNewEntityNotes(e.target.value)}
-                        placeholder="הערות"
-                        className="px-3 py-2 rounded-xl border border-[#E8D5BE] bg-white text-xs"
-                      />
-                    </div>
-                    <button
-                      type="button"
-                      disabled={creatingEntity}
-                      onClick={handleQuickCreateEntity}
-                      className="w-full py-2 rounded-xl bg-[#C85A17] hover:bg-[#A9440F] disabled:opacity-50 text-white font-bold text-xs"
-                    >
-                      {creatingEntity ? 'יוצר...' : 'צור'}
-                    </button>
                   </div>
-                )}
 
-                {userMode === 'existing' ? (
-                  <div className="space-y-2">
-                    {/* בחירה מהירה בלחיצה: 2 שורות ספקים אחרונים / 5 לקוחות אחרונים + עוד */}
-                    {filteredUsers.length > 0 && (
-                      <div className="space-y-1.5">
-                        <div
-                          className={
-                            orderType === 'supplier'
-                              ? 'grid grid-cols-2 sm:grid-cols-3 gap-1.5'
-                              : 'flex flex-wrap gap-1.5'
-                          }
-                        >
-                          {(orderType === 'supplier'
-                            ? filteredUsers.slice(0, 6)
-                            : showMoreQuickUsers || userSearch.trim()
-                            ? filteredUsers
-                            : filteredUsers.slice(0, 5)
-                          ).map((u) => {
-                            const active = String(u.id) === selectedUserId;
-                            return (
-                              <button
-                                key={u.id}
-                                type="button"
-                                onClick={() => applySelectedUser(u)}
-                                className={`min-h-[40px] px-2.5 py-1 rounded-xl border text-xs font-bold truncate transition-colors ${
-                                  active
-                                    ? 'bg-[#C85A17] text-white border-[#C85A17]'
-                                    : 'bg-[#FAF6F0] hover:bg-[#FFF7ED] text-slate-800 border-[#E8D5BE]'
-                                }`}
-                              >
-                                {u.name}
-                                {getPhoneLast4(u.phone) ? ` #${getPhoneLast4(u.phone)}` : ''}
-                              </button>
-                            );
-                          })}
-                          {orderType !== 'supplier' && !userSearch.trim() && filteredUsers.length > 5 && (
-                            <button
-                              type="button"
-                              onClick={() => setShowMoreQuickUsers((v) => !v)}
-                              className="min-h-[40px] px-2.5 py-1 rounded-xl border border-dashed border-[#C85A17]/60 text-[#8A330B] text-xs font-extrabold"
-                            >
-                              {showMoreQuickUsers ? 'פחות' : `עוד (${filteredUsers.length - 5})`}
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    )}
-
-                    <div className="relative">
-                      <Search className="w-3.5 h-3.5 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2" />
-                      <input
-                        type="text"
-                        value={userSearch}
-                        onChange={(e) => {
-                          const q = e.target.value;
-                          setUserSearch(q);
-                          const matches = filterUsersByNameOrPhone(
-                            q,
-                            orderType === 'supplier'
-                              ? users.filter((u) => u.role === 'supplier')
-                              : users.filter((u) => u.role !== 'admin')
-                          );
-                          if (q.replace(/\D/g, '').length === 4 && matches.length === 1) {
-                            applySelectedUser(matches[0]);
-                          }
-                        }}
-                        placeholder="חפש בהקלדת תחילת שם או 4 ספרות אחרונות (1015, 9917)"
-                        className="w-full pr-9 pl-3 py-2 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] text-xs"
-                      />
-                    </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <div className="flex flex-wrap items-center gap-1.5 pt-1 border-t border-[#E8D5BE]/60 text-[11px]">
+                    {hasFlavors && (
                       <select
-                        value={selectedUserId}
-                        onChange={(e) => {
-                          const found = users.find((u) => String(u.id) === e.target.value) || null;
-                          applySelectedUser(found);
-                        }}
-                        className="px-3 py-2 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] text-sm"
+                        value={it.flavor || 'רגיל'}
+                        onChange={(e) =>
+                          setParsedItems((prev) =>
+                            prev.map((row) =>
+                              row.lineId === it.lineId ? { ...row, flavor: e.target.value } : row
+                            )
+                          )
+                        }
+                        className="px-2 py-0.5 rounded-lg border border-[#E8D5BE] bg-white font-bold text-slate-700"
                       >
-                        <option value="">ללא חשבון (לקוח מזדמן)</option>
-                        {filteredUsers.map((u) => (
-                          <option key={u.id} value={u.id}>
-                            {u.name} {u.phone ? `(${getPhoneLast4(u.phone)})` : ''}
+                        {flavorList.map((fl) => (
+                          <option key={fl} value={fl}>
+                            טעם: {fl}
                           </option>
                         ))}
                       </select>
-                      <input
-                        type="text"
-                        required={!selectedUserId}
-                        value={recipientName}
-                        onChange={(e) => setRecipientName(e.target.value)}
-                        placeholder="שם מקבל ההזמנה"
-                        className="px-3 py-2 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] text-sm"
-                      />
-                    </div>
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 p-3 rounded-xl bg-[#FFF7ED]/70 border border-[#E8D5BE]">
-                    <input
-                      type="text"
-                      required
-                      value={recipientName}
-                      onChange={(e) => setRecipientName(e.target.value)}
-                      placeholder={orderType === 'supplier' ? 'שם הספק החדש' : 'שם הלקוח החדש'}
-                      className="px-3 py-2 rounded-xl border border-[#E8D5BE] bg-white text-sm"
-                    />
-                    <input
-                      type="tel"
-                      inputMode="tel"
-                      value={newUserPhone}
-                      onChange={(e) => setNewUserPhone(e.target.value)}
-                      placeholder="טלפון נייד"
-                      className="px-3 py-2 rounded-xl border border-[#E8D5BE] bg-white text-sm tabular-nums"
-                    />
-                  </div>
-                )}
-              </div>
-            ) : (
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  שם הגוף / המשפחה (הזמנה מסובסדת — סעיף סבסוד נפרד)
-                </label>
-                <div className="flex flex-wrap gap-1.5 mb-2">
-                  {['הכולל', 'משפחה 1', 'משפחה 2'].map((preset) => (
-                    <button
-                      key={preset}
-                      type="button"
-                      onClick={() => setRecipientName(preset)}
-                      className={`px-2.5 py-1 rounded-lg text-xs font-bold border ${
-                        recipientName === preset
-                          ? 'bg-purple-700 text-white border-purple-700'
-                          : 'bg-purple-50 text-purple-900 border-purple-200'
-                      }`}
-                    >
-                      {preset}
-                    </button>
-                  ))}
-                </div>
-                <input
-                  type="text"
-                  required
-                  value={recipientName}
-                  onChange={(e) => setRecipientName(e.target.value)}
-                  placeholder="לדוגמה: הכולל / משפחה 1 / משפחה 2"
-                  className="w-full px-3.5 py-2 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] text-sm"
-                />
-              </div>
-            )}
+                    )}
 
-            {/* משלוח / הנחה (₪ או %) / תשלום / מע״מ 18% */}
-            {orderType !== 'charity' && (
-              <div className="space-y-2.5">
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                  <div>
-                    <label className="block text-[11px] font-semibold text-slate-500 mb-1">משלוח (₪)</label>
-                    <input
-                      type="number"
-                      inputMode="decimal"
-                      min="0"
-                      step="0.5"
-                      dir="ltr"
-                      value={deliveryFee}
-                      onChange={(e) => setDeliveryFee(e.target.value)}
-                      className="w-full px-2.5 py-1.5 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] text-left tabular-nums text-sm font-bold"
-                    />
-                  </div>
-                  <div>
-                    <div className="flex items-center justify-between mb-1">
-                      <label className="text-[11px] font-semibold text-slate-500">הנחה</label>
+                    {bundleAvailable && (
                       <button
                         type="button"
-                        onClick={() => setDiscountMode((m) => (m === 'fixed' ? 'percent' : 'fixed'))}
-                        className="text-[10px] font-extrabold px-1.5 py-0.5 rounded bg-amber-100 text-amber-900"
+                        onClick={() =>
+                          setParsedItems((prev) =>
+                            prev.map((row) =>
+                              row.lineId === it.lineId
+                                ? { ...row, applyBundle: !row.applyBundle, overrideUnitPrice: undefined }
+                                : row
+                            )
+                          )
+                        }
+                        className={`px-2 py-0.5 rounded-lg font-bold border ${
+                          it.applyBundle && it.overrideUnitPrice === undefined
+                            ? 'bg-emerald-50 border-emerald-400 text-emerald-800'
+                            : 'bg-white border-[#E8D5BE] text-slate-500'
+                        }`}
                       >
-                        {discountMode === 'fixed' ? '₪' : '%'}
+                        {it.applyBundle && it.overrideUnitPrice === undefined
+                          ? '✓ מבצע כמות'
+                          : 'מחיר יחידה רגיל'}
                       </button>
-                    </div>
-                    <input
-                      type="number"
-                      inputMode="decimal"
-                      min="0"
-                      step="0.5"
-                      dir="ltr"
-                      value={discountValue}
-                      onChange={(e) => setDiscountValue(e.target.value)}
-                      className="w-full px-2.5 py-1.5 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] text-left tabular-nums text-sm font-bold"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[11px] font-semibold text-slate-500 mb-1">שולם מראש (₪)</label>
-                    <input
-                      type="number"
-                      inputMode="decimal"
-                      min="0"
-                      step="0.5"
-                      dir="ltr"
-                      value={paidAmount}
-                      onChange={(e) => setPaidAmount(e.target.value)}
-                      className="w-full px-2.5 py-1.5 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] text-left tabular-nums text-sm font-bold"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[11px] font-semibold text-slate-500 mb-1">אמצעי תשלום</label>
-                    <select
-                      value={paymentMethod}
-                      onChange={(e) => setPaymentMethod(e.target.value as PaymentMethod)}
-                      className="w-full px-2.5 py-1.5 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] text-sm"
-                    >
-                      {(['cash', 'paybox', 'transfer'] as const).map((pm) => (
-                        <option key={pm} value={pm}>
-                          {PAYMENT_METHOD_LABELS[pm]}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
+                    )}
 
-                {/* מתג מע״מ 18% */}
-                <label className="inline-flex items-center gap-2.5 px-3 py-2 rounded-xl bg-[#FAF6F0] border border-[#E8D5BE] cursor-pointer select-none">
-                  <input
-                    type="checkbox"
-                    checked={includeVat}
-                    onChange={(e) => setIncludeVat(e.target.checked)}
-                    className="w-4 h-4 rounded accent-[#C85A17]"
-                  />
-                  <span className="text-xs font-bold text-slate-800">+ מע״מ 18%</span>
-                  {includeVat && (
-                    <span className="text-xs font-extrabold text-[#C85A17] tabular-nums">
-                      ({formatILS(totals.vatAmount)})
-                    </span>
-                  )}
-                </label>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* טבלת הפריטים שפוענחו + הוספה ידנית */}
-        <div className="border-t border-[#F3E9DC] pt-4 space-y-3">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <h4 className="text-sm font-bold text-slate-800">
-              פריטים שפוענחו ({parsedItems.length})
-            </h4>
-            <div className="flex items-center gap-2">
-              <select
-                value={addProductId}
-                onChange={(e) => setAddProductId(e.target.value)}
-                className="px-3 py-1.5 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] text-xs font-semibold"
-              >
-                <option value="">+ הוסף מוצר ידנית...</option>
-                {activeProducts.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name} ({formatILS(getUnitPrice(p))})
-                  </option>
-                ))}
-              </select>
-              <button
-                type="button"
-                onClick={handleAddManualProduct}
-                disabled={!addProductId}
-                className="p-1.5 rounded-xl bg-[#FFF7ED] border border-[#C85A17]/40 text-[#C85A17] disabled:opacity-40"
-              >
-                <Plus className="w-4 h-4" />
-              </button>
-            </div>
-          </div>
-
-          {parsedItems.length === 0 ? (
-            <div className="py-5 px-4 rounded-2xl bg-[#FAF6F0] border border-dashed border-[#E8D5BE] text-center text-xs text-slate-500">
-              {hasParsed
-                ? 'לא זוהו מוצרים בהודעה. נסה לערוך את הטקסט או להוסיף מוצרים ידנית.'
-                : 'הדבק הודעת וואטסאפ ולחץ על ״פענח הודעה אוטומטית״ כדי לראות כאן את שורות ההזמנה והמחירים.'}
-            </div>
-          ) : (
-            <div className={compact ? 'space-y-2.5' : 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5'}>
-              {parsedItems.map((it) => {
-                const prod = productMap.get(it.product_id);
-                if (!prod) return null;
-                const baseUnitPrice = getUnitPrice(prod);
-                const hasFlavors = supportsFlavors(prod.name);
-                const bundleAvailable =
-                  orderType === 'customer' &&
-                  getBundleTotal(prod.name, it.quantity, baseUnitPrice) !== null;
-                const lineTotal = getLineTotal(it, prod);
-                const flavorList = prod.flavors && prod.flavors.length > 0 ? prod.flavors : DEFAULT_FLAVORS;
-
-                return (
-                  <div
-                    key={it.lineId}
-                    className="flex flex-col gap-2 p-3 rounded-2xl bg-[#FAF6F0] border border-[#E8D5BE]"
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="min-w-0">
-                        <div className="font-bold text-sm text-slate-900 truncate">
-                          {prod.name}
-                          {it.flavor ? ` (${it.flavor})` : ''}
-                        </div>
-                        <div className="text-[11px] text-slate-500 tabular-nums">
-                          {it.overrideUnitPrice !== undefined
-                            ? `${formatILS(it.overrideUnitPrice)} (ידני) × ${it.quantity} = `
-                            : bundleAvailable && it.applyBundle
-                            ? `מבצע כמות (${it.quantity} יח׳) = `
-                            : `${formatILS(baseUnitPrice)} × ${it.quantity} = `}
-                          <span className="font-bold text-[#8A330B]">{formatILS(lineTotal)}</span>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        <button
-                          type="button"
-                          onClick={() =>
+                    {orderType !== 'charity' && (
+                      <div className="flex items-center gap-1 mr-auto">
+                        <span className="text-slate-500">מחיר ידני:</span>
+                        <input
+                          type="number"
+                          inputMode="decimal"
+                          min="0"
+                          step="0.5"
+                          dir="ltr"
+                          placeholder={String(baseUnitPrice)}
+                          value={it.overrideUnitPrice ?? ''}
+                          onChange={(e) => {
+                            const raw = e.target.value;
                             setParsedItems((prev) =>
                               prev.map((row) =>
                                 row.lineId === it.lineId
-                                  ? { ...row, quantity: Math.max(1, row.quantity - 1) }
+                                  ? {
+                                      ...row,
+                                      overrideUnitPrice: raw === '' ? undefined : Math.max(0, Number(raw)),
+                                    }
                                   : row
-                              )
-                            )
-                          }
-                          className="w-9 h-9 rounded-xl bg-white border border-[#E8D5BE] flex items-center justify-center active:scale-95"
-                          aria-label="הפחת"
-                        >
-                          <Minus className="w-4 h-4" />
-                        </button>
-                        <input
-                          type="number"
-                          inputMode="numeric"
-                          min="1"
-                          value={it.quantity}
-                          onChange={(e) => {
-                            const nextQty = Math.max(1, Math.floor(Number(e.target.value) || 1));
-                            setParsedItems((prev) =>
-                              prev.map((row) =>
-                                row.lineId === it.lineId ? { ...row, quantity: nextQty } : row
                               )
                             );
                           }}
-                          className="w-12 h-9 text-center rounded-xl border border-[#E8D5BE] bg-white font-bold text-sm tabular-nums"
+                          className="w-16 px-1.5 py-0.5 rounded-lg border border-[#E8D5BE] bg-white text-left tabular-nums font-bold"
                         />
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setParsedItems((prev) =>
-                              prev.map((row) =>
-                                row.lineId === it.lineId
-                                  ? { ...row, quantity: row.quantity + 1 }
-                                  : row
-                              )
-                            )
-                          }
-                          className="w-9 h-9 rounded-xl bg-[#C85A17] text-white flex items-center justify-center active:scale-95"
-                          aria-label="הוסף"
-                        >
-                          <Plus className="w-4 h-4" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setParsedItems((prev) => prev.filter((row) => row.lineId !== it.lineId))
-                          }
-                          className="w-8 h-9 rounded-xl text-slate-400 hover:text-red-600 hover:bg-red-50 flex items-center justify-center"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
                       </div>
-                    </div>
-
-                    {/* בחירת טעם + מתג מבצע כמות + עקיפת מחיר ידנית לשורה */}
-                    <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-[#E8D5BE]/60 text-[11px]">
-                      {hasFlavors && (
-                        <select
-                          value={it.flavor || 'רגיל'}
-                          onChange={(e) =>
-                            setParsedItems((prev) =>
-                              prev.map((row) =>
-                                row.lineId === it.lineId ? { ...row, flavor: e.target.value } : row
-                              )
-                            )
-                          }
-                          className="px-2 py-1 rounded-lg border border-[#E8D5BE] bg-white font-bold text-slate-700"
-                        >
-                          {flavorList.map((fl) => (
-                            <option key={fl} value={fl}>
-                              טעם: {fl}
-                            </option>
-                          ))}
-                        </select>
-                      )}
-
-                      {bundleAvailable && (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setParsedItems((prev) =>
-                              prev.map((row) =>
-                                row.lineId === it.lineId
-                                  ? { ...row, applyBundle: !row.applyBundle, overrideUnitPrice: undefined }
-                                  : row
-                              )
-                            )
-                          }
-                          className={`px-2 py-1 rounded-lg font-bold border transition-colors ${
-                            it.applyBundle && it.overrideUnitPrice === undefined
-                              ? 'bg-emerald-50 border-emerald-400 text-emerald-800'
-                              : 'bg-white border-[#E8D5BE] text-slate-500'
-                          }`}
-                        >
-                          {it.applyBundle && it.overrideUnitPrice === undefined
-                            ? '✓ מחיר מבצע כמות'
-                            : 'מחיר יחידה רגיל'}
-                        </button>
-                      )}
-
-                      {orderType !== 'charity' && (
-                        <div className="flex items-center gap-1 mr-auto">
-                          <span className="text-slate-500">מחיר ידני:</span>
-                          <input
-                            type="number"
-                            inputMode="decimal"
-                            min="0"
-                            step="0.5"
-                            dir="ltr"
-                            placeholder={String(baseUnitPrice)}
-                            value={it.overrideUnitPrice ?? ''}
-                            onChange={(e) => {
-                              const raw = e.target.value;
-                              setParsedItems((prev) =>
-                                prev.map((row) =>
-                                  row.lineId === it.lineId
-                                    ? {
-                                        ...row,
-                                        overrideUnitPrice: raw === '' ? undefined : Math.max(0, Number(raw)),
-                                      }
-                                    : row
-                                )
-                              );
-                            }}
-                            className="w-16 px-1.5 py-0.5 rounded-lg border border-[#E8D5BE] bg-white text-left tabular-nums font-bold"
-                          />
-                        </div>
-                      )}
-                    </div>
+                    )}
                   </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
 
-        {/* הערות + שורת סיכום ושמירה */}
-        <div className="flex flex-col md:flex-row items-stretch md:items-center gap-3 pt-2">
-          <input
-            type="text"
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
-            placeholder="הערה להזמנה (שעת איסוף, הוראות אריזה...)"
-            className="flex-1 px-3.5 py-2.5 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] text-sm"
-          />
-
-          <div className="flex items-center justify-between md:justify-end gap-4 bg-[#FAF6F0] px-4 py-2.5 rounded-2xl border border-[#E8D5BE]">
-            <div className="tabular-nums">
-              <div className="text-[11px] text-slate-500">
-                {orderType === 'charity'
-                  ? `עלות סבסוד: ${formatILS(estimatedCost)}`
-                  : `${totals.discountILS > 0 ? `הנחה: -${formatILS(totals.discountILS)} · ` : ''}${
-                      includeVat ? `מע״מ 18%: ${formatILS(totals.vatAmount)} · ` : ''
-                    }עלות: ${formatILS(estimatedCost)}`}
-              </div>
-              <div className="text-xl font-extrabold text-[#C85A17]">{formatILS(totals.total)}</div>
+      {/* 5. משלוח, הנחה (₪ או %), תשלום ומע״מ */}
+      {orderType !== 'charity' && (
+        <div className="grid grid-cols-2 gap-2 pt-1">
+          <div>
+            <label className="block text-[11px] font-semibold text-slate-500 mb-0.5">משלוח (₪)</label>
+            <input
+              type="number"
+              min="0"
+              step="0.5"
+              dir="ltr"
+              value={deliveryFee}
+              onChange={(e) => setDeliveryFee(e.target.value)}
+              className="w-full px-2.5 py-1.5 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] text-left tabular-nums text-xs font-bold"
+            />
+          </div>
+          <div>
+            <div className="flex items-center justify-between mb-0.5">
+              <label className="text-[11px] font-semibold text-slate-500">הנחה להזמנה</label>
+              <button
+                type="button"
+                onClick={() => setDiscountMode((m) => (m === 'fixed' ? 'percent' : 'fixed'))}
+                className="text-[10px] font-extrabold px-1.5 py-0.5 rounded bg-amber-100 text-amber-900"
+              >
+                {discountMode === 'fixed' ? '₪' : '%'}
+              </button>
             </div>
-            <button
-              type="submit"
-              disabled={submitting || parsedItems.length === 0}
-              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[#C85A17] hover:bg-[#A9440F] disabled:opacity-50 text-white font-bold text-sm shadow-sm transition-colors"
+            <input
+              type="number"
+              min="0"
+              step="0.5"
+              dir="ltr"
+              value={discountValue}
+              onChange={(e) => setDiscountValue(e.target.value)}
+              className="w-full px-2.5 py-1.5 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] text-left tabular-nums text-xs font-bold"
+            />
+          </div>
+          <div>
+            <label className="block text-[11px] font-semibold text-slate-500 mb-0.5">שולם מראש (₪)</label>
+            <input
+              type="number"
+              min="0"
+              step="0.5"
+              dir="ltr"
+              value={paidAmount}
+              onChange={(e) => setPaidAmount(e.target.value)}
+              className="w-full px-2.5 py-1.5 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] text-left tabular-nums text-xs font-bold"
+            />
+          </div>
+          <div>
+            <label className="block text-[11px] font-semibold text-slate-500 mb-0.5">אמצעי תשלום</label>
+            <select
+              value={paymentMethod}
+              onChange={(e) => setPaymentMethod(e.target.value as PaymentMethod)}
+              className="w-full px-2.5 py-1.5 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] text-xs font-bold"
             >
-              <Send className="w-4 h-4" />
-              <span>{submitting ? 'שומר...' : 'שמור הזמנה'}</span>
-            </button>
+              {(['cash', 'paybox', 'transfer'] as const).map((pm) => (
+                <option key={pm} value={pm}>
+                  {PAYMENT_METHOD_LABELS[pm]}
+                </option>
+              ))}
+            </select>
           </div>
         </div>
-      </form>
-    </div>
+      )}
+
+      {/* הערות + סיכום ושמירה */}
+      <input
+        type="text"
+        value={notes}
+        onChange={(e) => setNotes(e.target.value)}
+        placeholder="הערה להזמנה (שעת איסוף, הוראות אריזה...)"
+        className="w-full px-3 py-2 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] text-xs"
+      />
+
+      <div className="flex items-center justify-between gap-3 bg-[#FAF6F0] px-3.5 py-2.5 rounded-2xl border border-[#E8D5BE]">
+        <div className="tabular-nums">
+          <div className="text-[11px] text-slate-500">
+            {orderType === 'charity'
+              ? `עלות סבסוד: ${formatILS(estimatedCost)}`
+              : `${totals.discountILS > 0 ? `הנחה: -${formatILS(totals.discountILS)} · ` : ''}עלות: ${formatILS(estimatedCost)}`}
+          </div>
+          <div className="text-lg font-extrabold text-[#C85A17]">{formatILS(totals.total)}</div>
+        </div>
+        <button
+          type="submit"
+          disabled={submitting || parsedItems.length === 0}
+          className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-[#C85A17] hover:bg-[#A9440F] disabled:opacity-50 text-white font-bold text-xs shadow-sm"
+        >
+          <Send className="w-4 h-4" />
+          <span>{submitting ? 'שומר...' : 'שמור הזמנה'}</span>
+        </button>
+      </div>
+    </form>
   );
 }

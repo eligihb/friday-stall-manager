@@ -15,11 +15,11 @@ import { buildWhatsAppShareUrl, formatOrderWhatsApp } from '../lib/whatsappForma
 import { getPaymentVisualState } from './SupplierInvoiceSheet';
 import type { BusinessSettings, Order, OrderStatus, OrderType } from '../types';
 
-const STATUS_STAGES: Array<{ key: OrderStatus; label: string; activeCls: string }> = [
-  { key: 'pending', label: 'ממתין', activeCls: 'bg-slate-800 text-white border-slate-800' },
-  { key: 'received', label: 'התקבל', activeCls: 'bg-sky-600 text-white border-sky-600' },
-  { key: 'ready', label: 'מוכן למסירה', activeCls: 'bg-amber-600 text-white border-amber-600' },
-  { key: 'delivered', label: 'נמסר', activeCls: 'bg-emerald-600 text-white border-emerald-600' },
+const STATUS_STAGES: Array<{ key: OrderStatus; label: string; activeCls: string; barCls: string; step: number }> = [
+  { key: 'pending', label: 'ממתין', activeCls: 'bg-red-600 text-white border-red-600', barCls: 'bg-red-600', step: 1 },
+  { key: 'received', label: 'התקבל', activeCls: 'bg-blue-600 text-white border-blue-600', barCls: 'bg-blue-600', step: 2 },
+  { key: 'ready', label: 'מוכן למסירה', activeCls: 'bg-orange-500 text-white border-orange-500', barCls: 'bg-orange-500', step: 3 },
+  { key: 'delivered', label: 'נמסר', activeCls: 'bg-emerald-600 text-white border-emerald-600', barCls: 'bg-emerald-600', step: 4 },
 ];
 
 interface OrderCardProps {
@@ -79,11 +79,28 @@ export function OrderCard({
       }`}
     >
       <div>
-        {/* כותרת הכרטיסייה */}
-        <div className="flex items-start justify-between gap-2">
+        {/* כותרת הכרטיסייה — לחיצה על שם לקוח פותחת כרטסת, לחיצה על גוף ההזמנה פותחת עריכה */}
+        <div
+          className={`flex items-start justify-between gap-2 ${onEdit ? 'cursor-pointer' : ''}`}
+          onClick={() => onEdit?.(order)}
+        >
           <div className="min-w-0">
             <div className="flex items-center gap-1.5 flex-wrap">
-              <span className="font-bold text-base text-slate-900 truncate">{order.recipient_name}</span>
+              {order.user_id && onOpenLedger ? (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onOpenLedger(order.user_id!);
+                  }}
+                  className="font-bold text-base text-slate-900 hover:text-[#C85A17] hover:underline truncate text-right"
+                  title="פתח כרטיס לקוח/ספק"
+                >
+                  {order.recipient_name}
+                </button>
+              ) : (
+                <span className="font-bold text-base text-slate-900 truncate">{order.recipient_name}</span>
+              )}
               <span className={`px-2 py-0.5 rounded-full text-[11px] font-bold ${typeBadgeCls(order.order_type)}`}>
                 {order.order_type === 'charity' ? 'מסובסד' : ORDER_TYPE_LABELS[order.order_type]}
               </span>
@@ -95,18 +112,23 @@ export function OrderCard({
             </div>
           </div>
 
-          {/* סכום + תגית תשלום צבעונית ברורה (אדום ממתין לתשלום / כתום חלקי / ירוק שולם הכל) */}
+          {/* סכום + תגית תשלום לחיצה הפותחת חלונית אישור תשלום */}
           <div className="text-left shrink-0 tabular-nums space-y-1">
             <div className="font-extrabold text-lg text-slate-900 leading-tight">
               {isCharity ? '₪0.00' : formatILS(order.total_amount)}
             </div>
             {!isCharity ? (
               <div className="flex flex-col items-end gap-0.5">
-                <span
-                  className={`inline-block px-2 py-0.5 rounded-full text-[11px] font-extrabold border ${payState.badgeCls}`}
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onQuickPay?.(order);
+                  }}
+                  className={`inline-block px-2 py-0.5 rounded-full text-[11px] font-extrabold border transition-transform hover:scale-105 ${payState.badgeCls}`}
                 >
                   {payState.label}
-                </span>
+                </button>
                 {payState.status === 'partial' && (
                   <span className="text-[10px] font-bold text-amber-900">
                     שולם {formatILS(order.paid_amount)} · נותר {formatILS(unpaid)}
@@ -120,6 +142,25 @@ export function OrderCard({
             )}
           </div>
         </div>
+
+        {/* סרגל התקדמות ויזואלי 4 שלבים */}
+        {order.status !== 'awaiting_approval' && (() => {
+          const currentStage = STATUS_STAGES.find((s) => s.key === order.status) || STATUS_STAGES[0];
+          return (
+            <div className="mt-2.5">
+              <div className="w-full h-2 rounded-full bg-slate-100 overflow-hidden flex gap-0.5">
+                {STATUS_STAGES.map((st) => (
+                  <div
+                    key={st.key}
+                    className={`flex-1 h-full transition-colors ${
+                      st.step <= currentStage.step ? currentStage.barCls : 'bg-slate-200'
+                    }`}
+                  />
+                ))}
+              </div>
+            </div>
+          );
+        })()}
 
         {/* תגיות פריטים קומפקטיות */}
         <div className="mt-3 flex flex-wrap gap-1.5">

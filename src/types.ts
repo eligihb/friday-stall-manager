@@ -182,8 +182,11 @@ export interface WasteLogResponse {
 
 export interface BusinessSettings {
   business_name: string;
+  business_address?: string;
+  order_phone?: string;
   admin_whatsapp_phone: string;
   default_delivery_fee: number;
+  free_delivery_threshold?: number;
   whatsapp_footer: string;
 }
 

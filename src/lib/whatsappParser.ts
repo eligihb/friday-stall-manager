@@ -49,9 +49,10 @@ const PRODUCT_ALIASES: Record<string, string[]> = {
     'זלאביות',
   ],
 
-  // פרנות — ספציפיים לפני פרנה רגילה
+  // פרנות — ספציפיים לפני פרנה קטנה/רגילה
   'פרנה שום': ['פרנה שום', 'פרנות שום', 'פרנת שום', 'פראנה שום', 'פרנה עם שום'],
   'פרנה גדולה': ['פרנה גדולה', 'פרנות גדולות', 'פראנה גדולה', 'פרנה גדול'],
+  'פרנה קטנה': ['פרנה קטנה', 'פרנות קטנות', 'פרנה', 'פרנות', 'פראנה', 'פראנות', 'פרנה רגילה'],
   'פרנה': ['פרנה', 'פרנות', 'פראנה', 'פראנות', 'פרנה קטנה', 'פרנה רגילה'],
 
   // פיתות פלאפל (רק כשצוין פלאפל במפורש!)
@@ -65,10 +66,26 @@ const PRODUCT_ALIASES: Record<string, string[]> = {
     'פלאפל',
   ],
 
-  // סאלוף — כולל מיפוי מדויק של "פיתות" / "פיתה" בודדות לסאלוף (לא לפיתת פלאפל!)
+  // סלוף / סאלוף — כולל מיפוי מדויק של "פיתות" / "פיתה" בודדות לסאלוף
+  'סלוף': ['סלוף', 'סלופים', 'סאלוף', 'סאלופים', 'סלופ', 'סאלופ', 'פיתות', 'פיתה'],
   'סאלוף': ['סאלוף', 'סאלופים', 'סלוף', 'סלופים', 'סלופ', 'סאלופ', 'פיתות', 'פיתה'],
 
-  // חילבה
+  // חילבה / חלבה (כולל אות חיבור "ו")
+  'חילבה גדולה': [
+    'חילבה גדולה',
+    'חילבה גדול',
+    'חלבה גדולה',
+    'חלבה גדול',
+    'וחילבה גדולה',
+    'וחילבה גדול',
+    'וחלבה גדולה',
+    'וחלבה גדול',
+    "חילבה 500 ג'",
+    'חילבה 500 גרם',
+    'חילבה 500',
+    'חצי קילו חילבה',
+    'חילבה חצי קילו',
+  ],
   "חילבה 500 ג'": [
     "חילבה 500 ג'",
     'חילבה 500 גרם',
@@ -77,6 +94,28 @@ const PRODUCT_ALIASES: Record<string, string[]> = {
     'חילבה חצי קילו',
     'חילבה גדולה',
     'חילבה גדול',
+    'חלבה גדולה',
+    'חלבה גדול',
+    'וחילבה גדולה',
+    'וחילבה גדול',
+    'וחלבה גדולה',
+    'וחלבה גדול',
+  ],
+  'חילבה קטנה': [
+    'חילבה קטנה',
+    'חילבה קטן',
+    'חלבה קטנה',
+    'חלבה קטן',
+    'וחילבה קטנה',
+    'וחלבה קטנה',
+    'חילבה',
+    'חלבה',
+    'וחילבה',
+    'וחלבה',
+    "חילבה 250 ג'",
+    'חילבה 250 גרם',
+    'חילבה 250',
+    'רבע קילו חילבה',
   ],
   "חילבה 250 ג'": [
     "חילבה 250 ג'",
@@ -85,7 +124,14 @@ const PRODUCT_ALIASES: Record<string, string[]> = {
     'רבע קילו חילבה',
     'חילבה קטנה',
     'חילבה קטן',
+    'חלבה קטנה',
+    'חלבה קטן',
+    'וחילבה קטנה',
+    'וחלבה קטנה',
     'חילבה',
+    'חלבה',
+    'וחילבה',
+    'וחלבה',
   ],
 
   'לחוח': ['לחוח', 'לחוחים', 'לחוך', 'לאחוח', 'לחוחה'],
@@ -129,8 +175,9 @@ const HEBREW_NUMBERS: Record<string, number> = {
 
 function normalizeHebrew(text: string): string {
   return text
+    .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}]/gu, ' ')
     .replace(/[״"׳'`]/g, "'")
-    .replace(/[•▪◦*!?.]/g, ' ')
+    .replace(/[•▪◦*!?.:_~()[\]]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -140,11 +187,11 @@ function stripGreetingsAndFillers(segment: string): string {
   const fillerPatterns = [
     /(^|\s)(היי|הי|שלום|אהלן)\s+אליאב(?=\s|$)/gi,
     /(^|\s)אליאב\s+(היי|הי|שלום|בוקר טוב|ערב טוב|אהלן|תודה)(?=\s|$)/gi,
-    /(^|\s)(בוקר טוב|צהריים טובים|ערב טוב|שבת שלום|שבוע טוב|תודה רבה|חג שמח|מה נשמע|מה קורה|מה שלומך)(?=\s|$)/gi,
-    /(^|\s)(אליאב|היי|הי|שלום|אהלן|תודה|בבקשה|אפשר|רוצה|להזמין|הזמנה ל?שישי|לשישי|וגם|גם|ועוד|עוד|אני צריך|אני צריכה|אשמח ל?|תכין לי|תשמור לי)(?=\s|$)/gi,
+    /(^|\s)(אני אשמח להזמין|אשמח להזמין|רציתי להזמין|רוצה להזמין|אפשר להזמין|תודה רבה|תודה מראש|בוקר טוב|צהריים טובים|ערב טוב|שבת שלום|שבוע טוב|חג שמח|מה נשמע|מה קורה|מה שלומך)(?=\s|$)/gi,
+    /(^|\s)(אליאב|היי|הי|שלום|אהלן|תודה|בבקשה|אפשר|רוצה|להזמין|הזמנה ל?שישי|לשישי|וגם|גם|ועוד|עוד|אני צריך|אני צריכה|אני אשמח|אשמח ל?|תכין לי|תשמור לי)(?=\s|$)/gi,
     /(^|\s)(יח'|יחידות|יח|חתיכות|מארזים|קופסאות|קופסה|מארז)(?=\s|$)/gi,
   ];
-  for (let pass = 0; pass < 2; pass++) {
+  for (let pass = 0; pass < 3; pass++) {
     for (const pat of fillerPatterns) {
       s = s.replace(pat, ' ');
     }
@@ -262,7 +309,7 @@ export function parseWhatsAppMessage(
   );
 
   const rawSegments = cleaned
-    .split(/[\n,;+]+/)
+    .split(/[\n,;+.!/|]+/)
     .map((s) => s.trim())
     .filter(Boolean);
 
@@ -284,48 +331,80 @@ export function parseWhatsAppMessage(
       }
     }
 
-    const segLower = seg.toLowerCase();
+    let working = seg.toLowerCase();
+    let matchedAnyInSeg = false;
 
-    let matchedCandidate: (typeof candidates)[number] | null = null;
-    for (const c of candidates) {
-      if (segLower.includes(c.normalizedAlias)) {
-        matchedCandidate = c;
-        break;
-      }
-    }
-
-    if (!matchedCandidate) {
-      if (/\d/.test(seg) || seg.length >= 4) {
-        unmatched.push(rawSeg);
-      }
-      continue;
-    }
-
-    const remainder = segLower.replace(matchedCandidate.normalizedAlias, ' ').trim();
-
-    let quantity = 1;
-    const digitMatch = remainder.match(/(\d+)/);
-    if (digitMatch) {
-      quantity = Math.max(1, parseInt(digitMatch[1], 10));
-    } else {
-      for (const [word, val] of Object.entries(HEBREW_NUMBERS)) {
-        if (new RegExp(`(^|\\s)${word}($|\\s)`).test(remainder)) {
-          quantity = val;
+    // פיצול וחילוץ של מספר פריטים צמודים באותה שורה (למשל "2 סלוף 3 לחוח" או "סלוף וחלבה גדול")
+    for (let iter = 0; iter < 8; iter++) {
+      let matchedCandidate: (typeof candidates)[number] | null = null;
+      let matchIdx = -1;
+      for (const c of candidates) {
+        const idx = working.indexOf(c.normalizedAlias);
+        if (idx >= 0) {
+          matchedCandidate = c;
+          matchIdx = idx;
           break;
         }
       }
+      if (!matchedCandidate) break;
+      matchedAnyInSeg = true;
+
+      const beforeText = working.slice(0, matchIdx).trim();
+      const afterText = working.slice(matchIdx + matchedCandidate.normalizedAlias.length).trim();
+
+      let quantity = 1;
+      let consumedBefore = beforeText;
+      let consumedAfter = afterText;
+
+      const beforeNum = beforeText.match(/(\d+)\s*$/);
+      const afterNum = afterText.match(/^(\d+)\b/);
+
+      if (beforeNum) {
+        quantity = Math.max(1, parseInt(beforeNum[1], 10));
+        consumedBefore = beforeText.slice(0, beforeNum.index).trim();
+      } else if (afterNum && !candidates.some((c) => afterText.slice(afterNum[0].length).trim().startsWith(c.normalizedAlias))) {
+        quantity = Math.max(1, parseInt(afterNum[1], 10));
+        consumedAfter = afterText.slice(afterNum[0].length).trim();
+      } else {
+        for (const [word, val] of Object.entries(HEBREW_NUMBERS)) {
+          if (new RegExp(`(^|\\s)${word}$`).test(beforeText)) {
+            quantity = val;
+            consumedBefore = beforeText.replace(new RegExp(`(^|\\s)${word}$`), '').trim();
+            break;
+          }
+          if (new RegExp(`^${word}($|\\s)`).test(afterText)) {
+            quantity = val;
+            consumedAfter = afterText.replace(new RegExp(`^${word}($|\\s)`), '').trim();
+            break;
+          }
+        }
+      }
+
+      const existing = aggregated.get(matchedCandidate.product.id);
+      if (existing) {
+        existing.quantity += quantity;
+        existing.rawSegments.push(rawSeg);
+      } else {
+        aggregated.set(matchedCandidate.product.id, {
+          product: matchedCandidate.product,
+          quantity,
+          rawSegments: [rawSeg],
+        });
+      }
+
+      working = `${consumedBefore} ${consumedAfter}`.replace(/\s+/g, ' ').trim();
+      if (!working) break;
     }
 
-    const existing = aggregated.get(matchedCandidate.product.id);
-    if (existing) {
-      existing.quantity += quantity;
-      existing.rawSegments.push(rawSeg);
-    } else {
-      aggregated.set(matchedCandidate.product.id, {
-        product: matchedCandidate.product,
-        quantity,
-        rawSegments: [rawSeg],
-      });
+    if (!matchedAnyInSeg) {
+      if (/\d/.test(seg) || seg.length >= 4) {
+        unmatched.push(rawSeg);
+      }
+    } else if (working) {
+      const leftover = stripGreetingsAndFillers(working).replace(/^[ו\s]+/, '').trim();
+      if (leftover.length >= 3 && /[א-ת]/.test(leftover)) {
+        unmatched.push(leftover);
+      }
     }
   }
 

@@ -14,6 +14,7 @@ import {
   Filter,
   PlayCircle,
   AlertOctagon,
+  Calculator,
 } from 'lucide-react';
 import { apiFetch } from '../lib/api';
 import { formatHebrewDate, formatILS, getNextFridayISO, PAYMENT_METHOD_LABELS } from '../lib/format';
@@ -64,17 +65,43 @@ export function FinancePage() {
   const [expNotes, setExpNotes] = useState('');
   const [savingExp, setSavingExp] = useState(false);
 
-  // מודאל תנועה כללית
+  // מודאל תנועה כללית / הוספת הוצאה / עריכת הוצאה
   const [showTxModal, setShowTxModal] = useState(false);
+  const [editingTx, setEditingTx] = useState<Transaction | null>(null);
+  const [txIsGeneral, setTxIsGeneral] = useState(false);
   const [txForm, setTxForm] = useState({
     date: new Date().toISOString().slice(0, 10),
     friday_date: getNextFridayISO(),
-    type: 'income' as 'income' | 'expense',
+    type: 'expense' as 'income' | 'expense',
     category: '',
     payment_method: 'cash' as PaymentMethod,
     amount: '',
     notes: '',
   });
+
+  // מחשבון פדיון וספירת קופה (שטרות ומטבעות + עודף פתיחה)
+  const [calcOpen, setCalcOpen] = useState(false);
+  const [openingFloat, setOpeningFloat] = useState('200');
+  const [cashCounts, setCashCounts] = useState<Record<string, string>>({
+    '200': '',
+    '100': '',
+    '50': '',
+    '20': '',
+    '10': '',
+    '5': '',
+    '2': '',
+    '1': '',
+    '0.5': '',
+    '0.1': '',
+  });
+
+  const cashCalcTotals = useMemo(() => {
+    const denoms = [200, 100, 50, 20, 10, 5, 2, 1, 0.5, 0.1];
+    const gross = denoms.reduce((sum, d) => sum + d * (Number(cashCounts[String(d)]) || 0), 0);
+    const floatVal = Math.max(0, Number(openingFloat) || 0);
+    const net = Math.max(0, Math.round((gross - floatVal) * 100) / 100);
+    return { gross: Math.round(gross * 100) / 100, floatVal, net };
+  }, [cashCounts, openingFloat]);
 
   // מודאל הוצאה קבועה (יצירה / עריכה)
   const [showFixedModal, setShowFixedModal] = useState(false);
@@ -215,20 +242,54 @@ export function FinancePage() {
     }
   };
 
+  const openAddExpenseModal = () => {
+    setEditingTx(null);
+    setTxIsGeneral(false);
+    setTxForm({
+      date: new Date().toISOString().slice(0, 10),
+      friday_date: getNextFridayISO(),
+      type: 'expense',
+      category: EXPENSE_PRESETS[0].label,
+      payment_method: 'cash',
+      amount: '',
+      notes: '',
+    });
+    setShowTxModal(true);
+  };
+
+  const openEditTxModal = (t: Transaction) => {
+    setEditingTx(t);
+    setTxIsGeneral(!t.friday_date);
+    setTxForm({
+      date: t.date,
+      friday_date: t.friday_date || getNextFridayISO(),
+      type: t.type,
+      category: t.category,
+      payment_method: t.payment_method,
+      amount: String(t.amount),
+      notes: t.notes || '',
+    });
+    setShowTxModal(true);
+  };
+
   const handleCreateTx = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
+      if (editingTx) {
+        await apiFetch(`/api/finance/transactions/${editingTx.id}`, { method: 'DELETE' });
+      }
       await apiFetch('/api/finance/transactions', {
         method: 'POST',
         body: JSON.stringify({
           ...txForm,
-          friday_date: txForm.friday_date || null,
+          friday_date: txIsGeneral ? null : txForm.friday_date || null,
           amount: Number(txForm.amount),
         }),
       });
       setShowTxModal(false);
+      setEditingTx(null);
       setTxForm((f) => ({ ...f, category: '', amount: '', notes: '' }));
-      showToast('התנועה נשמרה ביומן!');
+      showToast(editingTx ? 'התנועה עודכנה ביומן!' : 'התנועה נשמרה ביומן!');
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'שגיאה ברישום תנועה');
@@ -339,6 +400,22 @@ export function FinancePage() {
         <div className="flex flex-wrap gap-2 w-full sm:w-auto">
           <button
             type="button"
+            onClick={openAddExpenseModal}
+            className="flex-1 sm:flex-none min-h-[48px] md:min-h-[40px] inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 text-white font-bold text-xs shadow-sm"
+          >
+            <Plus className="w-4 h-4 shrink-0" />
+            <span>+ הוסף הוצאה</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setCalcOpen(true)}
+            className="flex-1 sm:flex-none min-h-[48px] md:min-h-[40px] inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl bg-[#FFF7ED] hover:bg-[#FFEDD5] border border-[#C85A17]/40 text-[#8A330B] font-bold text-xs shadow-sm"
+          >
+            <Calculator className="w-4 h-4 shrink-0" />
+            <span>מחשבון פדיון וקופה</span>
+          </button>
+          <button
+            type="button"
             onClick={() => setWasteOpen(true)}
             className="flex-1 sm:flex-none min-h-[48px] md:min-h-[40px] inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-red-50 hover:bg-red-100 border border-red-200 text-red-800 font-bold text-xs shadow-sm"
           >
@@ -349,7 +426,11 @@ export function FinancePage() {
           </button>
           <button
             type="button"
-            onClick={() => setShowTxModal(true)}
+            onClick={() => {
+              setEditingTx(null);
+              setTxIsGeneral(false);
+              setShowTxModal(true);
+            }}
             className="flex-1 sm:flex-none min-h-[48px] md:min-h-[40px] inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-[#1E242B] hover:bg-slate-800 text-white font-bold text-xs shadow-sm"
           >
             <Plus className="w-4 h-4 shrink-0" />
@@ -569,28 +650,58 @@ export function FinancePage() {
         </form>
       </div>
 
-      {/* כרטיסי תזרים לפי 3 אמצעי התשלום (לפי הסינון הנוכחי) */}
+      {/* כרטיסי תזרים לחיצים לפירוט וסינון מהיר */}
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 tabular-nums">
-        <div className="bg-white rounded-2xl p-4 border border-[#E8D5BE]/80 shadow-soft">
-          <div className="text-xs font-bold text-slate-500">הכנסות (מסונן)</div>
+        <button
+          type="button"
+          onClick={() => setFilterType((cur) => (cur === 'income' ? '' : 'income'))}
+          className={`text-right bg-white rounded-2xl p-4 border shadow-soft transition-all ${
+            filterType === 'income' ? 'border-emerald-500 ring-2 ring-emerald-200' : 'border-[#E8D5BE]/80 hover:border-emerald-300'
+          }`}
+        >
+          <div className="text-xs font-bold text-slate-500">הכנסות (לחץ לפירוט)</div>
           <div className="text-xl font-extrabold text-emerald-700 mt-1">{formatILS(summary.income)}</div>
-        </div>
-        <div className="bg-white rounded-2xl p-4 border border-[#E8D5BE]/80 shadow-soft">
-          <div className="text-xs font-bold text-slate-500">הוצאות (מסונן)</div>
+        </button>
+        <button
+          type="button"
+          onClick={() => setFilterType((cur) => (cur === 'expense' ? '' : 'expense'))}
+          className={`text-right bg-white rounded-2xl p-4 border shadow-soft transition-all ${
+            filterType === 'expense' ? 'border-red-500 ring-2 ring-red-200' : 'border-[#E8D5BE]/80 hover:border-red-300'
+          }`}
+        >
+          <div className="text-xs font-bold text-slate-500">הוצאות (לחץ לפירוט)</div>
           <div className="text-xl font-extrabold text-red-700 mt-1">{formatILS(summary.expense)}</div>
-        </div>
-        <div className="bg-white rounded-2xl p-4 border border-emerald-200 shadow-soft">
+        </button>
+        <button
+          type="button"
+          onClick={() => setFilterPayment((cur) => (cur === 'cash' ? '' : 'cash'))}
+          className={`text-right bg-white rounded-2xl p-4 border shadow-soft transition-all ${
+            filterPayment === 'cash' ? 'border-emerald-600 ring-2 ring-emerald-200' : 'border-emerald-200 hover:border-emerald-400'
+          }`}
+        >
           <div className="text-xs font-bold text-emerald-800">נטו מזומן</div>
           <div className="text-xl font-extrabold text-slate-900 mt-1">{formatILS(summary.cashNet)}</div>
-        </div>
-        <div className="bg-white rounded-2xl p-4 border border-sky-200 shadow-soft">
+        </button>
+        <button
+          type="button"
+          onClick={() => setFilterPayment((cur) => (cur === 'paybox' ? '' : 'paybox'))}
+          className={`text-right bg-white rounded-2xl p-4 border shadow-soft transition-all ${
+            filterPayment === 'paybox' ? 'border-sky-600 ring-2 ring-sky-200' : 'border-sky-200 hover:border-sky-400'
+          }`}
+        >
           <div className="text-xs font-bold text-sky-800">נטו פייבוקס</div>
           <div className="text-xl font-extrabold text-slate-900 mt-1">{formatILS(summary.payboxNet)}</div>
-        </div>
-        <div className="bg-white rounded-2xl p-4 border border-amber-200 shadow-soft">
+        </button>
+        <button
+          type="button"
+          onClick={() => setFilterPayment((cur) => (cur === 'transfer' ? '' : 'transfer'))}
+          className={`text-right bg-white rounded-2xl p-4 border shadow-soft transition-all ${
+            filterPayment === 'transfer' ? 'border-amber-600 ring-2 ring-amber-200' : 'border-amber-200 hover:border-amber-400'
+          }`}
+        >
           <div className="text-xs font-bold text-amber-800">נטו העברה בנקאית</div>
           <div className="text-xl font-extrabold text-slate-900 mt-1">{formatILS(summary.transferNet)}</div>
-        </div>
+        </button>
       </div>
 
       {/* יומן תנועות + הוצאות קבועות */}
@@ -694,8 +805,17 @@ export function FinancePage() {
                     </span>
                     <button
                       type="button"
+                      onClick={() => openEditTxModal(t)}
+                      className="p-1.5 rounded-lg text-slate-400 hover:text-amber-700 hover:bg-amber-50"
+                      title="ערוך תנועה"
+                    >
+                      <Edit3 className="w-4 h-4" />
+                    </button>
+                    <button
+                      type="button"
                       onClick={() => handleDeleteTx(t.id)}
                       className="p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50"
+                      title="מחק תנועה"
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>
@@ -805,12 +925,15 @@ export function FinancePage() {
         onSaved={load}
       />
 
-      {/* חלונית תנועה ידנית */}
+      {/* חלונית תנועה ידנית / הוספה ועריכת הוצאה */}
       <BottomSheet
         open={showTxModal}
-        onClose={() => setShowTxModal(false)}
-        title="רישום תנועה ידנית"
-        subtitle="הוספת הכנסה או הוצאה ישירות ליומן הכספים"
+        onClose={() => {
+          setShowTxModal(false);
+          setEditingTx(null);
+        }}
+        title={editingTx ? 'עריכת תנועה / הוצאה' : txForm.type === 'expense' ? 'הוספת הוצאה' : 'רישום תנועה ידנית'}
+        subtitle="ניתן לשייך לתאריך שישי ספציפי או לסמן כהוצאה כללית"
         maxWidthClass="md:max-w-md"
       >
         <form onSubmit={handleCreateTx} className="space-y-3.5">
@@ -818,7 +941,7 @@ export function FinancePage() {
             <button
               type="button"
               onClick={() => setTxForm({ ...txForm, type: 'income' })}
-              className={`min-h-[48px] py-2 rounded-xl text-sm font-bold border ${
+              className={`min-h-[44px] py-2 rounded-xl text-sm font-bold border ${
                 txForm.type === 'income'
                   ? 'bg-emerald-600 text-white border-emerald-600'
                   : 'border-[#E8D5BE] text-slate-600'
@@ -829,7 +952,7 @@ export function FinancePage() {
             <button
               type="button"
               onClick={() => setTxForm({ ...txForm, type: 'expense' })}
-              className={`min-h-[48px] py-2 rounded-xl text-sm font-bold border ${
+              className={`min-h-[44px] py-2 rounded-xl text-sm font-bold border ${
                 txForm.type === 'expense'
                   ? 'bg-red-600 text-white border-red-600'
                   : 'border-[#E8D5BE] text-slate-600'
@@ -838,6 +961,26 @@ export function FinancePage() {
               הוצאה
             </button>
           </div>
+          <label className="inline-flex items-center gap-2 text-xs font-bold text-slate-700 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={txIsGeneral}
+              onChange={(e) => setTxIsGeneral(e.target.checked)}
+              className="w-4 h-4 accent-[#C85A17]"
+            />
+            <span>הוצאה/תנועה כללית (אינה שייכת לתאריך שישי ספציפי)</span>
+          </label>
+          {!txIsGeneral && (
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 mb-1">שיוך לתאריך שישי</label>
+              <input
+                type="date"
+                value={txForm.friday_date}
+                onChange={(e) => setTxForm({ ...txForm, friday_date: e.target.value })}
+                className="w-full px-3.5 py-2 rounded-xl border border-[#E8D5BE] text-sm"
+              />
+            </div>
+          )}
           <div>
             <label className="block text-xs font-semibold text-slate-600 mb-1">קטגוריה / תיאור</label>
             <input
@@ -988,6 +1131,137 @@ export function FinancePage() {
             {editingFixed ? 'עדכן הוצאה קבועה' : 'שמור הוצאה קבועה'}
           </button>
         </form>
+      </BottomSheet>
+
+      {/* מחשבון פדיון וספירת קופה לפי שטרות ומטבעות + הפחתת עודף פתיחת יום */}
+      <BottomSheet
+        open={calcOpen}
+        onClose={() => setCalcOpen(false)}
+        title="מחשבון פדיון וספירת קופה"
+        subtitle="ספירת שטרות ומטבעות והפחתה אוטומטית של עודף פתיחת היום"
+        maxWidthClass="md:max-w-xl"
+      >
+        <div className="space-y-4">
+          <div className="p-3.5 rounded-2xl bg-amber-50/80 border border-amber-200 flex items-center justify-between gap-3">
+            <div>
+              <div className="text-xs font-extrabold text-amber-950">סכום פתיחת יום (עודף התחלתי)</div>
+              <div className="text-[11px] text-amber-800">מופחת אוטומטית מסך המזומן בקופה</div>
+            </div>
+            <input
+              type="number"
+              inputMode="decimal"
+              min="0"
+              step="10"
+              dir="ltr"
+              value={openingFloat}
+              onChange={(e) => setOpeningFloat(e.target.value)}
+              className="w-28 px-3 py-2 rounded-xl border border-amber-300 bg-white text-left tabular-nums font-extrabold text-sm"
+            />
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {/* שטרות */}
+            <div className="space-y-2">
+              <div className="text-xs font-extrabold text-slate-700">שטרות (₪)</div>
+              {(['200', '100', '50', '20'] as const).map((d) => {
+                const cnt = Number(cashCounts[d]) || 0;
+                return (
+                  <div key={d} className="flex items-center justify-between gap-2 p-2 rounded-xl bg-[#FAF6F0] border border-[#E8D5BE]">
+                    <span className="font-extrabold text-sm text-slate-800 w-12 tabular-nums">₪{d}</span>
+                    <input
+                      type="number"
+                      inputMode="numeric"
+                      min="0"
+                      dir="ltr"
+                      placeholder="כמות"
+                      value={cashCounts[d]}
+                      onChange={(e) => setCashCounts((prev) => ({ ...prev, [d]: e.target.value }))}
+                      className="w-20 px-2.5 py-1.5 rounded-lg border border-[#E8D5BE] bg-white text-left tabular-nums font-bold text-sm"
+                    />
+                    <span className="text-xs font-bold text-emerald-700 w-20 text-left tabular-nums">
+                      {formatILS(Number(d) * cnt)}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* מטבעות */}
+            <div className="space-y-2">
+              <div className="text-xs font-extrabold text-slate-700">מטבעות (₪)</div>
+              {(['10', '5', '2', '1', '0.5', '0.1'] as const).map((d) => {
+                const cnt = Number(cashCounts[d]) || 0;
+                return (
+                  <div key={d} className="flex items-center justify-between gap-2 p-2 rounded-xl bg-[#FAF6F0] border border-[#E8D5BE]">
+                    <span className="font-extrabold text-sm text-slate-800 w-12 tabular-nums">₪{d}</span>
+                    <input
+                      type="number"
+                      inputMode="numeric"
+                      min="0"
+                      dir="ltr"
+                      placeholder="כמות"
+                      value={cashCounts[d]}
+                      onChange={(e) => setCashCounts((prev) => ({ ...prev, [d]: e.target.value }))}
+                      className="w-20 px-2.5 py-1.5 rounded-lg border border-[#E8D5BE] bg-white text-left tabular-nums font-bold text-sm"
+                    />
+                    <span className="text-xs font-bold text-emerald-700 w-20 text-left tabular-nums">
+                      {formatILS(Number(d) * cnt)}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="p-4 rounded-2xl bg-[#1E242B] text-white space-y-2 tabular-nums">
+            <div className="flex justify-between text-xs text-slate-300">
+              <span>סה״כ מזומן שנספר בקופה:</span>
+              <span className="font-bold">{formatILS(cashCalcTotals.gross)}</span>
+            </div>
+            <div className="flex justify-between text-xs text-amber-300">
+              <span>פחות עודף פתיחת יום:</span>
+              <span className="font-bold">-{formatILS(cashCalcTotals.floatVal)}</span>
+            </div>
+            <div className="flex justify-between text-lg font-extrabold text-emerald-400 pt-2 border-t border-white/15">
+              <span>פדיון מזומן נטו ליום:</span>
+              <span>{formatILS(cashCalcTotals.net)}</span>
+            </div>
+          </div>
+
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() =>
+                setCashCounts({
+                  '200': '',
+                  '100': '',
+                  '50': '',
+                  '20': '',
+                  '10': '',
+                  '5': '',
+                  '2': '',
+                  '1': '',
+                  '0.5': '',
+                  '0.1': '',
+                })
+              }
+              className="px-4 py-2.5 rounded-xl border border-[#E8D5BE] text-xs font-bold text-slate-600"
+            >
+              אפס ספירה
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setStallCash(String(cashCalcTotals.net));
+                setCalcOpen(false);
+                showToast(`הפדיון נטו (${formatILS(cashCalcTotals.net)}) הועבר לטופס קופת הדוכן!`);
+              }}
+              className="flex-1 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-sm"
+            >
+              העבר פדיון נטו ({formatILS(cashCalcTotals.net)}) לקופת המזומן
+            </button>
+          </div>
+        </div>
       </BottomSheet>
     </div>
   );

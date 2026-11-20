@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo, useCallback } from 'react';
-import { Plus, Minus, Search, ChevronDown, ChevronUp, Users } from 'lucide-react';
+import { Plus, Minus, Search, ChevronDown, ChevronUp, Users, LayoutGrid, List, ArrowDownWideNarrow } from 'lucide-react';
 import { apiFetch } from '../lib/api';
 import { filterUsersByNameOrPhone, getPhoneLast4 } from '../lib/whatsappParser';
 import {
@@ -7,8 +7,10 @@ import {
   formatHebrewDate,
   formatILS,
   getNextFridayISO,
+  ORDER_STATUS_LABELS,
   PAYMENT_METHOD_LABELS,
 } from '../lib/format';
+import { getPaymentVisualState } from '../components/SupplierInvoiceSheet';
 import { useFriday } from '../context/FridayContext';
 import { FridaySelector } from '../components/FridaySelector';
 import { OrderCard } from '../components/OrderCard';
@@ -28,6 +30,8 @@ export function CustomerOrdersPage() {
   const { fridayDate: globalFriday, refreshTick } = useFriday();
   const [fridayDate, setFridayDate] = useState(globalFriday);
   const [statusFilter, setStatusFilter] = useState('');
+  const [viewMode, setViewMode] = useState<'cards' | 'list'>('cards');
+  const [sortBy, setSortBy] = useState<'newest' | 'amount_desc' | 'amount_asc'>('newest');
   const [orders, setOrders] = useState<Order[]>([]);
   const [recentOrdersHistory, setRecentOrdersHistory] = useState<Order[]>([]);
   const [quickCustSearch, setQuickCustSearch] = useState('');
@@ -115,6 +119,14 @@ export function CustomerOrdersPage() {
       return b.id - a.id;
     });
   }, [users, recentOrdersHistory]);
+
+  const sortedOrders = useMemo(() => {
+    const copy = [...orders];
+    if (sortBy === 'amount_desc') copy.sort((a, b) => b.total_amount - a.total_amount);
+    else if (sortBy === 'amount_asc') copy.sort((a, b) => a.total_amount - b.total_amount);
+    else copy.sort((a, b) => b.id - a.id);
+    return copy;
+  }, [orders, sortBy]);
 
   const quickVisibleCustomers = useMemo(() => {
     const base = quickCustSearch.trim()
@@ -402,28 +414,69 @@ export function CustomerOrdersPage() {
         </div>
       </div>
 
-      {/* סינון סטטוס */}
-      <div className="flex flex-wrap gap-1.5">
-        {[
-          { key: '', label: 'הכל' },
-          { key: 'pending', label: 'ממתין' },
-          { key: 'received', label: 'התקבל' },
-          { key: 'ready', label: 'מוכן למסירה' },
-          { key: 'delivered', label: 'נמסר' },
-        ].map((f) => (
-          <button
-            key={f.key}
-            type="button"
-            onClick={() => setStatusFilter(f.key)}
-            className={`min-h-[44px] md:min-h-[36px] px-3.5 py-2 rounded-xl text-xs font-bold ${
-              statusFilter === f.key
-                ? 'bg-[#1E242B] text-white'
-                : 'bg-white border border-[#E8D5BE] text-slate-600'
-            }`}
-          >
-            {f.label}
-          </button>
-        ))}
+      {/* סינון סטטוס + מיון + מעבר תצוגת בלוקים/רשימה */}
+      <div className="flex flex-wrap items-center justify-between gap-2.5">
+        <div className="flex flex-wrap gap-1.5">
+          {[
+            { key: '', label: 'הכל' },
+            { key: 'awaiting_approval', label: 'ממתינות לאישור' },
+            { key: 'pending', label: 'ממתין' },
+            { key: 'received', label: 'התקבל' },
+            { key: 'ready', label: 'מוכן למסירה' },
+            { key: 'delivered', label: 'נמסר' },
+          ].map((f) => (
+            <button
+              key={f.key}
+              type="button"
+              onClick={() => setStatusFilter(f.key)}
+              className={`min-h-[40px] md:min-h-[36px] px-3 py-1.5 rounded-xl text-xs font-bold ${
+                statusFilter === f.key
+                  ? 'bg-[#1E242B] text-white'
+                  : 'bg-white border border-[#E8D5BE] text-slate-600'
+              }`}
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="flex items-center gap-2">
+          <div className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-white border border-[#E8D5BE]">
+            <ArrowDownWideNarrow className="w-3.5 h-3.5 text-slate-500" />
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as 'newest' | 'amount_desc' | 'amount_asc')}
+              className="text-xs font-bold text-slate-700 bg-transparent focus:outline-none"
+            >
+              <option value="newest">חדש ביותר</option>
+              <option value="amount_desc">סכום: גבוה לנמוך</option>
+              <option value="amount_asc">סכום: נמוך לגבוה</option>
+            </select>
+          </div>
+
+          <div className="inline-flex items-center p-1 rounded-xl bg-white border border-[#E8D5BE]">
+            <button
+              type="button"
+              onClick={() => setViewMode('cards')}
+              className={`p-1.5 rounded-lg transition-colors ${
+                viewMode === 'cards' ? 'bg-[#C85A17] text-white' : 'text-slate-500 hover:text-slate-800'
+              }`}
+              title="תצוגת בלוקים"
+            >
+              <LayoutGrid className="w-4 h-4" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode('list')}
+              className={`p-1.5 rounded-lg transition-colors ${
+                viewMode === 'list' ? 'bg-[#C85A17] text-white' : 'text-slate-500 hover:text-slate-800'
+              }`}
+              title="תצוגת רשימה"
+            >
+              <List className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
       </div>
 
       {error && (
@@ -436,13 +489,13 @@ export function CustomerOrdersPage() {
         <div className="bg-white rounded-2xl p-10 text-center text-slate-400 border border-[#E8D5BE]">
           טוען הזמנות לקוחות...
         </div>
-      ) : orders.length === 0 ? (
+      ) : sortedOrders.length === 0 ? (
         <div className="bg-white rounded-2xl p-10 text-center text-slate-500 border border-[#E8D5BE]">
           לא נמצאו הזמנות לקוחות לפי הסינון הנבחר.
         </div>
-      ) : (
+      ) : viewMode === 'cards' ? (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3.5">
-          {orders.map((o) => (
+          {sortedOrders.map((o) => (
             <OrderCard
               key={o.id}
               order={o}
@@ -455,6 +508,85 @@ export function CustomerOrdersPage() {
               onOpenLedger={openCustomerLedger}
             />
           ))}
+        </div>
+      ) : (
+        <div className="bg-white rounded-3xl border border-[#E8D5BE] shadow-soft overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-right text-sm">
+              <thead className="bg-[#FAF6F0] border-b border-[#E8D5BE] text-xs font-bold text-slate-600">
+                <tr>
+                  <th className="py-3 px-4">לקוח</th>
+                  <th className="py-3 px-3">פריטים</th>
+                  <th className="py-3 px-3">סטטוס</th>
+                  <th className="py-3 px-3">סכום</th>
+                  <th className="py-3 px-3">תשלום</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[#F3E9DC]">
+                {sortedOrders.map((o) => {
+                  const payState = getPaymentVisualState(o);
+                  return (
+                    <tr
+                      key={o.id}
+                      onClick={() => openEditModal(o)}
+                      className="hover:bg-[#FFFBF5] cursor-pointer"
+                    >
+                      <td className="py-3 px-4">
+                        {o.user_id ? (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openCustomerLedger(o.user_id!);
+                            }}
+                            className="font-bold text-slate-900 hover:text-[#C85A17] hover:underline"
+                          >
+                            {o.recipient_name}
+                          </button>
+                        ) : (
+                          <span className="font-bold text-slate-900">{o.recipient_name}</span>
+                        )}
+                        <div className="text-[11px] text-slate-400 tabular-nums">#{o.id}</div>
+                      </td>
+                      <td className="py-3 px-3 text-xs text-slate-600 max-w-[260px] truncate">
+                        {o.items.map((it) => `${it.quantity}× ${it.product_name}`).join(', ')}
+                      </td>
+                      <td className="py-3 px-3">
+                        <span
+                          className={`inline-block px-2.5 py-0.5 rounded-full text-xs font-bold text-white ${
+                            o.status === 'delivered'
+                              ? 'bg-emerald-600'
+                              : o.status === 'ready'
+                              ? 'bg-orange-500'
+                              : o.status === 'received'
+                              ? 'bg-blue-600'
+                              : 'bg-red-600'
+                          }`}
+                        >
+                          {ORDER_STATUS_LABELS[o.status]}
+                        </span>
+                      </td>
+                      <td className="py-3 px-3 font-extrabold tabular-nums text-slate-900">
+                        {formatILS(o.total_amount)}
+                      </td>
+                      <td className="py-3 px-3">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setPayOrder(o);
+                          }}
+                          className={`px-2.5 py-1 rounded-full text-xs font-extrabold border ${payState.badgeCls}`}
+                        >
+                          {payState.label}
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 

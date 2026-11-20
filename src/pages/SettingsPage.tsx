@@ -38,8 +38,11 @@ export function SettingsPage() {
   // הגדרות עסק
   const [settings, setSettings] = useState<BusinessSettings>({
     business_name: 'דוכן שישי תימני',
+    business_address: '',
+    order_phone: '',
     admin_whatsapp_phone: '050-5551000',
     default_delivery_fee: 0,
+    free_delivery_threshold: 0,
     whatsapp_footer: 'שבת שלום ומבורכת! 🕯️',
   });
   const [savingSettings, setSavingSettings] = useState(false);
@@ -98,7 +101,14 @@ export function SettingsPage() {
         apiFetch<{ users: User[] }>('/api/users'),
         apiFetch<{ products: AdminProduct[] }>('/api/products'),
       ]);
-      setSettings(setRes.settings);
+      let extra: Partial<BusinessSettings> = {};
+      try {
+        const raw = localStorage.getItem('fsm_business_settings_extra');
+        if (raw) extra = JSON.parse(raw);
+      } catch {
+        // ignore
+      }
+      setSettings({ ...extra, ...setRes.settings });
       setUsers(usrRes.users);
       setProducts(prodRes.products.filter((p) => p.is_active));
       setError('');
@@ -122,7 +132,24 @@ export function SettingsPage() {
         method: 'PUT',
         body: JSON.stringify(settings),
       });
-      setSettings(res.settings);
+      try {
+        localStorage.setItem(
+          'fsm_business_settings_extra',
+          JSON.stringify({
+            business_address: settings.business_address || '',
+            order_phone: settings.order_phone || '',
+            free_delivery_threshold: settings.free_delivery_threshold || 0,
+          })
+        );
+      } catch {
+        // ignore
+      }
+      setSettings({
+        ...res.settings,
+        business_address: settings.business_address || res.settings.business_address || '',
+        order_phone: settings.order_phone || res.settings.order_phone || '',
+        free_delivery_threshold: settings.free_delivery_threshold ?? res.settings.free_delivery_threshold ?? 0,
+      });
       setSettingsSaved(true);
       setTimeout(() => setSettingsSaved(false), 2000);
       notify('הגדרות העסק נשמרו בהצלחה!');
@@ -474,6 +501,31 @@ export function SettingsPage() {
               />
             </div>
 
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+              <div>
+                <label className="block text-sm font-bold text-slate-700 mb-1.5">כתובת העסק</label>
+                <input
+                  type="text"
+                  value={settings.business_address || ''}
+                  onChange={(e) => setSettings({ ...settings, business_address: e.target.value })}
+                  placeholder="לדוגמה: רחוב הרצל 15, פתח תקווה"
+                  className="w-full px-4 py-2.5 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] focus:bg-white focus:border-[#C85A17] focus:outline-none font-semibold"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-bold text-slate-700 mb-1.5">טלפון להזמנות</label>
+                <input
+                  type="tel"
+                  inputMode="tel"
+                  dir="ltr"
+                  value={settings.order_phone || ''}
+                  onChange={(e) => setSettings({ ...settings, order_phone: e.target.value })}
+                  placeholder="050-0000000"
+                  className="w-full px-4 py-2.5 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] focus:bg-white focus:border-[#C85A17] focus:outline-none text-left tabular-nums font-bold"
+                />
+              </div>
+            </div>
+
             <div>
               <label className="block text-sm font-bold text-slate-700 mb-1.5">
                 טלפון וואטסאפ של המנהל לקבלת הזמנות לקוחות
@@ -493,22 +545,48 @@ export function SettingsPage() {
               </p>
             </div>
 
-            <div>
-              <label className="block text-sm font-bold text-slate-700 mb-1.5">
-                דמי משלוח ברירת מחדל (₪)
-              </label>
-              <input
-                type="number"
-                inputMode="decimal"
-                min="0"
-                step="0.5"
-                dir="ltr"
-                value={settings.default_delivery_fee}
-                onChange={(e) =>
-                  setSettings({ ...settings, default_delivery_fee: Math.max(0, Number(e.target.value) || 0) })
-                }
-                className="w-44 px-4 py-2.5 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] focus:bg-white focus:border-[#C85A17] focus:outline-none text-left tabular-nums font-bold"
-              />
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+              <div>
+                <label className="block text-sm font-bold text-slate-700 mb-1.5">
+                  דמי משלוח ברירת מחדל (₪)
+                </label>
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  min="0"
+                  step="0.5"
+                  dir="ltr"
+                  value={settings.default_delivery_fee}
+                  onChange={(e) =>
+                    setSettings({ ...settings, default_delivery_fee: Math.max(0, Number(e.target.value) || 0) })
+                  }
+                  className="w-full px-4 py-2.5 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] focus:bg-white focus:border-[#C85A17] focus:outline-none text-left tabular-nums font-bold"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-bold text-slate-700 mb-1.5">
+                  משלוח חינם מעל סכום (₪)
+                </label>
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  min="0"
+                  step="1"
+                  dir="ltr"
+                  placeholder="0 = ללא סף"
+                  value={settings.free_delivery_threshold ?? 0}
+                  onChange={(e) =>
+                    setSettings({
+                      ...settings,
+                      free_delivery_threshold: Math.max(0, Number(e.target.value) || 0),
+                    })
+                  }
+                  className="w-full px-4 py-2.5 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] focus:bg-white focus:border-[#C85A17] focus:outline-none text-left tabular-nums font-bold"
+                />
+                <p className="text-[11px] text-slate-500 mt-1">
+                  אם גדול מ-0, הזמנה מעל סכום זה תקבל משלוח חינם (0 ₪).
+                </p>
+              </div>
             </div>
 
             <div>
