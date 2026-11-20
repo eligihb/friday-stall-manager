@@ -121,7 +121,7 @@ function createInitialDb(): LocalDb {
   ];
 
   const users: StoredUser[] = [
-    { id: 1, name: 'אליאב מנהל', phone: '050-5551000', email: 'admin@teimani.co.il', password: '123456', role: 'admin', balance: 0, notes: 'מנהל ראשי — דוכן שישי תימני', created_at: today },
+    { id: 1, name: 'אליאב מנהל', phone: '0542452100', email: 'admin@teimani.co.il', password: '123456', role: 'admin', balance: 0, notes: 'מנהל ראשי — דוכן שישי תימני', created_at: today },
     { id: 2, name: 'מעדניית ראש העין', phone: '052-4442211', email: 'supplier@teimani.co.il', password: '123456', role: 'supplier', balance: 0, notes: 'ספק קבוע — משלוח בשישי ב-06:30', created_at: today },
     { id: 3, name: 'מינימרקט השכונה', phone: '054-8883322', email: 'market@teimani.co.il', password: '123456', role: 'supplier', balance: 0, notes: 'העברה בנקאית בתחילת שבוע', created_at: today },
   ];
@@ -165,7 +165,7 @@ function createInitialDb(): LocalDb {
     demoPurgedV191: true,
     settings: {
       business_name: 'דוכן שישי תימני',
-      admin_whatsapp_phone: '050-5551000',
+      admin_whatsapp_phone: '0542452100',
       default_delivery_fee: 0,
       whatsapp_footer: 'שבת שלום ומבורכת! 🕯️',
     },
@@ -211,6 +211,14 @@ function loadDb(): LocalDb {
           u.name = 'אליאב מנהל';
           mutated = true;
         }
+        if (u.phone === '0542452100') {
+          u.phone = '0542452100';
+          mutated = true;
+        }
+      }
+      if (parsed.settings && parsed.settings.admin_whatsapp_phone === '0542452100') {
+        parsed.settings.admin_whatsapp_phone = '0542452100';
+        mutated = true;
       }
       memoryDbFallback = parsed;
       if (mutated) saveDb(parsed);
@@ -270,13 +278,13 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
   if (!db.settings) {
     db.settings = {
       business_name: 'דוכן שישי תימני',
-      admin_whatsapp_phone: '050-5551000',
+      admin_whatsapp_phone: '0542452100',
       default_delivery_fee: 0,
       whatsapp_footer: 'שבת שלום ומבורכת! 🕯️',
     };
   }
   if (!db.settings.admin_whatsapp_phone) {
-    db.settings.admin_whatsapp_phone = '050-5551000';
+    db.settings.admin_whatsapp_phone = '0542452100';
   }
   if (db.settings.business_name === 'המטבח התימני') {
     db.settings.business_name = 'דוכן שישי תימני';
@@ -430,7 +438,7 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
   if (path === '/api/public/storefront' && method === 'GET') {
     return {
       business_name: db.settings.business_name || 'דוכן שישי תימני',
-      admin_whatsapp_phone: db.settings.admin_whatsapp_phone || '050-5551000',
+      admin_whatsapp_phone: db.settings.admin_whatsapp_phone || '0542452100',
       whatsapp_footer: db.settings.whatsapp_footer || 'שבת שלום ומבורכת! 🕯️',
       products: sortProducts(db.products)
         .filter((p) => p.is_active)
@@ -519,7 +527,7 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
       status: 'awaiting_approval',
       items: resultItems,
       business_name: db.settings.business_name || 'דוכן שישי תימני',
-      admin_whatsapp_phone: db.settings.admin_whatsapp_phone || '050-5551000',
+      admin_whatsapp_phone: db.settings.admin_whatsapp_phone || '0542452100',
       whatsapp_footer: db.settings.whatsapp_footer || 'שבת שלום ומבורכת! 🕯️',
     } as T;
   }
@@ -586,7 +594,7 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
     requireAdmin();
     db.settings = {
       business_name: String(body.business_name || 'דוכן שישי תימני').trim(),
-      admin_whatsapp_phone: String(body.admin_whatsapp_phone || '050-5551000').trim(),
+      admin_whatsapp_phone: String(body.admin_whatsapp_phone || '0542452100').trim(),
       default_delivery_fee: Math.max(0, Number(body.default_delivery_fee || 0)),
       whatsapp_footer: String(body.whatsapp_footer ?? '').trim(),
     };

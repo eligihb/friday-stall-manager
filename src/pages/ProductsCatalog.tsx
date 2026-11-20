@@ -24,6 +24,12 @@ import {
 import { apiFetch } from '../lib/api';
 import { formatHebrewDate, formatILS, formatPercent } from '../lib/format';
 import { isProductInStock, loadStockMap, saveStockMap, type ProductStockEntry } from '../lib/stockState';
+import {
+  isProductVisibleToCustomers,
+  loadStorefrontConfig,
+  setProductCustomerVisibility,
+  type StorefrontConfig,
+} from '../lib/storefrontConfig';
 import { BottomSheet } from '../components/BottomSheet';
 import type { AdminProduct, ProductPriceHistoryEntry } from '../types';
 
@@ -106,6 +112,15 @@ export function ProductsCatalog() {
   const [deleteWarningProduct, setDeleteWarningProduct] = useState<AdminProduct | null>(null);
   const [stockModalOpen, setStockModalOpen] = useState(false);
   const [stockMap, setStockMap] = useState<Record<number, ProductStockEntry>>(() => loadStockMap());
+  const [storefrontCfg, setStorefrontCfg] = useState<StorefrontConfig>(() => loadStorefrontConfig());
+
+  const toggleCustomerVisibility = (productId: number) => {
+    const currentlyVisible = isProductVisibleToCustomers(productId, storefrontCfg);
+    const nextCfg = setProductCustomerVisibility(productId, !currentlyVisible);
+    setStorefrontCfg(nextCfg);
+    setToast(!currentlyVisible ? 'המוצר יוצג בתפריט הלקוחות' : 'המוצר הוסתר מתפריט הלקוחות');
+    setTimeout(() => setToast(''), 2000);
+  };
 
   const updateProductStock = (productId: number, patch: Partial<ProductStockEntry>) => {
     setStockMap((prev) => {
@@ -642,6 +657,7 @@ export function ProductsCatalog() {
                     <th className="text-right py-3.5 px-2 font-bold">דוכן (₪)</th>
                     <th className="text-right py-3.5 px-2.5 font-bold">ריווח ספק</th>
                     <th className="text-right py-3.5 px-2.5 font-bold">רווח נקי (₪)</th>
+                    <th className="text-center py-3.5 px-2 font-bold">הצג ללקוחות</th>
                     <th className="text-center py-3.5 px-2 font-bold">פעיל</th>
                     <th className="text-center py-3.5 px-3 font-bold">פעולות</th>
                   </tr>
@@ -807,6 +823,24 @@ export function ProductsCatalog() {
                           <div className="text-[11px] text-slate-500 font-semibold">
                             {formatPercent(custPct)}
                           </div>
+                        </td>
+                        <td className="py-2.5 px-2 text-center">
+                          {(() => {
+                            const visible = isProductVisibleToCustomers(p.id, storefrontCfg);
+                            return (
+                              <button
+                                type="button"
+                                onClick={() => toggleCustomerVisibility(p.id)}
+                                className={`px-2 py-1 rounded-lg text-[11px] font-extrabold border transition-colors ${
+                                  visible
+                                    ? 'bg-emerald-50 border-emerald-300 text-emerald-800'
+                                    : 'bg-slate-100 border-slate-300 text-slate-500'
+                                }`}
+                              >
+                                {visible ? 'מוצג' : 'מוסתר'}
+                              </button>
+                            );
+                          })()}
                         </td>
                         <td className="py-2.5 px-2 text-center">
                           <button
@@ -1015,10 +1049,23 @@ export function ProductsCatalog() {
                     </div>
                   )}
 
-                  <div className="mb-2.5 flex items-center justify-between">
-                    <span className="text-[11px] font-bold text-slate-500">
-                      {unlockedIds[p.id] ? 'מצב עריכה פתוח' : 'המחירים נעולים לעריכה'}
-                    </span>
+                  <div className="mb-2.5 flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[11px] font-bold text-slate-500">
+                        {unlockedIds[p.id] ? 'מצב עריכה פתוח' : 'המחירים נעולים לעריכה'}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => toggleCustomerVisibility(p.id)}
+                        className={`px-2 py-0.5 rounded-lg text-[11px] font-extrabold border ${
+                          isProductVisibleToCustomers(p.id, storefrontCfg)
+                            ? 'bg-emerald-50 border-emerald-300 text-emerald-800'
+                            : 'bg-slate-100 border-slate-300 text-slate-500'
+                        }`}
+                      >
+                        {isProductVisibleToCustomers(p.id, storefrontCfg) ? 'מוצג ללקוחות' : 'מוסתר מלקוחות'}
+                      </button>
+                    </div>
                     {!unlockedIds[p.id] && (
                       <button
                         type="button"

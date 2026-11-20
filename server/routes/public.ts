@@ -41,7 +41,7 @@ router.get('/storefront', async (_req, res) => {
 
     res.json({
       business_name: settings?.business_name || 'דוכן שישי תימני',
-      admin_whatsapp_phone: settings?.admin_whatsapp_phone || '050-5551000',
+      admin_whatsapp_phone: settings?.admin_whatsapp_phone || '0542452100',
       whatsapp_footer: settings?.whatsapp_footer || 'שבת שלום ומבורכת! 🕯️',
       products: products.map((p) => ({
         id: Number(p.id),
@@ -159,7 +159,7 @@ router.post('/orders', async (req, res) => {
         unit_price: p.unit_price_snapshot,
       })),
       business_name: settings?.business_name || 'דוכן שישי תימני',
-      admin_whatsapp_phone: settings?.admin_whatsapp_phone || '050-5551000',
+      admin_whatsapp_phone: settings?.admin_whatsapp_phone || '0542452100',
       whatsapp_footer: settings?.whatsapp_footer || 'שבת שלום ומבורכת! 🕯️',
     });
   } catch (err) {

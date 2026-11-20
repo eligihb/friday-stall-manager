@@ -19,14 +19,14 @@ router.get('/', requireAuth, async (_req, res) => {
     if (!row) {
       await db.run(
         `INSERT INTO business_settings (id, business_name, admin_whatsapp_phone, default_delivery_fee, whatsapp_footer)
-         VALUES (1, 'דוכן שישי תימני', '050-5551000', 0, 'שבת שלום ומבורכת! 🕯️')`
+         VALUES (1, 'דוכן שישי תימני', '0542452100', 0, 'שבת שלום ומבורכת! 🕯️')`
       );
       row = await db.get<DbSettings>('SELECT * FROM business_settings WHERE id = 1');
     }
     res.json({
       settings: {
         business_name: row?.business_name || 'דוכן שישי תימני',
-        admin_whatsapp_phone: row?.admin_whatsapp_phone || '050-5551000',
+        admin_whatsapp_phone: row?.admin_whatsapp_phone || '0542452100',
         default_delivery_fee: Number(row?.default_delivery_fee ?? 0),
         whatsapp_footer: row?.whatsapp_footer || 'שבת שלום ומבורכת! 🕯️',
       },
@@ -40,7 +40,7 @@ router.get('/', requireAuth, async (_req, res) => {
 router.put('/', requireAuth, requireRole('admin'), async (req, res) => {
   try {
     const business_name = String(req.body?.business_name || '').trim() || 'דוכן שישי תימני';
-    const admin_whatsapp_phone = String(req.body?.admin_whatsapp_phone || '').trim() || '050-5551000';
+    const admin_whatsapp_phone = String(req.body?.admin_whatsapp_phone || '').trim() || '0542452100';
     const default_delivery_fee = Math.max(0, Number(req.body?.default_delivery_fee || 0));
     const whatsapp_footer = String(req.body?.whatsapp_footer ?? '').trim();
 

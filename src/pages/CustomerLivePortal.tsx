@@ -66,7 +66,7 @@ export function CustomerLivePortal({ customerId }: CustomerLivePortalProps) {
       apiFetch<{ settings: BusinessSettings }>('/api/settings').catch(() => ({
         settings: {
           business_name: APP_BRAND_NAME,
-          admin_whatsapp_phone: '050-5551000',
+          admin_whatsapp_phone: '0542452100',
           default_delivery_fee: 0,
           whatsapp_footer: '',
         },

@@ -1,5 +1,6 @@
 import type { BusinessSettings, FridayInventoryItem, Order, User } from '../types';
 import { formatFridayLabel, formatILS, ORDER_STATUS_LABELS } from './format';
+import { isProductVisibleToCustomers, loadStorefrontConfig } from './storefrontConfig';
 
 export function formatProductionWhatsApp(
   fridayDate: string,
@@ -56,39 +57,29 @@ export function buildDigitalMenuUrl(): string {
 }
 
 export function formatDigitalMenuWhatsApp(
-  products: Array<{ name: string; preorder_price: number; customer_price: number; is_active?: boolean }>,
+  products: Array<{ id?: number; name: string; preorder_price: number; customer_price: number; is_active?: boolean }>,
   settings?: Partial<BusinessSettings>
 ): string {
+  const cfg = loadStorefrontConfig();
   const bizName = settings?.business_name || 'המטבח התימני – תפריט יום שישי';
-  const footer = settings?.whatsapp_footer ?? 'שבת שלום ומבורכת! 🕯️';
-  const active = products.filter((p) => p.is_active !== false);
+  const active = products.filter(
+    (p) => p.is_active !== false && (p.id === undefined || isProductVisibleToCustomers(p.id, cfg))
+  );
 
-  const lines: string[] = [
-    `🫓 *${bizName}*`,
-    `🔥 מאפים תימניים טריים ולוהטים לשבת!`,
-    `⏰ *מבצע הזמנה מוקדמת:* עד יום שישי בשעה 06:00 בבוקר!`,
-    `━━━━━━━━━━━━━━━━`,
-  ];
-
-  for (const p of active) {
-    const pre = formatILS(p.preorder_price);
-    const reg = formatILS(p.customer_price);
-    lines.push(
-      p.preorder_price < p.customer_price
+  const itemsText = active
+    .map((p) => {
+      const pre = formatILS(p.preorder_price);
+      const reg = formatILS(p.customer_price);
+      return p.preorder_price < p.customer_price
         ? `• *${p.name}* — ${pre} במוקדמת (דוכן: ${reg})`
-        : `• *${p.name}* — ${reg}`
-    );
-  }
+        : `• *${p.name}* — ${reg}`;
+    })
+    .join('\n');
 
-  lines.push(`━━━━━━━━━━━━━━━━`);
-  lines.push(`✨ *מבצעי כמות:*`);
-  lines.push(`• פיתות זעתר / שום / שומשום: יחידה 5 ₪ · שלישייה 12 ₪ · שישייה 20 ₪`);
-  lines.push(`• ג'חנון: יחידה 9 ₪ · 5 יחידות ומעלה ב-8 ₪ ליחידה!`);
-  lines.push(``);
-  lines.push(`🛒 *להזמנה מהירה אונליין:*`);
-  lines.push(buildDigitalMenuUrl());
-  if (footer) lines.push(`\n${footer}`);
-  return lines.join('\n');
+  return cfg.menuShareTemplate
+    .replace(/\{שם_עסק\}/g, bizName)
+    .replace(/\{פריטים\}/g, itemsText)
+    .replace(/\{קישור\}/g, buildDigitalMenuUrl());
 }
 
 export function formatOrderWhatsApp(order: Order, settings?: Partial<BusinessSettings>): string {
@@ -148,29 +139,26 @@ export function formatPublicApprovalWhatsApp(payload: {
   total_amount: number;
   notes?: string;
 }): string {
-  const lines: string[] = [
-    `🫓 *${payload.business_name} — הזמנה חדשה לאישור (#${payload.id})*`,
-    `👤 שם: *${payload.recipient_name}*`,
-    `📱 טלפון: ${payload.phone}`,
-    `📅 ${formatFridayLabel(payload.friday_date)}`,
-    `🏷️ תעריף: ${payload.pricing_mode === 'preorder' ? 'הזמנה מוקדמת' : 'מחיר דוכן רגיל'}`,
-    `━━━━━━━━━━━━━━━━`,
-  ];
+  const cfg = loadStorefrontConfig();
+  const itemsText = payload.items
+    .map((it) => `• ${it.quantity} × ${it.product_name} — ${formatILS(it.quantity * it.unit_price)}`)
+    .join('\n');
+  const notesLine = payload.notes ? `📝 הערה: ${payload.notes}` : '';
 
-  for (const it of payload.items) {
-    lines.push(`• ${it.quantity} × ${it.product_name} — ${formatILS(it.quantity * it.unit_price)}`);
-  }
-
-  lines.push(`━━━━━━━━━━━━━━━━`);
-  lines.push(`💳 *סה״כ לתשלום: ${formatILS(payload.total_amount)}*`);
-  if (payload.notes) lines.push(`📝 הערה: ${payload.notes}`);
-  lines.push(`⏳ סטטוס: ממתין לאישור מנהל`);
-  lines.push(``);
-  lines.push(`✅ *אישור מיידי להזמנה:*`);
-  lines.push(buildQuickApproveUrl(payload.id));
-  lines.push(`👁️ *צפייה ועריכה ביישומון:*`);
-  lines.push(buildAdminOrderViewUrl(payload.id));
-  return lines.join('\n');
+  return cfg.customerOrderTemplate
+    .replace(/\{שם_עסק\}/g, payload.business_name)
+    .replace(/\{מספר\}/g, String(payload.id))
+    .replace(/\{שם\}/g, payload.recipient_name)
+    .replace(/\{טלפון\}/g, payload.phone)
+    .replace(/\{תאריך\}/g, formatFridayLabel(payload.friday_date))
+    .replace(/\{פריטים\}/g, itemsText)
+    .replace(/\{סהכ\}/g, formatILS(payload.total_amount))
+    .replace(/\{הערות\}/g, notesLine)
+    .replace(/\{קישור_אישור\}/g, buildQuickApproveUrl(payload.id))
+    .replace(/\{קישור_צפייה\}/g, buildAdminOrderViewUrl(payload.id))
+    .replace(/\{קישור\}/g, buildAdminOrderViewUrl(payload.id))
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
 }
 
 export function formatSupplierLedgerWhatsApp(user: User, orders: Order[]): string {

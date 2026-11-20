@@ -22,6 +22,17 @@ import { apiFetch } from '../lib/api';
 import { formatILS, PAYMENT_METHOD_LABELS, ROLE_LABELS } from '../lib/format';
 import { filterUsersByNameOrPhone, getPhoneLast4 } from '../lib/whatsappParser';
 import { APP_VERSION } from '../lib/version';
+import { useAuth } from '../context/AuthContext';
+import {
+  DEFAULT_ADMIN_NAME,
+  DEFAULT_ADMIN_WHATSAPP,
+  DEFAULT_CUSTOMER_ORDER_TEMPLATE,
+  DEFAULT_MENU_SHARE_TEMPLATE,
+  loadStorefrontConfig,
+  saveStorefrontConfig,
+  type CustomerPriceMode,
+  type StorefrontConfig,
+} from '../lib/storefrontConfig';
 import { BottomSheet } from '../components/BottomSheet';
 import {
   clearCloudConfig,
@@ -33,14 +44,17 @@ import {
 import type { AdminProduct, BusinessSettings, PaymentMethod, User, UserRole } from '../types';
 
 export function SettingsPage() {
+  const { user: currentUser, updateUserName } = useAuth();
   const [activeSection, setActiveSection] = useState<'business' | 'users'>('business');
+  const [adminDisplayName, setAdminDisplayName] = useState(() => currentUser?.name || DEFAULT_ADMIN_NAME);
+  const [storefrontCfg, setStorefrontCfg] = useState<StorefrontConfig>(() => loadStorefrontConfig());
 
   // הגדרות עסק
   const [settings, setSettings] = useState<BusinessSettings>({
     business_name: 'דוכן שישי תימני',
     business_address: '',
-    order_phone: '',
-    admin_whatsapp_phone: '050-5551000',
+    order_phone: DEFAULT_ADMIN_WHATSAPP,
+    admin_whatsapp_phone: DEFAULT_ADMIN_WHATSAPP,
     default_delivery_fee: 0,
     free_delivery_threshold: 0,
     whatsapp_footer: 'שבת שלום ומבורכת! 🕯️',
@@ -132,6 +146,10 @@ export function SettingsPage() {
         method: 'PUT',
         body: JSON.stringify(settings),
       });
+      if (adminDisplayName.trim() && adminDisplayName.trim() !== currentUser?.name) {
+        await updateUserName(adminDisplayName.trim());
+      }
+      saveStorefrontConfig(storefrontCfg);
       try {
         localStorage.setItem(
           'fsm_business_settings_extra',
@@ -490,15 +508,28 @@ export function SettingsPage() {
           >
             <h3 className="font-serif text-2xl font-bold text-slate-900">פרטי העסק והודעות</h3>
 
-            <div>
-              <label className="block text-sm font-bold text-slate-700 mb-1.5">שם העסק</label>
-              <input
-                type="text"
-                required
-                value={settings.business_name}
-                onChange={(e) => setSettings({ ...settings, business_name: e.target.value })}
-                className="w-full px-4 py-2.5 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] focus:bg-white focus:border-[#C85A17] focus:outline-none font-semibold"
-              />
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+              <div>
+                <label className="block text-sm font-bold text-slate-700 mb-1.5">שם העסק</label>
+                <input
+                  type="text"
+                  required
+                  value={settings.business_name}
+                  onChange={(e) => setSettings({ ...settings, business_name: e.target.value })}
+                  className="w-full px-4 py-2.5 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] focus:bg-white focus:border-[#C85A17] focus:outline-none font-semibold"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-bold text-slate-700 mb-1.5">שם המנהל לתצוגה</label>
+                <input
+                  type="text"
+                  required
+                  value={adminDisplayName}
+                  onChange={(e) => setAdminDisplayName(e.target.value)}
+                  placeholder="אליאב מנהל"
+                  className="w-full px-4 py-2.5 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] focus:bg-white focus:border-[#C85A17] focus:outline-none font-semibold"
+                />
+              </div>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
@@ -537,7 +568,7 @@ export function SettingsPage() {
                 required
                 value={settings.admin_whatsapp_phone || ''}
                 onChange={(e) => setSettings({ ...settings, admin_whatsapp_phone: e.target.value })}
-                placeholder="050-5551000"
+                placeholder="0542452100"
                 className="w-56 px-4 py-2.5 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] focus:bg-white focus:border-[#C85A17] focus:outline-none text-left tabular-nums font-bold"
               />
               <p className="text-xs text-slate-500 mt-1">
@@ -589,15 +620,119 @@ export function SettingsPage() {
               </div>
             </div>
 
+            {/* בורר רמת מחירון ברירת מחדל לתפריט הלקוחות */}
+            <div className="p-4 rounded-2xl bg-[#FAF6F0] border border-[#E8D5BE] space-y-2.5">
+              <label className="block text-sm font-extrabold text-slate-800">
+                רמת מחירון ברירת מחדל לתפריט הלקוחות
+              </label>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                {(
+                  [
+                    ['auto', 'אוטומטי (א׳ 00:00 – ו׳ 06:00)'],
+                    ['preorder', 'מחיר הזמנה מוקדמת'],
+                    ['stall', 'מחיר דוכן רגיל'],
+                  ] as Array<[CustomerPriceMode, string]>
+                ).map(([modeVal, lbl]) => (
+                  <button
+                    key={modeVal}
+                    type="button"
+                    onClick={() => setStorefrontCfg({ ...storefrontCfg, customerPriceMode: modeVal })}
+                    className={`py-2 px-3 rounded-xl text-xs font-bold border transition-all ${
+                      storefrontCfg.customerPriceMode === modeVal
+                        ? 'bg-[#C85A17] text-white border-[#C85A17] shadow-sm'
+                        : 'bg-white text-slate-700 border-[#E8D5BE]'
+                    }`}
+                  >
+                    {lbl}
+                  </button>
+                ))}
+              </div>
+              <p className="text-[11px] text-slate-500">
+                לקוחות רואים רק מחירי לקוח וזמינות (במלאי / אזל) — ללא עלויות, ספקים או כמויות מלאי.
+              </p>
+            </div>
+
+            {/* עורך 2 תבניות הודעות הוואטסאפ */}
+            <div className="space-y-4 pt-2 border-t border-[#F3E9DC]">
+              <div>
+                <div className="flex items-center justify-between gap-2 mb-1">
+                  <label className="text-sm font-bold text-slate-700">
+                    תבנית 1: שיתוף תפריט/מחירון ללקוחות
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setStorefrontCfg({
+                        ...storefrontCfg,
+                        menuShareTemplate: DEFAULT_MENU_SHARE_TEMPLATE,
+                      })
+                    }
+                    className="text-xs font-bold text-[#C85A17] hover:underline"
+                  >
+                    איפוס לברירת מחדל
+                  </button>
+                </div>
+                <textarea
+                  rows={5}
+                  value={storefrontCfg.menuShareTemplate}
+                  onChange={(e) =>
+                    setStorefrontCfg({ ...storefrontCfg, menuShareTemplate: e.target.value })
+                  }
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] focus:bg-white focus:border-[#C85A17] focus:outline-none text-xs leading-relaxed"
+                />
+                <p className="text-[11px] text-slate-500 mt-1">
+                  תגיות זמינות: <code className="bg-slate-100 px-1 rounded">{'{שם_עסק}'}</code>{' '}
+                  <code className="bg-slate-100 px-1 rounded">{'{פריטים}'}</code>{' '}
+                  <code className="bg-slate-100 px-1 rounded">{'{קישור}'}</code>
+                </p>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between gap-2 mb-1">
+                  <label className="text-sm font-bold text-slate-700">
+                    תבנית 2: שליחת הזמנה מלקוח אליך (כולל קישורי אישור)
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setStorefrontCfg({
+                        ...storefrontCfg,
+                        customerOrderTemplate: DEFAULT_CUSTOMER_ORDER_TEMPLATE,
+                      })
+                    }
+                    className="text-xs font-bold text-[#C85A17] hover:underline"
+                  >
+                    איפוס לברירת מחדל
+                  </button>
+                </div>
+                <textarea
+                  rows={6}
+                  value={storefrontCfg.customerOrderTemplate}
+                  onChange={(e) =>
+                    setStorefrontCfg({ ...storefrontCfg, customerOrderTemplate: e.target.value })
+                  }
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] focus:bg-white focus:border-[#C85A17] focus:outline-none text-xs leading-relaxed"
+                />
+                <p className="text-[11px] text-slate-500 mt-1">
+                  תגיות זמינות: <code className="bg-slate-100 px-1 rounded">{'{שם}'}</code>{' '}
+                  <code className="bg-slate-100 px-1 rounded">{'{טלפון}'}</code>{' '}
+                  <code className="bg-slate-100 px-1 rounded">{'{פריטים}'}</code>{' '}
+                  <code className="bg-slate-100 px-1 rounded">{'{סהכ}'}</code>{' '}
+                  <code className="bg-slate-100 px-1 rounded">{'{קישור_אישור}'}</code>{' '}
+                  <code className="bg-slate-100 px-1 rounded">{'{קישור_צפייה}'}</code>
+                </p>
+              </div>
+            </div>
+
             <div>
               <label className="block text-sm font-bold text-slate-700 mb-1.5">
                 תבנית חתימה מותאמת להודעות וואטסאפ
               </label>
               <textarea
-                rows={4}
+                rows={3}
                 value={settings.whatsapp_footer}
                 onChange={(e) => setSettings({ ...settings, whatsapp_footer: e.target.value })}
-                placeholder="לדוגמה: לתשלום בפייבוקס: 050-5551000 | שבת שלום ומבורכת!"
+                placeholder="לדוגמה: לתשלום בפייבוקס: 0542452100 | שבת שלום ומבורכת!"
                 className="w-full px-4 py-3 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] focus:bg-white focus:border-[#C85A17] focus:outline-none text-sm leading-relaxed"
               />
             </div>
