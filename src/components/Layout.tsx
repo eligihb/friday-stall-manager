@@ -21,7 +21,7 @@ import { useFriday } from '../context/FridayContext';
 import { formatShortFriday, getFridaysRange, ROLE_LABELS } from '../lib/format';
 import { APP_BRAND_NAME, APP_VERSION } from '../lib/version';
 import { BottomSheet } from './BottomSheet';
-import { QuickOrderSheet } from './QuickOrderSheet';
+import { OrderDrawer } from './OrderDrawer';
 
 export type AdminTab =
   | 'dashboard'
@@ -95,7 +95,10 @@ export function Layout({ activeTab, onSelectTab, children }: LayoutProps) {
       {/* סרגל צד לדסקטופ וטאבלט (>= 768px) */}
       <aside className="hidden md:flex md:flex-col md:w-64 md:fixed md:inset-y-0 md:right-0 bg-[#1E242B] text-cream-100 border-l border-white/10 z-30">
         <div className="p-5 border-b border-white/10">
-          <div className="flex items-center gap-3">
+          <div
+            className="flex items-center gap-3 cursor-pointer"
+            onClick={() => onSelectTab('dashboard')}
+          >
             <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-[#C85A17] to-[#D97706] flex items-center justify-center shadow-md shrink-0">
               <Flame className="w-5 h-5 text-white" />
             </div>
@@ -120,7 +123,7 @@ export function Layout({ activeTab, onSelectTab, children }: LayoutProps) {
               className="mt-4 w-full py-2.5 px-3.5 rounded-xl bg-gradient-to-l from-[#C85A17] to-[#D97706] hover:brightness-110 text-white font-bold text-xs shadow-md flex items-center justify-center gap-2 transition-all"
             >
               <Plus className="w-4 h-4" />
-              <span>קליטה מהירה (וואטסאפ / ידני)</span>
+              <span>+ הוסף הזמנה</span>
             </button>
           )}
         </div>
@@ -477,8 +480,8 @@ export function Layout({ activeTab, onSelectTab, children }: LayoutProps) {
         </div>
       </BottomSheet>
 
-      {/* חלונית קליטה מהירה (FAB +) */}
-      {isAdmin && <QuickOrderSheet open={quickOpen} onClose={() => setQuickOpen(false)} />}
+      {/* מגש הזמנה קומפקטי (+ הוסף הזמנה) */}
+      {isAdmin && <OrderDrawer open={quickOpen} onClose={() => setQuickOpen(false)} />}
     </div>
   );
 }

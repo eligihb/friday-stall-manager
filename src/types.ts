@@ -39,6 +39,7 @@ export interface AdminProduct {
   sort_order?: number;
   waste_type?: WasteType;
   is_active: boolean;
+  flavors?: string[];
 }
 
 export interface ProductPriceHistoryEntry {
