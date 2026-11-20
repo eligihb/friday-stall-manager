@@ -7,13 +7,21 @@ import {
   ShieldAlert,
   CheckCircle2,
   Trash2,
+  Share2,
+  Link2,
+  Check,
 } from 'lucide-react';
 import { apiFetch } from '../lib/api';
 import { formatFridayLabel, formatILS } from '../lib/format';
+import {
+  buildDigitalMenuUrl,
+  buildWhatsAppShareUrl,
+  formatDigitalMenuWhatsApp,
+} from '../lib/whatsappFormat';
 import { useFriday } from '../context/FridayContext';
 import { FridaySelector } from '../components/FridaySelector';
 import type { AdminTab } from '../components/Layout';
-import type { FridayInventoryItem, Order, User } from '../types';
+import type { AdminProduct, BusinessSettings, FridayInventoryItem, Order, User } from '../types';
 
 interface AdminDashboardProps {
   onNavigate: (tab: AdminTab) => void;
@@ -24,20 +32,38 @@ export function AdminDashboard({ onNavigate }: AdminDashboardProps) {
   const [orders, setOrders] = useState<Order[]>([]);
   const [awaitingOrders, setAwaitingOrders] = useState<Order[]>([]);
   const [users, setUsers] = useState<User[]>([]);
+  const [products, setProducts] = useState<AdminProduct[]>([]);
+  const [bizSettings, setBizSettings] = useState<BusinessSettings | undefined>(undefined);
+  const [copiedMenuLink, setCopiedMenuLink] = useState(false);
   const [inventory, setInventory] = useState<FridayInventoryItem[]>([]);
 
   const loadAll = useCallback(async () => {
-    const [ordRes, awaitRes, usrRes, invRes] = await Promise.all([
+    const [ordRes, awaitRes, usrRes, invRes, prodRes, setRes] = await Promise.all([
       apiFetch<{ orders: Order[] }>(`/api/orders?friday_date=${fridayDate}`),
       apiFetch<{ orders: Order[] }>('/api/orders?status=awaiting_approval'),
       apiFetch<{ users: User[] }>('/api/users'),
       apiFetch<{ items: FridayInventoryItem[] }>(`/api/inventory?friday_date=${fridayDate}`),
+      apiFetch<{ products: AdminProduct[] }>('/api/products'),
+      apiFetch<{ settings: BusinessSettings }>('/api/settings'),
     ]);
     setOrders(ordRes.orders.filter((o) => o.status !== 'awaiting_approval'));
     setAwaitingOrders(awaitRes.orders);
     setUsers(usrRes.users);
     setInventory(invRes.items);
+    setProducts(prodRes.products);
+    setBizSettings(setRes.settings);
   }, [fridayDate]);
+
+  const menuShareUrl = useMemo(() => {
+    const text = formatDigitalMenuWhatsApp(products, bizSettings);
+    return buildWhatsAppShareUrl(text);
+  }, [products, bizSettings]);
+
+  const handleCopyMenuLink = async () => {
+    await navigator.clipboard.writeText(buildDigitalMenuUrl());
+    setCopiedMenuLink(true);
+    setTimeout(() => setCopiedMenuLink(false), 1800);
+  };
 
   const handleApproveOrder = async (orderId: number) => {
     await apiFetch(`/api/orders/${orderId}`, {
@@ -98,7 +124,47 @@ export function AdminDashboard({ onNavigate }: AdminDashboardProps) {
             תמונת מצב מהירה ליום שישי הנבחר — הזמנות, יחידות למאפייה, הכנסות וחובות פתוחים.
           </p>
         </div>
-        <FridaySelector value={fridayDate} onChange={setFridayDate} label="תאריך שישי:" />
+        <div className="flex flex-wrap items-center gap-2">
+          <a
+            href={menuShareUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-[#25D366] hover:bg-[#1EB958] text-white font-extrabold text-xs shadow-sm"
+          >
+            <Share2 className="w-4 h-4" />
+            <span>שתף תפריט בוואטסאפ</span>
+          </a>
+          <button
+            type="button"
+            onClick={handleCopyMenuLink}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-white border border-[#E8D5BE] hover:border-[#C85A17] text-[#8A330B] font-extrabold text-xs shadow-sm"
+          >
+            {copiedMenuLink ? <Check className="w-4 h-4 text-emerald-600" /> : <Link2 className="w-4 h-4" />}
+            <span>{copiedMenuLink ? 'הקישור הועתק!' : 'העתק קישור תפריט'}</span>
+          </button>
+          <FridaySelector value={fridayDate} onChange={setFridayDate} label="תאריך שישי:" />
+        </div>
+      </div>
+
+      {/* כפתורי שיתוף תפריט גם במובייל */}
+      <div className="md:hidden grid grid-cols-2 gap-2">
+        <a
+          href={menuShareUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="py-2.5 px-3 rounded-xl bg-[#25D366] text-white font-extrabold text-xs flex items-center justify-center gap-1.5 shadow-sm"
+        >
+          <Share2 className="w-4 h-4" />
+          <span>שתף תפריט בוואטסאפ</span>
+        </a>
+        <button
+          type="button"
+          onClick={handleCopyMenuLink}
+          className="py-2.5 px-3 rounded-xl bg-white border border-[#E8D5BE] text-[#8A330B] font-extrabold text-xs flex items-center justify-center gap-1.5 shadow-sm"
+        >
+          {copiedMenuLink ? <Check className="w-4 h-4 text-emerald-600" /> : <Link2 className="w-4 h-4" />}
+          <span>{copiedMenuLink ? 'קישור הועתק!' : 'העתק קישור תפריט'}</span>
+        </button>
       </div>
 
       {/* הזמנות ממתינות לאישור */}

@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { formatFridayLabel, formatILS, ORDER_STATUS_LABELS, ORDER_TYPE_LABELS } from '../lib/format';
 import { buildCustomerPortalUrl, buildWhatsAppShareUrl, formatOrderWhatsApp } from '../lib/whatsappFormat';
+import { getOrderPaymentMeta } from '../lib/paymentMeta';
 import { getPaymentVisualState } from './SupplierInvoiceSheet';
 import type { BusinessSettings, Order, OrderStatus, OrderType } from '../types';
 
@@ -48,6 +49,8 @@ export function OrderCard({
 }: OrderCardProps) {
   const [copied, setCopied] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
+  const [pendingStatus, setPendingStatus] = useState<OrderStatus | null>(null);
+  const paymentMeta = getOrderPaymentMeta(order.id);
 
   const handleCopyCustomerLink = async () => {
     if (!order.user_id) return;
@@ -127,7 +130,7 @@ export function OrderCard({
               {isCharity ? '₪0.00' : formatILS(order.total_amount)}
             </div>
             {!isCharity ? (
-              <div className="flex flex-col items-end gap-0.5">
+              <div className="flex flex-col items-end gap-1">
                 <button
                   type="button"
                   onClick={(e) => {
@@ -136,11 +139,20 @@ export function OrderCard({
                   }}
                   className={`inline-block px-2 py-0.5 rounded-full text-[11px] font-extrabold border transition-transform hover:scale-105 ${payState.badgeCls}`}
                 >
-                  {payState.label}
+                  {payState.status === 'paid'
+                    ? 'שולם מלא'
+                    : payState.status === 'partial'
+                    ? 'שולם חלקית'
+                    : 'לא שולם'}
                 </button>
                 {payState.status === 'partial' && (
-                  <span className="text-[10px] font-bold text-amber-900">
+                  <span className="text-[10px] font-extrabold px-1.5 py-0.5 rounded bg-amber-100 text-amber-950">
                     שולם {formatILS(order.paid_amount)} · נותר {formatILS(unpaid)}
+                  </span>
+                )}
+                {order.paid_amount > 0 && paymentMeta && (
+                  <span className="text-[10px] font-bold text-slate-500">
+                    {paymentMeta.methodLabel} · {paymentMeta.paidTime}
                   </span>
                 )}
               </div>
@@ -208,36 +220,67 @@ export function OrderCard({
         )}
       </div>
 
-      {/* סרגל 4 שלבי סטטוס הזמנה בלחיצה ישירה: ממתין | התקבל | מוכן למסירה | נמסר */}
+      {/* סרגל 4 שלבי סטטוס הזמנה עם אישור מפורש ("עדכן") למניעת לחיצות בטעות */}
       <div className="mt-3.5 pt-3 border-t border-[#F3E9DC] space-y-2.5">
         {order.status === 'awaiting_approval' ? (
           <button
             type="button"
             onClick={() => onCycleStatus(order, 'received')}
-            className="w-full min-h-[48px] rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-extrabold flex items-center justify-center gap-1.5"
+            className="w-full min-h-[44px] rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-extrabold flex items-center justify-center gap-1.5"
           >
             <CheckCircle2 className="w-4 h-4" />
             <span>אשר הזמנה (העבר ל״התקבל״)</span>
           </button>
         ) : (
-          <div className="grid grid-cols-4 gap-1">
-            {STATUS_STAGES.map((st) => {
-              const active = order.status === st.key;
-              return (
-                <button
-                  key={st.key}
-                  type="button"
-                  onClick={() => onCycleStatus(order, st.key)}
-                  className={`min-h-[42px] px-1 rounded-xl border text-[11px] font-extrabold leading-tight transition-all active:scale-[0.97] ${
-                    active
-                      ? `${st.activeCls} shadow-sm`
-                      : 'bg-[#FAF6F0] text-slate-600 border-[#E8D5BE] hover:bg-[#F3E9DC]'
-                  }`}
-                >
-                  {st.label}
-                </button>
-              );
-            })}
+          <div className="space-y-2">
+            <div className="grid grid-cols-4 gap-1">
+              {STATUS_STAGES.map((st) => {
+                const isSelected = (pendingStatus ?? order.status) === st.key;
+                return (
+                  <button
+                    key={st.key}
+                    type="button"
+                    onClick={() => {
+                      if (st.key === order.status) setPendingStatus(null);
+                      else setPendingStatus(st.key);
+                    }}
+                    className={`min-h-[40px] px-1 rounded-xl border text-[11px] font-extrabold leading-tight transition-all ${
+                      isSelected
+                        ? `${st.activeCls} shadow-sm ${pendingStatus === st.key ? 'ring-2 ring-offset-1 ring-slate-900' : ''}`
+                        : 'bg-[#FAF6F0] text-slate-600 border-[#E8D5BE] hover:bg-[#F3E9DC]'
+                    }`}
+                  >
+                    {st.label}
+                  </button>
+                );
+              })}
+            </div>
+            {pendingStatus && pendingStatus !== order.status && (
+              <div className="flex items-center justify-between gap-2 p-2 rounded-xl bg-amber-50 border border-amber-300">
+                <span className="text-[11px] font-extrabold text-amber-950">
+                  לעדכן סטטוס ל״{ORDER_STATUS_LABELS[pendingStatus]}״?
+                </span>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setPendingStatus(null)}
+                    className="px-2.5 py-1 rounded-lg bg-white border border-amber-300 text-[11px] font-bold text-slate-600"
+                  >
+                    בטל
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onCycleStatus(order, pendingStatus);
+                      setPendingStatus(null);
+                    }}
+                    className="px-3 py-1 rounded-lg bg-[#C85A17] hover:bg-[#A9440F] text-white text-[11px] font-extrabold"
+                  >
+                    עדכן
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
 

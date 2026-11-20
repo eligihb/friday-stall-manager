@@ -74,6 +74,8 @@ export function WhatsAppOrderParser({
   const [overridePreorderCutoff, setOverridePreorderCutoff] = useState(false);
 
   const [rawText, setRawText] = useState('');
+  const [pasteBoxOpen, setPasteBoxOpen] = useState(false);
+  const [customerConfirmed, setCustomerConfirmed] = useState(false);
   const [parsedItems, setParsedItems] = useState<ParsedOrderLine[]>([]);
   const [unmatched, setUnmatched] = useState<string[]>([]);
   const [hasParsed, setHasParsed] = useState(false);
@@ -407,30 +409,58 @@ export function WhatsAppOrderParser({
         </div>
       )}
 
-      {/* 1. תיבה קומפקטית להדבקת הודעת וואטסאפ */}
-      <div className="p-3 rounded-2xl bg-[#FAF6F0] border border-[#E8D5BE] space-y-2">
-        <label className="block text-xs font-extrabold text-slate-700">
-          הדבקת טקסט חופשי מוואטסאפ (אופציונלי)
-        </label>
-        <textarea
-          rows={2}
-          value={rawText}
-          onChange={(e) => setRawText(e.target.value)}
-          placeholder='לדוגמה: "2 סלוף. לחוך. *וחלבה** גדול, 3 זעתר"'
-          className="w-full p-2.5 rounded-xl border border-[#E8D5BE] bg-white focus:border-[#C85A17] focus:outline-none text-xs leading-relaxed"
-        />
-        <button
-          type="button"
-          onClick={() => runParse(rawText)}
-          disabled={!rawText.trim()}
-          className="w-full py-2 px-3 rounded-xl bg-[#1E242B] hover:bg-slate-800 disabled:opacity-40 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition-colors"
-        >
-          <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-          <span>פענח הודעה</span>
-        </button>
+      {/* 1. תיבת הדבקת טקסט חופשי מוואטסאפ — מכווצת/נעולה כברירת מחדל */}
+      <div className="rounded-2xl bg-[#FAF6F0] border border-[#E8D5BE] overflow-hidden">
+        {!pasteBoxOpen ? (
+          <button
+            type="button"
+            onClick={() => setPasteBoxOpen(true)}
+            className="w-full py-2.5 px-3.5 flex items-center justify-between text-xs font-extrabold text-[#8A330B] hover:bg-[#FFF7ED] transition-colors"
+          >
+            <span className="inline-flex items-center gap-1.5">
+              <Sparkles className="w-4 h-4 text-[#C85A17]" />
+              <span>הדבק טקסט להזמנה (פענוח וואטסאפ)</span>
+            </span>
+            <span className="text-[11px] px-2 py-0.5 rounded-lg bg-white border border-[#E8D5BE]">פתח</span>
+          </button>
+        ) : (
+          <div className="p-3 space-y-2">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-extrabold text-slate-700">
+                הדבק טקסט להזמנה (וואטסאפ)
+              </label>
+              <button
+                type="button"
+                onClick={() => setPasteBoxOpen(false)}
+                className="text-[11px] font-bold text-slate-500 hover:text-slate-800"
+              >
+                סגור
+              </button>
+            </div>
+            <textarea
+              rows={2}
+              value={rawText}
+              onChange={(e) => setRawText(e.target.value)}
+              placeholder='לדוגמה: "2 סלוף. לחוך. *וחלבה** גדול, 3 זעתר"'
+              className="w-full p-2.5 rounded-xl border border-[#E8D5BE] bg-white focus:border-[#C85A17] focus:outline-none text-xs leading-relaxed"
+            />
+            <button
+              type="button"
+              onClick={() => {
+                runParse(rawText);
+                setPasteBoxOpen(false);
+              }}
+              disabled={!rawText.trim()}
+              className="w-full py-2 px-3 rounded-xl bg-[#1E242B] hover:bg-slate-800 disabled:opacity-40 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition-colors"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+              <span>עדכן ופענח הודעה</span>
+            </button>
+          </div>
+        )}
 
         {unmatched.length > 0 && (
-          <div className="p-2.5 rounded-xl bg-red-100 border border-red-400 text-red-800 text-xs font-bold space-y-1">
+          <div className="mx-3 mb-3 p-2.5 rounded-xl bg-red-100 border border-red-400 text-red-800 text-xs font-bold space-y-1">
             <div className="flex items-center gap-1.5 font-extrabold">
               <AlertTriangle className="w-4 h-4 text-red-700 shrink-0" />
               <span>לא זוהו אוטומטית:</span>
@@ -536,19 +566,41 @@ export function WhatsAppOrderParser({
             required
             value={recipientName}
             onFocus={() => setShowSuggestions(true)}
-            onChange={(e) => handleNameChange(e.target.value)}
+            onChange={(e) => {
+              setCustomerConfirmed(false);
+              handleNameChange(e.target.value);
+            }}
             placeholder="שם מלא (או 4 ספרות טלפון)"
             className="px-3 py-2 rounded-xl border border-[#E8D5BE] bg-white text-sm font-semibold"
           />
-          <input
-            type="tel"
-            inputMode="tel"
-            value={recipientPhone}
-            onFocus={() => setShowSuggestions(true)}
-            onChange={(e) => handlePhoneChange(e.target.value)}
-            placeholder="טלפון נייד"
-            className="px-3 py-2 rounded-xl border border-[#E8D5BE] bg-white text-sm tabular-nums"
-          />
+          <div className="flex gap-1.5">
+            <input
+              type="tel"
+              inputMode="tel"
+              value={recipientPhone}
+              onFocus={() => setShowSuggestions(true)}
+              onChange={(e) => {
+                setCustomerConfirmed(false);
+                handlePhoneChange(e.target.value);
+              }}
+              placeholder="טלפון נייד"
+              className="flex-1 min-w-0 px-3 py-2 rounded-xl border border-[#E8D5BE] bg-white text-sm tabular-nums"
+            />
+            <button
+              type="button"
+              onClick={() => {
+                setCustomerConfirmed(true);
+                setShowSuggestions(false);
+              }}
+              className={`px-3 py-2 rounded-xl text-xs font-extrabold border shrink-0 transition-colors ${
+                customerConfirmed
+                  ? 'bg-emerald-600 text-white border-emerald-600'
+                  : 'bg-[#FFF7ED] text-[#8A330B] border-[#C85A17]/40 hover:bg-[#FFEDD5]'
+              }`}
+            >
+              {customerConfirmed ? 'עודכן ✓' : 'עדכן'}
+            </button>
+          </div>
         </div>
 
         {selectedUser ? (
@@ -854,7 +906,8 @@ export function WhatsAppOrderParser({
         className="w-full px-3 py-2 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] text-xs"
       />
 
-      <div className="flex items-center justify-between gap-3 bg-[#FAF6F0] px-3.5 py-2.5 rounded-2xl border border-[#E8D5BE]">
+      {/* כפתור שלח הזמנה צף (Floating Action Bar) בתחתית החלונית */}
+      <div className="sticky bottom-0 -mx-5 px-4 py-3 bg-white/95 backdrop-blur-md border-t border-[#E8D5BE] shadow-[0_-4px_16px_rgba(30,36,43,0.08)] flex items-center justify-between gap-3">
         <div className="tabular-nums">
           <div className="text-[11px] text-slate-500">
             {orderType === 'charity'
@@ -866,10 +919,10 @@ export function WhatsAppOrderParser({
         <button
           type="submit"
           disabled={submitting || parsedItems.length === 0}
-          className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-[#C85A17] hover:bg-[#A9440F] disabled:opacity-50 text-white font-bold text-xs shadow-sm"
+          className="inline-flex items-center gap-1.5 px-5 py-3 rounded-2xl bg-[#C85A17] hover:bg-[#A9440F] disabled:opacity-50 text-white font-extrabold text-sm shadow-md active:scale-[0.98] transition-all"
         >
           <Send className="w-4 h-4" />
-          <span>{submitting ? 'שומר...' : 'שמור הזמנה'}</span>
+          <span>{submitting ? 'שולח...' : 'שלח הזמנה'}</span>
         </button>
       </div>
     </form>

@@ -17,6 +17,7 @@ import { SupplierPortal } from './pages/SupplierPortal';
 import { CustomerPortal } from './pages/CustomerPortal';
 import { CustomerLivePortal } from './pages/CustomerLivePortal';
 import { QuickApproveView } from './pages/QuickApproveView';
+import { DigitalMenuPage } from './pages/DigitalMenuPage';
 import { APP_BRAND_NAME } from './lib/version';
 
 const VALID_TABS: AdminTab[] = [
@@ -35,31 +36,36 @@ function parseSpecialRoute(): {
   customerPortalId: number | null;
   quickApproveOrderId: number | null;
   directOrderId: number | null;
+  isDigitalMenu: boolean;
 } {
   const hashClean = window.location.hash.replace(/^#\/?/, '');
   const searchParams = new URLSearchParams(window.location.search);
 
+  if (hashClean === 'menu' || hashClean === 'order') {
+    return { customerPortalId: null, quickApproveOrderId: null, directOrderId: null, isDigitalMenu: true };
+  }
+
   const queryCustomer = searchParams.get('customer');
   if (queryCustomer && /^\d+$/.test(queryCustomer)) {
-    return { customerPortalId: Number(queryCustomer), quickApproveOrderId: null, directOrderId: null };
+    return { customerPortalId: Number(queryCustomer), quickApproveOrderId: null, directOrderId: null, isDigitalMenu: false };
   }
 
   const cMatch = hashClean.match(/^c\/(\d+)/);
   if (cMatch) {
-    return { customerPortalId: Number(cMatch[1]), quickApproveOrderId: null, directOrderId: null };
+    return { customerPortalId: Number(cMatch[1]), quickApproveOrderId: null, directOrderId: null, isDigitalMenu: false };
   }
 
   const approveMatch = hashClean.match(/^approve-quick\/(\d+)/);
   if (approveMatch) {
-    return { customerPortalId: null, quickApproveOrderId: Number(approveMatch[1]), directOrderId: null };
+    return { customerPortalId: null, quickApproveOrderId: Number(approveMatch[1]), directOrderId: null, isDigitalMenu: false };
   }
 
   const orderMatch = hashClean.match(/^order\/(\d+)/);
   if (orderMatch) {
-    return { customerPortalId: null, quickApproveOrderId: null, directOrderId: Number(orderMatch[1]) };
+    return { customerPortalId: null, quickApproveOrderId: null, directOrderId: Number(orderMatch[1]), isDigitalMenu: false };
   }
 
-  return { customerPortalId: null, quickApproveOrderId: null, directOrderId: null };
+  return { customerPortalId: null, quickApproveOrderId: null, directOrderId: null, isDigitalMenu: false };
 }
 
 function getTabFromHash(): AdminTab {
@@ -106,6 +112,11 @@ function AppRouter() {
     window.addEventListener('hashchange', onHashChange);
     return () => window.removeEventListener('hashchange', onHashChange);
   }, []);
+
+  // עמוד תפריט לקוחות דיגיטלי מעוצב ללא סיסמה (#/menu ו-#/order)
+  if (specialRoute.isDigitalMenu) {
+    return <DigitalMenuPage />;
+  }
 
   // אישור מיידי מהיר ללא טעינת מסכי הניהול
   if (specialRoute.quickApproveOrderId !== null) {

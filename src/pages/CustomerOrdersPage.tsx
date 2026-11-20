@@ -79,7 +79,7 @@ export function CustomerOrdersPage() {
     try {
       const qs = new URLSearchParams({ order_type: 'customer' });
       if (fridayDate) qs.set('friday_date', fridayDate);
-      if (statusFilter) qs.set('status', statusFilter);
+      if (statusFilter && statusFilter !== 'pending') qs.set('status', statusFilter);
 
       const [ordRes, allCustOrdRes, prodRes, usrRes, setRes] = await Promise.all([
         apiFetch<{ orders: Order[] }>(`/api/orders?${qs.toString()}`),
@@ -121,12 +121,16 @@ export function CustomerOrdersPage() {
   }, [users, recentOrdersHistory]);
 
   const sortedOrders = useMemo(() => {
-    const copy = [...orders];
+    const base =
+      statusFilter === 'pending'
+        ? orders.filter((o) => o.status === 'pending' || o.status === 'awaiting_approval')
+        : orders;
+    const copy = [...base];
     if (sortBy === 'amount_desc') copy.sort((a, b) => b.total_amount - a.total_amount);
     else if (sortBy === 'amount_asc') copy.sort((a, b) => a.total_amount - b.total_amount);
     else copy.sort((a, b) => b.id - a.id);
     return copy;
-  }, [orders, sortBy]);
+  }, [orders, sortBy, statusFilter]);
 
   const quickVisibleCustomers = useMemo(() => {
     const base = quickCustSearch.trim()
@@ -310,20 +314,21 @@ export function CustomerOrdersPage() {
   }, [orders]);
 
   return (
-    <div className="space-y-5">
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-        <div className="hidden md:block">
+    <div className="space-y-4">
+      {/* כותרת ובורר תאריך לדסקטופ בלבד — במובייל קיים בורר ב-Header וכפתור הזמנה חדשה בסרגל התחתון */}
+      <div className="hidden md:flex md:items-center md:justify-between gap-3">
+        <div>
           <h2 className="font-serif text-3xl font-bold text-slateink-800">הזמנות לקוחות</h2>
           <p className="text-sm text-slate-600 mt-1">
-            יצירה ועריכת הזמנות במחירון הזמנה מוקדמת (`preorder_price`), תיעוד תשלומים ושיתוף בוואטסאפ.
+            יצירה ועריכת הזמנות, תיעוד תשלומים ושיתוף בוואטסאפ.
           </p>
         </div>
-        <div className="flex flex-wrap items-center justify-between md:justify-end gap-2.5">
+        <div className="flex flex-wrap items-center justify-end gap-2.5">
           <FridaySelector value={fridayDate} onChange={setFridayDate} allowAll />
           <button
             type="button"
             onClick={() => openCreateModal()}
-            className="inline-flex items-center gap-1.5 px-4 min-h-[48px] md:min-h-[42px] rounded-xl bg-[#C85A17] hover:bg-[#A9440F] text-white font-bold text-xs sm:text-sm shadow-sm"
+            className="inline-flex items-center gap-1.5 px-4 min-h-[42px] rounded-xl bg-[#C85A17] hover:bg-[#A9440F] text-white font-bold text-sm shadow-sm"
           >
             <Plus className="w-4 h-4" />
             <span>הזמנה חדשה</span>
@@ -331,64 +336,43 @@ export function CustomerOrdersPage() {
         </div>
       </div>
 
-      {/* לקוחות אחרונים (5 אחרונים + הצג עוד + חיפוש מהיר בתחילת שם) להוספת הזמנה בלחיצה */}
+      {/* שורת צ'יפים קומפקטית ודקה ל-5 לקוחות אחרונים */}
       {users.length > 0 && (
-        <div className="bg-white rounded-2xl p-3.5 sm:p-4 border border-[#E8D5BE] shadow-soft space-y-2.5">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-            <div className="flex items-center gap-1.5 text-xs font-extrabold text-slate-700">
-              <Users className="w-4 h-4 text-[#C85A17]" />
-              <span>הוספת הזמנה מהירה — 5 לקוחות אחרונים</span>
-            </div>
-            <div className="relative sm:w-64">
-              <Search className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2" />
-              <input
-                type="text"
-                value={quickCustSearch}
-                onChange={(e) => setQuickCustSearch(e.target.value)}
-                placeholder="חיפוש מהיר: הקלד תחילת שם או 4 ספרות..."
-                className="w-full pr-9 pl-3 py-2 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] focus:bg-white focus:border-[#C85A17] focus:outline-none text-xs"
-              />
-            </div>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <div className="relative w-36 sm:w-48">
+            <Search className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              value={quickCustSearch}
+              onChange={(e) => setQuickCustSearch(e.target.value)}
+              placeholder="חפש לקוח..."
+              className="w-full pr-8 pl-2 py-1.5 rounded-xl border border-[#E8D5BE] bg-white text-xs focus:border-[#C85A17] focus:outline-none"
+            />
           </div>
-
-          <div className="flex flex-wrap gap-2">
-            {quickVisibleCustomers.map((u) => (
-              <button
-                key={u.id}
-                type="button"
-                onClick={() => openCreateModal(u)}
-                className="min-h-[44px] px-3 py-1.5 rounded-xl bg-[#FAF6F0] hover:bg-[#FFF7ED] border border-[#E8D5BE] hover:border-[#C85A17] text-xs font-bold text-slate-800 inline-flex items-center gap-1.5 active:scale-[0.98] transition-all"
-              >
-                <Plus className="w-3.5 h-3.5 text-[#C85A17] shrink-0" />
-                <span>{u.name}</span>
-                {getPhoneLast4(u.phone) && (
-                  <span className="text-[10px] text-slate-400 tabular-nums">#{getPhoneLast4(u.phone)}</span>
-                )}
-              </button>
-            ))}
-            {!quickCustSearch.trim() && recentCustomers.length > 5 && (
-              <button
-                type="button"
-                onClick={() => setShowAllRecentCusts((v) => !v)}
-                className="min-h-[44px] px-3 py-1.5 rounded-xl bg-white border border-dashed border-[#C85A17]/60 text-[#8A330B] text-xs font-extrabold inline-flex items-center gap-1"
-              >
-                {showAllRecentCusts ? (
-                  <>
-                    <ChevronUp className="w-3.5 h-3.5" />
-                    <span>הצג פחות</span>
-                  </>
-                ) : (
-                  <>
-                    <ChevronDown className="w-3.5 h-3.5" />
-                    <span>עוד ({recentCustomers.length - 5})</span>
-                  </>
-                )}
-              </button>
-            )}
-            {quickCustSearch.trim() && quickVisibleCustomers.length === 0 && (
-              <span className="text-xs text-slate-400 py-2">לא נמצאו לקוחות התואמים ל״{quickCustSearch}״</span>
-            )}
-          </div>
+          {quickVisibleCustomers.map((u) => (
+            <button
+              key={u.id}
+              type="button"
+              onClick={() => openCreateModal(u)}
+              className="px-2.5 py-1.5 rounded-xl bg-white hover:bg-[#FFF7ED] border border-[#E8D5BE] text-xs font-bold text-slate-800 inline-flex items-center gap-1 active:scale-[0.98]"
+            >
+              <Plus className="w-3 h-3 text-[#C85A17] shrink-0" />
+              <span>{u.name}</span>
+              {getPhoneLast4(u.phone) && (
+                <span className="text-[10px] text-slate-400 tabular-nums">#{getPhoneLast4(u.phone)}</span>
+              )}
+            </button>
+          ))}
+          {!quickCustSearch.trim() && recentCustomers.length > 5 && (
+            <button
+              type="button"
+              onClick={() => setShowAllRecentCusts((v) => !v)}
+              className="px-2.5 py-1.5 rounded-xl bg-white border border-dashed border-[#C85A17]/60 text-[#8A330B] text-xs font-extrabold inline-flex items-center gap-1"
+            >
+              {showAllRecentCusts ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+              <span>{showAllRecentCusts ? 'פחות' : `+${recentCustomers.length - 5}`}</span>
+            </button>
+          )}
         </div>
       )}
 
@@ -418,20 +402,19 @@ export function CustomerOrdersPage() {
       <div className="flex flex-wrap items-center justify-between gap-2.5">
         <div className="flex flex-wrap gap-1.5">
           {[
-            { key: '', label: 'הכל' },
-            { key: 'awaiting_approval', label: 'ממתינות לאישור' },
-            { key: 'pending', label: 'ממתין' },
-            { key: 'received', label: 'התקבל' },
-            { key: 'ready', label: 'מוכן למסירה' },
-            { key: 'delivered', label: 'נמסר' },
+            { key: '', label: 'הכל', activeCls: 'bg-[#1E242B] text-white' },
+            { key: 'pending', label: 'ממתין', activeCls: 'bg-red-600 text-white' },
+            { key: 'received', label: 'התקבל', activeCls: 'bg-blue-600 text-white' },
+            { key: 'ready', label: 'מוכן למסירה', activeCls: 'bg-orange-500 text-white' },
+            { key: 'delivered', label: 'נמסר', activeCls: 'bg-emerald-600 text-white' },
           ].map((f) => (
             <button
               key={f.key}
               type="button"
               onClick={() => setStatusFilter(f.key)}
-              className={`min-h-[40px] md:min-h-[36px] px-3 py-1.5 rounded-xl text-xs font-bold ${
+              className={`min-h-[36px] px-3 py-1.5 rounded-xl text-xs font-bold transition-colors ${
                 statusFilter === f.key
-                  ? 'bg-[#1E242B] text-white'
+                  ? f.activeCls
                   : 'bg-white border border-[#E8D5BE] text-slate-600'
               }`}
             >

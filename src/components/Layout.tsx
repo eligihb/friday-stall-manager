@@ -196,22 +196,25 @@ export function Layout({ activeTab, onSelectTab, children }: LayoutProps) {
       {/* תוכן ראשי */}
       <div className="flex-1 flex flex-col md:pr-64 min-w-0 max-w-full">
         {/* כותרת עליונה דביקה למובייל (< 768px) */}
-        <header className="md:hidden sticky top-0 z-30 bg-[#1E242B] text-white px-3.5 py-2.5 shadow-md border-b border-white/10">
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2 min-w-0">
+        <header className="md:hidden sticky top-0 z-30 bg-[#1E242B] text-white px-3 pt-[max(0.85rem,env(safe-area-inset-top))] pb-2.5 shadow-md border-b border-white/10">
+          <div className="flex items-center justify-between gap-2 min-h-[44px]">
+            <div
+              className="flex items-center gap-2 min-w-0 cursor-pointer"
+              onClick={() => onSelectTab('dashboard')}
+            >
               <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-[#C85A17] to-[#D97706] flex items-center justify-center shrink-0">
                 <Flame className="w-4 h-4 text-white" />
               </div>
-              <div className="min-w-0">
-                <div className="flex items-center gap-1.5">
-                  <span className="font-serif font-bold text-base leading-none truncate">
+              <div className="min-w-0 py-0.5">
+                <div className="flex items-center gap-1.5 flex-nowrap">
+                  <span className="font-serif font-bold text-sm sm:text-base leading-snug truncate">
                     {isAdmin ? TAB_TITLES[activeTab] : APP_BRAND_NAME}
                   </span>
-                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-white/10 text-amber-300 tabular-nums shrink-0">
+                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-white/15 text-amber-300 tabular-nums shrink-0 leading-none">
                     {APP_VERSION}
                   </span>
                 </div>
-                <div className="text-[11px] text-slate-300 truncate mt-0.5">
+                <div className="text-[11px] text-slate-300 truncate leading-tight mt-0.5">
                   {user.name} · {ROLE_LABELS[user.role]}
                 </div>
               </div>
@@ -219,13 +222,13 @@ export function Layout({ activeTab, onSelectTab, children }: LayoutProps) {
 
             <div className="flex items-center gap-1.5 shrink-0">
               {isAdmin && (
-                <label className="inline-flex items-center gap-1 bg-white/10 border border-white/15 rounded-xl px-2 py-1.5 min-h-[44px] font-bold text-amber-200">
+                <label className="inline-flex items-center gap-1 bg-white/10 border border-white/15 rounded-xl px-2 py-1.5 min-h-[40px] font-bold text-amber-200">
                   <Calendar className="w-3.5 h-3.5 text-amber-400 shrink-0" />
                   <select
                     value={fridayDate}
                     onChange={(e) => setFridayDate(e.target.value)}
                     aria-label="בחירת יום שישי"
-                    className="bg-transparent text-amber-100 font-bold text-base focus:outline-none max-w-[126px]"
+                    className="bg-transparent text-amber-100 font-bold text-xs focus:outline-none max-w-[104px]"
                   >
                     {fridayOptions.map((f) => (
                       <option key={f} value={f} className="text-slate-900">
@@ -347,18 +350,18 @@ export function Layout({ activeTab, onSelectTab, children }: LayoutProps) {
                 <span className="text-[11px] font-bold leading-none">הזמנות</span>
               </button>
 
-              {/* 3. קליטה מהירה — FAB מרכזי מוגבה */}
+              {/* 3. הזמנה חדשה — FAB מרכזי מוגבה */}
               <div className="flex flex-col items-center justify-end -mt-6">
                 <button
                   type="button"
                   onClick={() => setQuickOpen(true)}
                   className="w-14 h-14 rounded-full bg-gradient-to-br from-[#C85A17] to-[#9A3412] text-white shadow-[0_8px_20px_rgba(200,90,23,0.45)] border-4 border-[#FAF6F0] flex items-center justify-center active:scale-95 transition-transform"
-                  aria-label="קליטה מהירה"
+                  aria-label="הזמנה חדשה"
                 >
                   <Plus className="w-7 h-7 stroke-[2.6]" />
                 </button>
                 <span className="text-[10px] font-extrabold text-[#8A330B] mt-0.5 leading-none">
-                  קליטה מהירה
+                  הזמנה חדשה
                 </span>
               </div>
 

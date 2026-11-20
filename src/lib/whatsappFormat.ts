@@ -51,6 +51,46 @@ export function buildAdminOrderViewUrl(orderId: number): string {
   return `${getAppBaseUrl()}#/order/${orderId}`;
 }
 
+export function buildDigitalMenuUrl(): string {
+  return `${getAppBaseUrl()}#/menu`;
+}
+
+export function formatDigitalMenuWhatsApp(
+  products: Array<{ name: string; preorder_price: number; customer_price: number; is_active?: boolean }>,
+  settings?: Partial<BusinessSettings>
+): string {
+  const bizName = settings?.business_name || 'המטבח התימני – תפריט יום שישי';
+  const footer = settings?.whatsapp_footer ?? 'שבת שלום ומבורכת! 🕯️';
+  const active = products.filter((p) => p.is_active !== false);
+
+  const lines: string[] = [
+    `🫓 *${bizName}*`,
+    `🔥 מאפים תימניים טריים ולוהטים לשבת!`,
+    `⏰ *מבצע הזמנה מוקדמת:* עד יום שישי בשעה 06:00 בבוקר!`,
+    `━━━━━━━━━━━━━━━━`,
+  ];
+
+  for (const p of active) {
+    const pre = formatILS(p.preorder_price);
+    const reg = formatILS(p.customer_price);
+    lines.push(
+      p.preorder_price < p.customer_price
+        ? `• *${p.name}* — ${pre} במוקדמת (דוכן: ${reg})`
+        : `• *${p.name}* — ${reg}`
+    );
+  }
+
+  lines.push(`━━━━━━━━━━━━━━━━`);
+  lines.push(`✨ *מבצעי כמות:*`);
+  lines.push(`• פיתות זעתר / שום / שומשום: יחידה 5 ₪ · שלישייה 12 ₪ · שישייה 20 ₪`);
+  lines.push(`• ג'חנון: יחידה 9 ₪ · 5 יחידות ומעלה ב-8 ₪ ליחידה!`);
+  lines.push(``);
+  lines.push(`🛒 *להזמנה מהירה אונליין:*`);
+  lines.push(buildDigitalMenuUrl());
+  if (footer) lines.push(`\n${footer}`);
+  return lines.join('\n');
+}
+
 export function formatOrderWhatsApp(order: Order, settings?: Partial<BusinessSettings>): string {
   const bizName = settings?.business_name || 'דוכן שישי תימני';
   const footer = settings?.whatsapp_footer ?? 'שבת שלום ומבורכת! 🕯️';
