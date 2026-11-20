@@ -121,7 +121,7 @@ function createInitialDb(): LocalDb {
   ];
 
   const users: StoredUser[] = [
-    { id: 1, name: 'יגאל מנהל', phone: '050-5551000', email: 'admin@teimani.co.il', password: '123456', role: 'admin', balance: 0, notes: 'מנהל ראשי — דוכן שישי תימני', created_at: today },
+    { id: 1, name: 'אליאב מנהל', phone: '050-5551000', email: 'admin@teimani.co.il', password: '123456', role: 'admin', balance: 0, notes: 'מנהל ראשי — דוכן שישי תימני', created_at: today },
     { id: 2, name: 'מעדניית ראש העין', phone: '052-4442211', email: 'supplier@teimani.co.il', password: '123456', role: 'supplier', balance: 0, notes: 'ספק קבוע — משלוח בשישי ב-06:30', created_at: today },
     { id: 3, name: 'מינימרקט השכונה', phone: '054-8883322', email: 'market@teimani.co.il', password: '123456', role: 'supplier', balance: 0, notes: 'העברה בנקאית בתחילת שבוע', created_at: today },
   ];
@@ -204,7 +204,16 @@ function loadDb(): LocalDb {
   try {
     const raw = safeGetItem(STORAGE_KEY);
     if (raw) {
-      memoryDbFallback = JSON.parse(raw) as LocalDb;
+      const parsed = JSON.parse(raw) as LocalDb;
+      let mutated = false;
+      for (const u of parsed.users || []) {
+        if (u.role === 'admin' && u.name === 'יגאל מנהל') {
+          u.name = 'אליאב מנהל';
+          mutated = true;
+        }
+      }
+      memoryDbFallback = parsed;
+      if (mutated) saveDb(parsed);
       return memoryDbFallback;
     }
   } catch {}
