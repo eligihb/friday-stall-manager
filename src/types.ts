@@ -66,7 +66,14 @@ export interface OrderItem {
 }
 
 export type OrderType = 'customer' | 'supplier' | 'charity';
-export type OrderStatus = 'awaiting_approval' | 'pending' | 'received' | 'ready' | 'delivered';
+export type OrderStatus =
+  | 'awaiting_approval'
+  | 'pending'
+  | 'received'
+  | 'ready'
+  | 'delivered'
+  | 'cancel_requested'
+  | 'cancelled';
 
 export interface Order {
   id: number;

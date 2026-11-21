@@ -26,11 +26,16 @@ export const DEFAULT_CUSTOMER_ORDER_TEMPLATE = `🫓 *{שם_עסק} — הזמנ
 👁️ *צפייה ועריכה ביישומון:*
 {קישור_צפייה}`;
 
+export const DEFAULT_PAYMENT_PHONE = '054-2452100';
+
 export interface StorefrontConfig {
   customerPriceMode: CustomerPriceMode;
   hiddenProductIds: Record<number, boolean>;
   menuShareTemplate: string;
   customerOrderTemplate: string;
+  paymentPhone: string;
+  bitLink: string;
+  payboxLink: string;
 }
 
 const CONFIG_KEY = 'fsm_storefront_config_v1';
@@ -50,6 +55,9 @@ export function loadStorefrontConfig(): StorefrontConfig {
         hiddenProductIds: parsed.hiddenProductIds || {},
         menuShareTemplate: shareTpl,
         customerOrderTemplate: parsed.customerOrderTemplate || DEFAULT_CUSTOMER_ORDER_TEMPLATE,
+        paymentPhone: parsed.paymentPhone || DEFAULT_PAYMENT_PHONE,
+        bitLink: parsed.bitLink || '',
+        payboxLink: parsed.payboxLink || '',
       };
     }
   } catch {
@@ -60,6 +68,9 @@ export function loadStorefrontConfig(): StorefrontConfig {
     hiddenProductIds: {},
     menuShareTemplate: DEFAULT_MENU_SHARE_TEMPLATE,
     customerOrderTemplate: DEFAULT_CUSTOMER_ORDER_TEMPLATE,
+    paymentPhone: DEFAULT_PAYMENT_PHONE,
+    bitLink: '',
+    payboxLink: '',
   };
 }
 

@@ -27,6 +27,7 @@ import {
 } from '../lib/storefrontConfig';
 import { buildWhatsAppShareUrl, formatPublicApprovalWhatsApp } from '../lib/whatsappFormat';
 import { BottomSheet } from '../components/BottomSheet';
+import { QuickCustomerPayBox } from '../components/QuickCustomerPayBox';
 import type { Order, OrderStatus } from '../types';
 
 interface StorefrontProduct {
@@ -697,14 +698,25 @@ export function DigitalMenuPage() {
                   </div>
                 </div>
               </div>
-              <button
-                type="button"
-                onClick={handleSwitchUser}
-                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl bg-[#FAF6F0] border border-[#E8D5BE] text-[11px] font-bold text-slate-600 hover:text-red-600 shrink-0"
-              >
-                <LogOut className="w-3 h-3" />
-                <span>החלף משתמש</span>
-              </button>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  {savedProfile.customerId && (
+                    <a
+                      href={`#/c/${savedProfile.customerId}`}
+                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl bg-[#C85A17] hover:bg-[#A9440F] text-white text-[11px] font-extrabold shadow-sm"
+                    >
+                      <Wallet className="w-3 h-3" />
+                      <span>לאזור האישי שלי</span>
+                    </a>
+                  )}
+                  <button
+                    type="button"
+                    onClick={handleSwitchUser}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl bg-[#FAF6F0] border border-[#E8D5BE] text-[11px] font-bold text-slate-600 hover:text-red-600 shrink-0"
+                  >
+                    <LogOut className="w-3 h-3" />
+                    <span>החלף משתמש</span>
+                  </button>
+                </div>
             </div>
 
             {customerHistory && (
@@ -825,6 +837,18 @@ export function DigitalMenuPage() {
               <ExternalLink className="w-4 h-4" />
               <span>פתח וואטסאפ לאישור הזמנה ({formatILS(submitted.total)})</span>
             </a>
+
+            <QuickCustomerPayBox amountToPay={submitted.total} />
+
+            {savedProfile?.customerId && (
+              <a
+                href={`#/c/${savedProfile.customerId}`}
+                className="w-full py-2 px-4 rounded-xl bg-[#FAF6F0] border border-[#E8D5BE] text-[#8A330B] font-extrabold text-xs flex items-center justify-center gap-1.5 hover:bg-[#F3E9DC]"
+              >
+                <Wallet className="w-3.5 h-3.5" />
+                <span>מעבר לאזור האישי ולמעקב אחר ההזמנה</span>
+              </a>
+            )}
           </section>
         )}
 

@@ -50,6 +50,11 @@ export function buildQuickApproveUrl(orderId: number, encodedData?: string): str
   return `${getAppBaseUrl()}#/approve-quick/${orderId}${qs}`;
 }
 
+export function buildCancelApproveUrl(orderId: number, encodedData?: string): string {
+  const qs = encodedData ? `?d=${encodedData}` : '';
+  return `${getAppBaseUrl()}#/approve-cancel/${orderId}${qs}`;
+}
+
 export function buildAdminOrderViewUrl(orderId: number, encodedData?: string): string {
   const qs = encodedData ? `?d=${encodedData}` : '';
   return `${getAppBaseUrl()}#/order/${orderId}${qs}`;
@@ -206,5 +211,49 @@ export function formatSupplierLedgerWhatsApp(user: User, orders: Order[]): strin
     );
   }
 
+  return lines.join('\n');
+}
+
+export function formatCancelRequestWhatsApp(payload: {
+  id: number;
+  business_name: string;
+  recipient_name: string;
+  phone: string;
+  friday_date: string;
+  items: Array<{ product_id?: number; product_name: string; quantity: number; unit_price_snapshot?: number; unit_price?: number }>;
+  total_amount: number;
+  notes?: string;
+}): string {
+  const encoded = encodeOrderLinkPayload({
+    id: payload.id,
+    n: payload.recipient_name,
+    p: payload.phone,
+    f: payload.friday_date,
+    t: payload.total_amount,
+    nt: payload.notes || '',
+    i: payload.items.map((it) => ({
+      pid: it.product_id ?? 0,
+      q: it.quantity,
+      u: it.unit_price_snapshot ?? it.unit_price ?? 0,
+      nm: it.product_name,
+    })),
+  });
+
+  const itemLines = payload.items.map(
+    (it) => `• ${it.quantity} × ${it.product_name}`
+  );
+
+  const lines: string[] = [
+    `❌ *בקשת ביטול הזמנה #${payload.id} — ${payload.business_name}*`,
+    `👤 לקוח: ${payload.recipient_name}${payload.phone ? ` (${payload.phone})` : ''}`,
+    `📅 ${formatFridayLabel(payload.friday_date)}`,
+    `━━━━━━━━━━━━━━━━`,
+    ...itemLines,
+    `━━━━━━━━━━━━━━━━`,
+    `💳 סכום הזמנה: *${formatILS(payload.total_amount)}*`,
+    ``,
+    `✅ לאישור או דחיית הביטול לחץ כאן:`,
+    buildCancelApproveUrl(payload.id, encoded),
+  ];
   return lines.join('\n');
 }

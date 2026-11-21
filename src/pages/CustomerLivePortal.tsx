@@ -1,23 +1,31 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   Flame,
-  CheckCircle2,
   Clock,
-  ShoppingBag,
   Plus,
-  Minus,
-  Send,
   History,
   Wallet,
+  XCircle,
+  AlertTriangle,
+  Lock,
   ExternalLink,
+  CheckCircle2,
+  X,
 } from 'lucide-react';
 import { apiFetch } from '../lib/api';
-import { formatFridayLabel, formatILS, getNextFridayISO, ORDER_STATUS_LABELS } from '../lib/format';
-import { getFridayPricingStatus } from '../lib/pricingCutoff';
-import { buildWhatsAppShareUrl, formatPublicApprovalWhatsApp } from '../lib/whatsappFormat';
-import { isProductInStock, loadStockMap } from '../lib/stockState';
+import {
+  formatFridayLabel,
+  formatILS,
+  isBeforeFridayCancelCutoff,
+  ORDER_STATUS_LABELS,
+} from '../lib/format';
+import {
+  buildWhatsAppShareUrl,
+  formatCancelRequestWhatsApp,
+} from '../lib/whatsappFormat';
+import { QuickCustomerPayBox } from '../components/QuickCustomerPayBox';
 import { APP_BRAND_NAME } from '../lib/version';
-import type { AdminProduct, BusinessSettings, Order, OrderStatus, User } from '../types';
+import type { BusinessSettings, Order, OrderStatus, User } from '../types';
 
 interface CustomerLivePortalProps {
   customerId: number;
@@ -37,51 +45,63 @@ function getStepIndex(status: OrderStatus): number {
   return 4;
 }
 
+function getPaymentBadge(order: Order): { label: string; cls: string } {
+  if (order.status === 'cancelled') {
+    return { label: 'בוטל', cls: 'bg-slate-200 text-slate-700 border-slate-300' };
+  }
+  if (order.status === 'cancel_requested') {
+    return { label: 'ממתין לאישור ביטול', cls: 'bg-orange-100 text-orange-900 border-orange-300' };
+  }
+  if (order.total_amount <= 0 || order.paid_amount >= order.total_amount - 0.01) {
+    return { label: 'שולם מלא ✓', cls: 'bg-emerald-100 text-emerald-800 border-emerald-300' };
+  }
+  if (order.paid_amount > 0) {
+    return { label: 'שולם חלקית', cls: 'bg-amber-100 text-amber-900 border-amber-300' };
+  }
+  return { label: 'טרם שולם', cls: 'bg-red-100 text-red-800 border-red-300' };
+}
+
 export function CustomerLivePortal({ customerId }: CustomerLivePortalProps) {
   const [customer, setCustomer] = useState<User | null>(null);
   const [orders, setOrders] = useState<Order[]>([]);
-  const [products, setProducts] = useState<AdminProduct[]>([]);
   const [settings, setSettings] = useState<BusinessSettings | null>(null);
-  const [stockMap] = useState(() => loadStockMap());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  // הזמנה עצמית / עדכון הזמנה
-  const [fridayDate] = useState(getNextFridayISO());
-  const [cart, setCart] = useState<Record<number, number>>({});
-  const [notes, setNotes] = useState('');
-  const [submitting, setSubmitting] = useState(false);
-  const [submittedWaUrl, setSubmittedWaUrl] = useState('');
-  const [submittedOrderId, setSubmittedOrderId] = useState<number | null>(null);
-
-  const pricing = useMemo(() => getFridayPricingStatus(fridayDate), [fridayDate]);
+  // מודאל בקשת ביטול הזמנה
+  const [cancelTarget, setCancelTarget] = useState<Order | null>(null);
+  const [cancelling, setCancelling] = useState(false);
+  const [cancelWaUrl, setCancelWaUrl] = useState<string>('');
+  const [cancelNoticeOrderId, setCancelNoticeOrderId] = useState<number | null>(null);
 
   useEffect(() => {
     let active = true;
     setLoading(true);
     Promise.all([
-      apiFetch<{ users: User[] }>('/api/users').catch(() => ({ users: [] as User[] })),
-      apiFetch<{ orders: Order[] }>('/api/orders').catch(() => ({ orders: [] as Order[] })),
-      apiFetch<{ products: AdminProduct[] }>('/api/products').catch(() => ({ products: [] as AdminProduct[] })),
-      apiFetch<{ settings: BusinessSettings }>('/api/settings').catch(() => ({
-        settings: {
-          business_name: APP_BRAND_NAME,
-          admin_whatsapp_phone: '0542452100',
-          default_delivery_fee: 0,
-          whatsapp_footer: '',
-        },
+      apiFetch<{ customer: User | null; orders: Order[] }>(
+        `/api/public/customer-history?customer_id=${customerId}`
+      ).catch(() => ({ customer: null as User | null, orders: [] as Order[] })),
+      apiFetch<{ business_name?: string; admin_whatsapp_phone?: string; whatsapp_footer?: string }>(
+        '/api/public/storefront'
+      ).catch(() => ({
+        business_name: APP_BRAND_NAME,
+        admin_whatsapp_phone: '0542452100',
+        whatsapp_footer: '',
       })),
     ])
-      .then(([uRes, oRes, pRes, sRes]) => {
+      .then(([histRes, sfRes]) => {
         if (!active) return;
-        const found = uRes.users.find((u) => u.id === customerId) || null;
-        setCustomer(found);
-        const custOrders = oRes.orders
-          .filter((o) => o.user_id === customerId)
-          .sort((a, b) => b.id - a.id);
-        setOrders(custOrders);
-        setProducts(pRes.products.filter((p) => p.is_active));
-        setSettings(sRes.settings);
+        setCustomer(histRes.customer);
+        const sorted = [...(histRes.orders || [])].sort(
+          (a, b) => b.friday_date.localeCompare(a.friday_date) || b.id - a.id
+        );
+        setOrders(sorted);
+        setSettings({
+          business_name: sfRes.business_name || APP_BRAND_NAME,
+          admin_whatsapp_phone: sfRes.admin_whatsapp_phone || '0542452100',
+          default_delivery_fee: 0,
+          whatsapp_footer: sfRes.whatsapp_footer || '',
+        });
       })
       .catch((err) => {
         if (active) setError(err instanceof Error ? err.message : 'שגיאה בטעינת האזור האישי');
@@ -94,70 +114,54 @@ export function CustomerLivePortal({ customerId }: CustomerLivePortalProps) {
     };
   }, [customerId]);
 
+  // חישוב 3 נתוני סיכום חשבון אישי (ללא הזמנות שבוטלו)
+  const accountSummary = useMemo(() => {
+    const valid = orders.filter((o) => o.status !== 'cancelled');
+    const totalOrdered = valid.reduce((s, o) => s + (Number(o.total_amount) || 0), 0);
+    const totalPaid = valid.reduce((s, o) => s + (Number(o.paid_amount) || 0), 0);
+    const balanceDue = Math.max(0, totalOrdered - totalPaid);
+    return { totalOrdered, totalPaid, balanceDue };
+  }, [orders]);
+
   const currentOrder = orders[0] || null;
   const pastOrders = orders.slice(1);
 
-  const getProductPrice = (p: AdminProduct) =>
-    pricing.isPreorder ? p.preorder_price : p.customer_price;
-
-  const cartItems = useMemo(() => {
-    return products
-      .filter((p) => (cart[p.id] || 0) > 0)
-      .map((p) => ({
-        product: p,
-        quantity: cart[p.id],
-        unit_price: getProductPrice(p),
-      }));
-  }, [products, cart, pricing.isPreorder]);
-
-  const cartTotal = useMemo(
-    () => cartItems.reduce((sum, it) => sum + it.quantity * it.unit_price, 0),
-    [cartItems]
-  );
-
-  const handleSubmitOrderForWhatsAppApproval = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (cartItems.length === 0) return;
-    setSubmitting(true);
+  const handleConfirmCancelRequest = async () => {
+    if (!cancelTarget) return;
+    setCancelling(true);
     setError('');
     try {
-      const res = await apiFetch<{ id?: number; order?: { id: number } }>('/api/public/orders', {
+      await apiFetch('/api/public/request-cancel', {
         method: 'POST',
-        body: JSON.stringify({
-          friday_date: fridayDate,
-          user_id: customer?.id ?? customerId,
-          recipient_name: customer?.name || `לקוח #${customerId}`,
-          phone: customer?.phone || '',
-          notes: notes.trim(),
-          items: cartItems.map((it) => ({ product_id: it.product.id, quantity: it.quantity })),
-        }),
+        body: JSON.stringify({ order_id: cancelTarget.id }),
       });
-      const newOrderId = res.order?.id ?? res.id ?? Date.now();
-      const waText = formatPublicApprovalWhatsApp({
-        id: newOrderId,
+
+      setOrders((prev) =>
+        prev.map((o) =>
+          o.id === cancelTarget.id ? { ...o, status: 'cancel_requested' } : o
+        )
+      );
+
+      const waText = formatCancelRequestWhatsApp({
+        id: cancelTarget.id,
         business_name: settings?.business_name || APP_BRAND_NAME,
-        recipient_name: customer?.name || `לקוח #${customerId}`,
+        recipient_name: customer?.name || cancelTarget.recipient_name || `לקוח #${customerId}`,
         phone: customer?.phone || '',
-        friday_date: fridayDate,
-        pricing_mode: pricing.mode,
-        items: cartItems.map((it) => ({
-          product_name: it.product.name,
-          quantity: it.quantity,
-          unit_price: it.unit_price,
-        })),
-        total_amount: cartTotal,
-        notes: notes.trim(),
+        friday_date: cancelTarget.friday_date,
+        items: cancelTarget.items,
+        total_amount: cancelTarget.total_amount,
+        notes: cancelTarget.notes,
       });
       const waUrl = buildWhatsAppShareUrl(waText, settings?.admin_whatsapp_phone);
-      setSubmittedOrderId(newOrderId);
-      setSubmittedWaUrl(waUrl);
-      setCart({});
-      setNotes('');
+      setCancelWaUrl(waUrl);
+      setCancelNoticeOrderId(cancelTarget.id);
+      setCancelTarget(null);
       window.open(waUrl, '_blank', 'noopener,noreferrer');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'שגיאה בשליחת ההזמנה לאישור');
+      setError(err instanceof Error ? err.message : 'לא ניתן לשלוח בקשת ביטול להזמנה זו');
+      setCancelTarget(null);
     } finally {
-      setSubmitting(false);
+      setCancelling(false);
     }
   };
 
@@ -177,22 +181,26 @@ export function CustomerLivePortal({ customerId }: CustomerLivePortalProps) {
       {/* כותרת עליונה */}
       <header className="bg-[#1E242B] text-white px-4 py-4 shadow-md">
         <div className="max-w-2xl mx-auto flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2.5">
+          <div className="flex items-center gap-2.5 min-w-0">
             <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-[#C85A17] to-[#D97706] flex items-center justify-center shrink-0">
               <Flame className="w-5 h-5 text-white" />
             </div>
-            <div>
-              <h1 className="font-serif text-xl font-bold leading-tight">
+            <div className="min-w-0">
+              <h1 className="font-serif text-xl font-bold leading-tight truncate">
                 {settings?.business_name || APP_BRAND_NAME}
               </h1>
-              <p className="text-xs text-amber-300">
+              <p className="text-xs text-amber-300 truncate">
                 אזור אישי · {customer ? customer.name : `לקוח #${customerId}`}
               </p>
             </div>
           </div>
-          <span className="px-2.5 py-1 rounded-full bg-white/10 text-[11px] font-bold text-amber-200">
-            ללא סיסמה
-          </span>
+          <a
+            href="#/menu"
+            className="shrink-0 inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#C85A17] hover:bg-[#A9440F] text-white text-xs font-extrabold shadow-sm transition-colors"
+          >
+            <Plus className="w-4 h-4" />
+            <span>הזמנה חדשה</span>
+          </a>
         </div>
       </header>
 
@@ -203,12 +211,92 @@ export function CustomerLivePortal({ customerId }: CustomerLivePortalProps) {
           </div>
         )}
 
-        {/* 1. סטטוס ההזמנה הנוכחית */}
+        {/* 1. כרטיס סיכום חשבון אישי בראש המסך (3 נתונים) */}
+        <section className="bg-white rounded-3xl border border-[#E8D5BE] shadow-soft p-4 sm:p-5 space-y-4">
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <h2 className="font-serif text-xl font-bold text-slate-900 flex items-center gap-2">
+              <Wallet className="w-5 h-5 text-[#C85A17]" />
+              <span>סיכום חשבון אישי</span>
+            </h2>
+            <a
+              href="#/menu"
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#C85A17] hover:bg-[#A9440F] text-white text-xs font-extrabold shadow-sm transition-colors"
+            >
+              <Plus className="w-4 h-4" />
+              <span>+ הוסף הזמנה חדשה</span>
+            </a>
+          </div>
+
+          <div className="grid grid-cols-3 gap-2.5 text-center tabular-nums">
+            <div className="p-3 rounded-2xl bg-[#FAF6F0] border border-[#E8D5BE]">
+              <div className="text-[11px] font-bold text-slate-500">סה״כ הזמנות</div>
+              <div className="text-lg sm:text-xl font-extrabold text-slate-900 mt-1">
+                {formatILS(accountSummary.totalOrdered)}
+              </div>
+            </div>
+            <div className="p-3 rounded-2xl bg-emerald-50/70 border border-emerald-200">
+              <div className="text-[11px] font-bold text-emerald-700">מתוכם שולם</div>
+              <div className="text-lg sm:text-xl font-extrabold text-emerald-700 mt-1">
+                {formatILS(accountSummary.totalPaid)}
+              </div>
+            </div>
+            <div
+              className={`p-3 rounded-2xl border ${
+                accountSummary.balanceDue > 0
+                  ? 'bg-red-50/80 border-red-200'
+                  : 'bg-emerald-50/70 border-emerald-200'
+              }`}
+            >
+              <div
+                className={`text-[11px] font-bold ${
+                  accountSummary.balanceDue > 0 ? 'text-red-700' : 'text-emerald-700'
+                }`}
+              >
+                יתרה לתשלום
+              </div>
+              <div
+                className={`text-lg sm:text-xl font-extrabold mt-1 ${
+                  accountSummary.balanceDue > 0 ? 'text-red-600' : 'text-emerald-700'
+                }`}
+              >
+                {formatILS(accountSummary.balanceDue)}
+              </div>
+            </div>
+          </div>
+
+          {accountSummary.balanceDue > 0 && (
+            <QuickCustomerPayBox
+              amountToPay={accountSummary.balanceDue}
+              title="תשלום מהיר ליתרה הפתוחה"
+            />
+          )}
+        </section>
+
+        {/* הודעת אישור שליחת בקשת ביטול לוואטסאפ */}
+        {cancelWaUrl && cancelNoticeOrderId && (
+          <div className="p-4 rounded-2xl bg-orange-50 border border-orange-300 space-y-2.5">
+            <div className="flex items-center gap-2 text-orange-950 font-extrabold text-sm">
+              <CheckCircle2 className="w-5 h-5 text-orange-600 shrink-0" />
+              <span>בקשת הביטול להזמנה #{cancelNoticeOrderId} נרשמה — ממתין לאישור מנהל</span>
+            </div>
+            <a
+              href={cancelWaUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="w-full py-2.5 px-4 rounded-xl bg-[#25D366] hover:bg-[#1EB958] text-white font-extrabold text-sm flex items-center justify-center gap-2 shadow-sm"
+            >
+              <ExternalLink className="w-4 h-4" />
+              <span>שלח הודעת ביטול למנהל בוואטסאפ</span>
+            </a>
+          </div>
+        )}
+
+        {/* 2. סטטוס ההזמנה הפעילה לשישי הקרוב */}
         <section className="bg-white rounded-3xl border border-[#E8D5BE] shadow-soft p-4 sm:p-5 space-y-4">
           <div className="flex items-center justify-between gap-2">
             <h2 className="font-serif text-xl font-bold text-slate-900 flex items-center gap-2">
               <Clock className="w-5 h-5 text-[#C85A17]" />
-              <span>סטטוס ההזמנה הנוכחית</span>
+              <span>ההזמנה הפעילה לשישי הקרוב</span>
             </h2>
             {currentOrder && (
               <span className="text-xs font-extrabold px-2.5 py-1 rounded-full bg-[#FAF6F0] border border-[#E8D5BE] tabular-nums">
@@ -218,227 +306,238 @@ export function CustomerLivePortal({ customerId }: CustomerLivePortalProps) {
           </div>
 
           {!currentOrder ? (
-            <div className="py-4 text-center text-sm text-slate-500">
-              אין כרגע הזמנה פעילה. ניתן לבצע הזמנה חדשה למטה!
+            <div className="py-6 text-center space-y-3">
+              <p className="text-sm text-slate-500">אין כרגע הזמנה פעילה.</p>
+              <a
+                href="#/menu"
+                className="inline-flex items-center gap-2 px-5 py-3 rounded-2xl bg-[#C85A17] hover:bg-[#A9440F] text-white font-extrabold text-sm shadow-sm transition-colors"
+              >
+                <Plus className="w-4 h-4" />
+                <span>+ הוסף הזמנה חדשה מהתפריט</span>
+              </a>
             </div>
-          ) : (
-            <div className="space-y-3.5">
-              <div className="text-xs text-slate-500 font-semibold">
-                {formatFridayLabel(currentOrder.friday_date)} · סטטוס:{' '}
-                <strong className="text-slate-900">{ORDER_STATUS_LABELS[currentOrder.status]}</strong>
-              </div>
+          ) : (() => {
+            const unpaid = Math.max(0, currentOrder.total_amount - currentOrder.paid_amount);
+            const payBadge = getPaymentBadge(currentOrder);
+            const canStillCancel = isBeforeFridayCancelCutoff(currentOrder.friday_date);
+            const isCancelableStatus =
+              currentOrder.status !== 'delivered' &&
+              currentOrder.status !== 'cancelled' &&
+              currentOrder.status !== 'cancel_requested';
 
-              {/* סרגל התקדמות 4 שלבים */}
-              {(() => {
-                const curStep = getStepIndex(currentOrder.status);
-                const curColor = PROGRESS_STEPS[curStep - 1]?.color || 'bg-red-600';
-                return (
-                  <div className="space-y-2">
-                    <div className="w-full h-2.5 rounded-full bg-slate-100 overflow-hidden flex gap-1">
-                      {PROGRESS_STEPS.map((st) => (
-                        <div
-                          key={st.key}
-                          className={`flex-1 h-full transition-colors ${
-                            st.step <= curStep ? curColor : 'bg-slate-200'
-                          }`}
-                        />
-                      ))}
-                    </div>
-                    <div className="grid grid-cols-4 text-center text-[11px] font-bold">
-                      {PROGRESS_STEPS.map((st) => (
-                        <span
-                          key={st.key}
-                          className={st.step <= curStep ? 'text-slate-900' : 'text-slate-400'}
-                        >
-                          {st.label}
-                        </span>
-                      ))}
-                    </div>
+            return (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between gap-2 flex-wrap text-xs">
+                  <div className="text-slate-600 font-semibold">
+                    {formatFridayLabel(currentOrder.friday_date)} · סטטוס:{' '}
+                    <strong className="text-slate-900">
+                      {ORDER_STATUS_LABELS[currentOrder.status]}
+                    </strong>
                   </div>
-                );
-              })()}
-
-              {/* פירוט פריטים וסה״כ */}
-              <div className="flex flex-wrap gap-1.5 pt-1">
-                {currentOrder.items.map((it) => (
                   <span
-                    key={it.id}
-                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-[#FAF6F0] border border-[#E8D5BE] text-xs font-bold"
+                    className={`px-2.5 py-0.5 rounded-full text-[11px] font-extrabold border ${payBadge.cls}`}
                   >
-                    <span className="text-[#C85A17]">{it.quantity}×</span>
-                    <span>{it.product_name}</span>
+                    {payBadge.label}
                   </span>
-                ))}
-              </div>
+                </div>
 
-              <div className="flex items-center justify-between pt-2 border-t border-[#F3E9DC] text-sm tabular-nums">
-                <span className="text-slate-600 font-semibold">סה״כ להזמנה:</span>
-                <span className="font-extrabold text-lg text-[#C85A17]">
-                  {formatILS(currentOrder.total_amount)}
-                </span>
+                {/* סרגל התקדמות חי 4 שלבים או באנר ביטול */}
+                {currentOrder.status === 'cancel_requested' ? (
+                  <div className="p-3 rounded-2xl bg-orange-50 border border-orange-300 flex items-center gap-2 text-xs font-extrabold text-orange-900">
+                    <AlertTriangle className="w-4 h-4 text-orange-600 shrink-0" />
+                    <span>בקשת הביטול נשלחה — ממתין לאישור מנהל</span>
+                  </div>
+                ) : currentOrder.status === 'cancelled' ? (
+                  <div className="p-3 rounded-2xl bg-slate-100 border border-slate-300 text-xs font-extrabold text-slate-600 text-center">
+                    הזמנה זו בוטלה באישור מנהל
+                  </div>
+                ) : (
+                  (() => {
+                    const curStep = getStepIndex(currentOrder.status);
+                    const curColor = PROGRESS_STEPS[curStep - 1]?.color || 'bg-red-600';
+                    return (
+                      <div className="space-y-2">
+                        <div className="w-full h-2.5 rounded-full bg-slate-100 overflow-hidden flex gap-1">
+                          {PROGRESS_STEPS.map((st) => (
+                            <div
+                              key={st.key}
+                              className={`flex-1 h-full transition-colors ${
+                                st.step <= curStep ? curColor : 'bg-slate-200'
+                              }`}
+                            />
+                          ))}
+                        </div>
+                        <div className="grid grid-cols-4 text-center text-[11px] font-bold">
+                          {PROGRESS_STEPS.map((st) => (
+                            <span
+                              key={st.key}
+                              className={st.step <= curStep ? 'text-slate-900' : 'text-slate-400'}
+                            >
+                              {st.label}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })()
+                )}
+
+                {/* פירוט פריטים */}
+                <div className="flex flex-wrap gap-1.5 pt-1">
+                  {currentOrder.items.map((it) => (
+                    <span
+                      key={it.id}
+                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-[#FAF6F0] border border-[#E8D5BE] text-xs font-bold"
+                    >
+                      <span className="text-[#C85A17]">{it.quantity}×</span>
+                      <span>{it.product_name}</span>
+                    </span>
+                  ))}
+                </div>
+
+                {/* סיכום סכום ושולם */}
+                <div className="flex items-center justify-between pt-2 border-t border-[#F3E9DC] text-sm tabular-nums">
+                  <div className="space-y-0.5">
+                    <div className="text-slate-600 font-semibold">סה״כ להזמנה:</div>
+                    {currentOrder.paid_amount > 0 && (
+                      <div className="text-xs font-bold text-emerald-700">
+                        שולם: {formatILS(currentOrder.paid_amount)}
+                        {unpaid > 0 && ` · נותר: ${formatILS(unpaid)}`}
+                      </div>
+                    )}
+                  </div>
+                  <span className="font-extrabold text-lg text-[#C85A17]">
+                    {formatILS(currentOrder.total_amount)}
+                  </span>
+                </div>
+
+                {/* מנגנון ביטול הזמנה (עד שישי 06:00 בלבד ובאישור מנהל) */}
+                {isCancelableStatus && (
+                  <div className="pt-2 border-t border-[#F3E9DC]">
+                    {canStillCancel ? (
+                      <button
+                        type="button"
+                        onClick={() => setCancelTarget(currentOrder)}
+                        className="w-full py-2.5 px-4 rounded-xl border border-red-200 bg-red-50/70 hover:bg-red-100 text-red-700 text-xs font-extrabold flex items-center justify-center gap-1.5 transition-colors"
+                      >
+                        <XCircle className="w-4 h-4" />
+                        <span>בקשת ביטול הזמנה</span>
+                      </button>
+                    ) : (
+                      <div className="p-3 rounded-xl bg-slate-100 border border-slate-200 text-slate-600 text-xs font-bold flex items-center justify-center gap-2 text-center">
+                        <Lock className="w-4 h-4 shrink-0 text-slate-500" />
+                        <span>לא ניתן לבטל הזמנות לאחר השעה 06:00 בבוקר ביום שישי</span>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
-            </div>
-          )}
+            );
+          })()}
         </section>
 
-        {/* 2. מצב חשבון ויתרות קודמות */}
+        {/* 3. היסטוריית הזמנות קודמות */}
         <section className="bg-white rounded-3xl border border-[#E8D5BE] shadow-soft p-4 sm:p-5 space-y-3">
           <div className="flex items-center justify-between">
             <h2 className="font-serif text-xl font-bold text-slate-900 flex items-center gap-2">
-              <Wallet className="w-5 h-5 text-[#C85A17]" />
-              <span>מצב חשבון ויתרות קודמות</span>
+              <History className="w-5 h-5 text-[#C85A17]" />
+              <span>היסטוריית הזמנות קודמות</span>
             </h2>
-            <span
-              className={`text-lg font-extrabold tabular-nums ${
-                (customer?.balance ?? 0) < 0 ? 'text-red-600' : 'text-emerald-700'
-              }`}
-            >
-              {(customer?.balance ?? 0) < 0
-                ? `חוב: ${formatILS(Math.abs(customer?.balance ?? 0))}`
-                : (customer?.balance ?? 0) > 0
-                ? `זיכוי: ${formatILS(customer?.balance ?? 0)}`
-                : 'מאוזן (₪0.00)'}
-            </span>
+            <span className="text-xs font-bold text-slate-500">{pastOrders.length} הזמנות</span>
           </div>
 
-          {pastOrders.length > 0 && (
-            <div className="pt-2 border-t border-[#F3E9DC] space-y-2">
-              <div className="text-xs font-bold text-slate-500 flex items-center gap-1">
-                <History className="w-3.5 h-3.5" />
-                <span>היסטוריית הזמנות קודמות ({pastOrders.length})</span>
-              </div>
-              <div className="space-y-1.5 max-h-40 overflow-y-auto">
-                {pastOrders.slice(0, 6).map((o) => (
-                  <div
-                    key={o.id}
-                    className="flex items-center justify-between text-xs p-2.5 rounded-xl bg-[#FAF6F0] border border-[#E8D5BE]/70 tabular-nums"
-                  >
-                    <div>
-                      <span className="font-bold text-slate-800">{formatFridayLabel(o.friday_date)}</span>
-                      <span className="text-slate-400 mr-1.5">#{o.id}</span>
-                    </div>
-                    <div className="font-extrabold text-slate-900">{formatILS(o.total_amount)}</div>
-                  </div>
-                ))}
-              </div>
+          {pastOrders.length === 0 ? (
+            <div className="py-4 text-center text-xs text-slate-500">
+              עדיין אין הזמנות קודמות בהיסטוריה.
             </div>
-          )}
-        </section>
-
-        {/* 3. טופס הזמנה עצמית / עדכון הזמנה עם אימות וואטסאפ ותצוגת זמינות בלבד */}
-        <section className="bg-white rounded-3xl border border-[#E8D5BE] shadow-soft p-4 sm:p-5 space-y-4">
-          <div>
-            <h2 className="font-serif text-xl font-bold text-slate-900 flex items-center gap-2">
-              <ShoppingBag className="w-5 h-5 text-[#C85A17]" />
-              <span>הזמנה עצמית לשישי ({formatFridayLabel(fridayDate)})</span>
-            </h2>
-            <p className="text-xs text-slate-500 mt-0.5">
-              ההזמנה נשלחת לאישור המנהל בוואטסאפ ונכנסת להכנה רק לאחר אישור.
-            </p>
-          </div>
-
-          {submittedWaUrl && (
-            <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-300 space-y-2.5">
-              <div className="flex items-center gap-2 text-emerald-900 font-extrabold text-sm">
-                <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
-                <span>הזמנה #{submittedOrderId} נשמרה בממתין לאישור!</span>
-              </div>
-              <a
-                href={submittedWaUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="w-full py-2.5 px-4 rounded-xl bg-[#25D366] hover:bg-[#1EB958] text-white font-extrabold text-sm flex items-center justify-center gap-2 shadow-sm"
-              >
-                <ExternalLink className="w-4 h-4" />
-                <span>פתח וואטסאפ לשליחה לאישור</span>
-              </a>
-            </div>
-          )}
-
-          <form onSubmit={handleSubmitOrderForWhatsAppApproval} className="space-y-3">
-            <div className="divide-y divide-[#F3E9DC] border border-[#E8D5BE] rounded-2xl overflow-hidden">
-              {products.map((p) => {
-                const inStock = isProductInStock(p.id, stockMap);
-                const qty = cart[p.id] || 0;
-                const price = getProductPrice(p);
+          ) : (
+            <div className="space-y-2.5">
+              {pastOrders.map((o) => {
+                const badge = getPaymentBadge(o);
                 return (
                   <div
-                    key={p.id}
-                    className={`p-3 flex items-center justify-between gap-2 ${
-                      !inStock ? 'bg-slate-50 opacity-65' : qty > 0 ? 'bg-[#FFF7ED]' : 'bg-white'
-                    }`}
+                    key={o.id}
+                    className="p-3.5 rounded-2xl bg-[#FAF6F0] border border-[#E8D5BE]/80 space-y-2"
                   >
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-bold text-sm text-slate-900">{p.name}</span>
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <div className="text-xs">
+                        <span className="font-extrabold text-slate-900">
+                          {formatFridayLabel(o.friday_date)}
+                        </span>
+                        <span className="text-slate-400 mr-1.5 tabular-nums">#{o.id}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
                         <span
-                          className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold ${
-                            inStock
-                              ? 'bg-emerald-100 text-emerald-800'
-                              : 'bg-red-100 text-red-700'
-                          }`}
+                          className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold border ${badge.cls}`}
                         >
-                          {inStock ? 'במלאי' : 'אזל מהמלאי'}
+                          {badge.label}
+                        </span>
+                        <span className="font-extrabold text-sm text-slate-900 tabular-nums">
+                          {formatILS(o.total_amount)}
                         </span>
                       </div>
-                      <div className="text-xs font-bold text-[#8A330B] tabular-nums mt-0.5">
-                        {formatILS(price)}
-                      </div>
                     </div>
-
-                    {inStock ? (
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setCart((prev) => ({ ...prev, [p.id]: Math.max(0, (prev[p.id] || 0) - 1) }))
-                          }
-                          className="w-9 h-9 rounded-xl bg-[#FAF6F0] border border-[#E8D5BE] flex items-center justify-center"
-                        >
-                          <Minus className="w-4 h-4" />
-                        </button>
-                        <span className="w-7 text-center font-extrabold text-sm tabular-nums">{qty}</span>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setCart((prev) => ({ ...prev, [p.id]: (prev[p.id] || 0) + 1 }))
-                          }
-                          className="w-9 h-9 rounded-xl bg-[#C85A17] text-white flex items-center justify-center"
-                        >
-                          <Plus className="w-4 h-4" />
-                        </button>
+                    {o.items.length > 0 && (
+                      <div className="flex flex-wrap gap-1">
+                        {o.items.map((it) => (
+                          <span
+                            key={it.id}
+                            className="px-2 py-0.5 rounded-full bg-white border border-[#E8D5BE]/70 text-[11px] font-semibold text-slate-700"
+                          >
+                            {it.quantity}× {it.product_name}
+                          </span>
+                        ))}
                       </div>
-                    ) : (
-                      <span className="text-xs font-bold text-red-600 shrink-0">לא זמין</span>
                     )}
                   </div>
                 );
               })}
             </div>
-
-            <input
-              type="text"
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              placeholder="הערות להזמנה (טעמים, שעת איסוף...)"
-              className="w-full px-3.5 py-2.5 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] text-sm"
-            />
-
-            <button
-              type="submit"
-              disabled={submitting || cartItems.length === 0}
-              className="w-full min-h-[52px] px-4 py-3 rounded-2xl bg-[#25D366] hover:bg-[#1EB958] disabled:opacity-45 text-white font-extrabold text-sm flex items-center justify-center gap-2 shadow-sm"
-            >
-              <Send className="w-4 h-4" />
-              <span>
-                {submitting
-                  ? 'שולח...'
-                  : `שלח הזמנה לאישור בוואטסאפ (${formatILS(cartTotal)})`}
-              </span>
-            </button>
-          </form>
+          )}
         </section>
       </main>
+
+      {/* חלונית אישור בקשת ביטול הזמנה */}
+      {cancelTarget && (
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+          <div className="max-w-sm w-full bg-white rounded-3xl border border-[#E8D5BE] shadow-card p-5 space-y-4">
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex items-center gap-2 text-red-700">
+                <AlertTriangle className="w-5 h-5 shrink-0" />
+                <h3 className="font-serif text-lg font-extrabold">בקשת ביטול הזמנה #{cancelTarget.id}</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setCancelTarget(null)}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-700"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <p className="text-xs text-slate-600 leading-relaxed">
+              בקשת הביטול תועבר לאישור המנהל בוואטסאפ, וההזמנה תעבור לסטטוס{' '}
+              <strong>״ממתין לאישור ביטול״</strong> עד לאישור המנהל. האם להמשיך?
+            </p>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setCancelTarget(null)}
+                className="py-2.5 rounded-xl border border-[#E8D5BE] bg-[#FAF6F0] text-slate-700 font-bold text-xs"
+              >
+                חזור
+              </button>
+              <button
+                type="button"
+                disabled={cancelling}
+                onClick={handleConfirmCancelRequest}
+                className="py-2.5 rounded-xl bg-red-600 hover:bg-red-700 disabled:opacity-60 text-white font-extrabold text-xs"
+              >
+                {cancelling ? 'שולח...' : 'אשר ושלח למנהל'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

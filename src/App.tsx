@@ -19,6 +19,7 @@ import { SupplierPortal } from './pages/SupplierPortal';
 import { CustomerPortal } from './pages/CustomerPortal';
 import { CustomerLivePortal } from './pages/CustomerLivePortal';
 import { QuickApproveView } from './pages/QuickApproveView';
+import { ApproveCancelView } from './pages/ApproveCancelView';
 import { DigitalMenuPage } from './pages/DigitalMenuPage';
 import { FlyerPage } from './pages/FlyerPage';
 import { APP_BRAND_NAME } from './lib/version';
@@ -41,6 +42,7 @@ const VALID_TABS: AdminTab[] = [
 function parseSpecialRoute(): {
   customerPortalId: number | null;
   quickApproveOrderId: number | null;
+  approveCancelOrderId: number | null;
   directOrderId: number | null;
   encodedOrderData: string | null;
   isDigitalMenu: boolean;
@@ -55,6 +57,7 @@ function parseSpecialRoute(): {
     return {
       customerPortalId: null,
       quickApproveOrderId: null,
+      approveCancelOrderId: null,
       directOrderId: null,
       encodedOrderData: null,
       isDigitalMenu: true,
@@ -66,6 +69,7 @@ function parseSpecialRoute(): {
     return {
       customerPortalId: Number(queryCustomer),
       quickApproveOrderId: null,
+      approveCancelOrderId: null,
       directOrderId: null,
       encodedOrderData: null,
       isDigitalMenu: false,
@@ -77,6 +81,7 @@ function parseSpecialRoute(): {
     return {
       customerPortalId: Number(cMatch[1]),
       quickApproveOrderId: null,
+      approveCancelOrderId: null,
       directOrderId: null,
       encodedOrderData: null,
       isDigitalMenu: false,
@@ -88,6 +93,19 @@ function parseSpecialRoute(): {
     return {
       customerPortalId: null,
       quickApproveOrderId: Number(approveMatch[1]),
+      approveCancelOrderId: null,
+      directOrderId: null,
+      encodedOrderData,
+      isDigitalMenu: false,
+    };
+  }
+
+  const cancelApproveMatch = hashPath.match(/^approve-cancel\/(\d+)/);
+  if (cancelApproveMatch) {
+    return {
+      customerPortalId: null,
+      quickApproveOrderId: null,
+      approveCancelOrderId: Number(cancelApproveMatch[1]),
       directOrderId: null,
       encodedOrderData,
       isDigitalMenu: false,
@@ -99,6 +117,7 @@ function parseSpecialRoute(): {
     return {
       customerPortalId: null,
       quickApproveOrderId: null,
+      approveCancelOrderId: null,
       directOrderId: Number(orderMatch[1]),
       encodedOrderData,
       isDigitalMenu: false,
@@ -108,6 +127,7 @@ function parseSpecialRoute(): {
   return {
     customerPortalId: null,
     quickApproveOrderId: null,
+    approveCancelOrderId: null,
     directOrderId: null,
     encodedOrderData: null,
     isDigitalMenu: false,
@@ -192,6 +212,16 @@ function AppRouter() {
     return (
       <QuickApproveView
         orderId={specialRoute.quickApproveOrderId}
+        encodedData={specialRoute.encodedOrderData}
+      />
+    );
+  }
+
+  // אישור / דחיית בקשת ביטול הזמנה ע"י מנהל (#/approve-cancel/:id?d=...)
+  if (specialRoute.approveCancelOrderId !== null) {
+    return (
+      <ApproveCancelView
+        orderId={specialRoute.approveCancelOrderId}
         encodedData={specialRoute.encodedOrderData}
       />
     );

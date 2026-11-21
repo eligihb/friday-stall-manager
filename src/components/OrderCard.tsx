@@ -10,6 +10,8 @@ import {
   FileText,
   CheckCircle2,
   Link2,
+  XCircle,
+  AlertTriangle,
 } from 'lucide-react';
 import { formatFridayLabel, formatILS, ORDER_STATUS_LABELS, ORDER_TYPE_LABELS } from '../lib/format';
 import { buildCustomerPortalUrl, buildWhatsAppShareUrl, formatOrderWhatsApp } from '../lib/whatsappFormat';
@@ -83,7 +85,11 @@ export function OrderCard({
   return (
     <div
       className={`bg-white rounded-2xl border shadow-soft p-4 flex flex-col justify-between transition-all ${
-        order.status === 'delivered'
+        order.status === 'cancelled'
+          ? 'border-slate-300 bg-slate-50/70 opacity-75'
+          : order.status === 'cancel_requested'
+          ? 'border-orange-400 bg-orange-50/30 ring-1 ring-orange-300'
+          : order.status === 'delivered'
           ? 'border-emerald-200 bg-emerald-50/15'
           : order.status === 'ready'
           ? 'border-amber-300'
@@ -167,7 +173,10 @@ export function OrderCard({
         </div>
 
         {/* סרגל התקדמות ויזואלי 4 שלבים */}
-        {order.status !== 'awaiting_approval' && (() => {
+        {order.status !== 'awaiting_approval' &&
+          order.status !== 'cancel_requested' &&
+          order.status !== 'cancelled' &&
+          (() => {
           const currentStage = STATUS_STAGES.find((s) => s.key === order.status) || STATUS_STAGES[0];
           return (
             <div className="mt-2.5">
@@ -224,7 +233,36 @@ export function OrderCard({
 
       {/* סרגל 4 שלבי סטטוס הזמנה עם אישור מפורש ("עדכן") למניעת לחיצות בטעות */}
       <div className="mt-3.5 pt-3 border-t border-[#F3E9DC] space-y-2.5">
-        {order.status === 'awaiting_approval' ? (
+        {order.status === 'cancel_requested' ? (
+          <div className="p-2.5 rounded-xl bg-orange-50 border border-orange-300 space-y-2">
+            <div className="flex items-center gap-1.5 text-xs font-extrabold text-orange-900">
+              <AlertTriangle className="w-4 h-4 text-orange-600 shrink-0" />
+              <span>הלקוח ביקש לבטל הזמנה זו — נדרש אישור מנהל</span>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => onCycleStatus(order, 'cancelled')}
+                className="min-h-[42px] px-2 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-extrabold flex items-center justify-center gap-1.5"
+              >
+                <XCircle className="w-4 h-4 shrink-0" />
+                <span>אשר ביטול הזמנה</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => onCycleStatus(order, 'received')}
+                className="min-h-[42px] px-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-extrabold flex items-center justify-center gap-1.5"
+              >
+                <CheckCircle2 className="w-4 h-4 shrink-0" />
+                <span>דחה ביטול</span>
+              </button>
+            </div>
+          </div>
+        ) : order.status === 'cancelled' ? (
+          <div className="p-2.5 rounded-xl bg-slate-100 border border-slate-300 text-center text-xs font-extrabold text-slate-600">
+            הזמנה זו בוטלה באישור מנהל (חיוב אופס ל-₪0.00)
+          </div>
+        ) : order.status === 'awaiting_approval' ? (
           <button
             type="button"
             onClick={() => onCycleStatus(order, 'received')}

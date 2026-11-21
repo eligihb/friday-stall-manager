@@ -652,6 +652,65 @@ export function SettingsPage() {
               </p>
             </div>
 
+            {/* הגדרות תשלום מהיר ללקוחות (Bit / PayBox) */}
+            <div className="p-4 rounded-2xl bg-[#FFFDF9] border border-[#E8D5BE] space-y-3">
+              <div className="flex items-center gap-2 text-sm font-extrabold text-slate-800">
+                <CreditCard className="w-4 h-4 text-[#C85A17]" />
+                <span>הגדרות תשלום מהיר ללקוחות (Bit / PayBox)</span>
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  מספר טלפון להעברה ב-Bit / PayBox
+                </label>
+                <input
+                  type="tel"
+                  inputMode="tel"
+                  dir="ltr"
+                  value={storefrontCfg.paymentPhone || ''}
+                  onChange={(e) =>
+                    setStorefrontCfg({ ...storefrontCfg, paymentPhone: e.target.value })
+                  }
+                  placeholder="054-2452100"
+                  className="w-56 px-3.5 py-2 rounded-xl border border-[#E8D5BE] bg-white focus:border-[#C85A17] focus:outline-none text-left tabular-nums font-bold text-sm"
+                />
+                <p className="text-[11px] text-slate-500 mt-1">
+                  מספר זה מוצג ללקוח עם כפתור העתקה בלחיצה אחת במסך אישור ההזמנה ובאזור האישי.
+                </p>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    קישור מותאם ל-Bit (אופציונלי)
+                  </label>
+                  <input
+                    type="url"
+                    dir="ltr"
+                    value={storefrontCfg.bitLink || ''}
+                    onChange={(e) =>
+                      setStorefrontCfg({ ...storefrontCfg, bitLink: e.target.value })
+                    }
+                    placeholder="https://www.bitpay.co.il/app/..."
+                    className="w-full px-3 py-2 rounded-xl border border-[#E8D5BE] bg-white focus:border-[#C85A17] focus:outline-none text-left text-xs"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    קישור מותאם ל-PayBox (אופציונלי)
+                  </label>
+                  <input
+                    type="url"
+                    dir="ltr"
+                    value={storefrontCfg.payboxLink || ''}
+                    onChange={(e) =>
+                      setStorefrontCfg({ ...storefrontCfg, payboxLink: e.target.value })
+                    }
+                    placeholder="https://payboxapp.page.link/..."
+                    className="w-full px-3 py-2 rounded-xl border border-[#E8D5BE] bg-white focus:border-[#C85A17] focus:outline-none text-left text-xs"
+                  />
+                </div>
+              </div>
+            </div>
+
             {/* עורך 2 תבניות הודעות הוואטסאפ */}
             <div className="space-y-4 pt-2 border-t border-[#F3E9DC]">
               <div>

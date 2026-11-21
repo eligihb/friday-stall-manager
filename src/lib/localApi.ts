@@ -12,7 +12,7 @@ import type {
   User,
   UserRole,
 } from '../types';
-import { getNextFridayISO } from './format';
+import { getNextFridayISO, isBeforeFridayCancelCutoff } from './format';
 import { getFridayPricingStatus } from './pricingCutoff';
 import { loadImportedOrdersBackup } from './orderLinkCodec';
 
@@ -662,6 +662,116 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
     return { id: orderId, order: newOrder, imported: true } as T;
   }
 
+  // בקשת ביטול הזמנה מצד הלקוח (עד שישי 06:00 בלבד — מועבר לממתין לאישור ביטול)
+  if (path === '/api/public/request-cancel' && method === 'POST') {
+    const orderId = Number(body.order_id || body.id || 0);
+    const order = db.orders.find((o) => o.id === orderId);
+    if (!order) throwErr('ההזמנה לא נמצאה', 404);
+    if (order.status === 'cancelled') {
+      return { ok: true, order } as T;
+    }
+    if (!isBeforeFridayCancelCutoff(order.friday_date)) {
+      throwErr('לא ניתן לבטל הזמנות לאחר השעה 06:00 בבוקר ביום שישי', 400);
+    }
+    order.status = 'cancel_requested';
+    saveDb(db);
+    return { ok: true, order } as T;
+  }
+
+  // אישור או דחיית בקשת ביטול הזמנה ע"י המנהל (תומך גם בייבוא מקישור ?d= ממכשיר אחר)
+  if (path === '/api/public/resolve-cancel' && method === 'POST') {
+    const orderId = Number(body.order_id || body.id || 0);
+    const action: 'approve' | 'reject' = body.action === 'reject' ? 'reject' : 'approve';
+    let order = db.orders.find((o) => o.id === orderId) || null;
+
+    if (!order && body.decoded && typeof body.decoded === 'object') {
+      const dec = body.decoded as {
+        id?: number;
+        n?: string;
+        p?: string;
+        f?: string;
+        t?: number;
+        nt?: string;
+        i?: Array<{ pid?: number; q?: number; u?: number; nm?: string }>;
+      };
+      const recipient_name = String(dec.n || 'לקוח').trim();
+      const phone = String(dec.p || '').trim();
+      const friday_date = String(dec.f || getNextFridayISO()).slice(0, 10);
+      const normTail = (p: string) => {
+        const d = p.replace(/\D/g, '');
+        return d.length >= 9 ? d.slice(-9) : d;
+      };
+      const phoneTail = normTail(phone);
+      let matchedCustomer =
+        (phoneTail.length >= 7
+          ? db.users.find((u) => u.role !== 'admin' && normTail(u.phone || '') === phoneTail)
+          : null) ||
+        db.users.find((u) => u.role !== 'admin' && u.name.trim().toLowerCase() === recipient_name.toLowerCase()) ||
+        null;
+      if (!matchedCustomer) {
+        const newUid = db.nextIds.users++;
+        matchedCustomer = {
+          id: newUid,
+          name: recipient_name,
+          phone,
+          email: `customer${newUid}@teimani.local`,
+          password: '',
+          role: 'customer',
+          balance: 0,
+          notes: 'יובא אוטומטית מקישור ביטול בוואטסאפ',
+          created_at: new Date().toISOString().slice(0, 10),
+        };
+        db.users.push(matchedCustomer);
+      }
+      const assignedId = orderId && !db.orders.some((o) => o.id === orderId) ? orderId : db.nextIds.orders++;
+      if (assignedId >= db.nextIds.orders) db.nextIds.orders = assignedId + 1;
+
+      const pMap = new Map(db.products.map((p) => [p.id, p]));
+      for (const it of dec.i || []) {
+        const prod = pMap.get(Number(it.pid || 0)) || db.products[0];
+        if (prod) {
+          db.order_items.push({
+            id: db.nextIds.order_items++,
+            order_id: assignedId,
+            product_id: prod.id,
+            quantity: Math.max(1, Number(it.q || 1)),
+            unit_price_snapshot: Math.max(0, Number(it.u ?? prod.customer_price)),
+            cost_price_snapshot: prod.cost_price,
+          });
+        }
+      }
+      order = {
+        id: assignedId,
+        user_id: matchedCustomer.id,
+        recipient_name: matchedCustomer.name || recipient_name,
+        friday_date,
+        order_type: 'customer',
+        delivery_fee: 0,
+        credit_discount: 0,
+        total_amount: round2(Number(dec.t || 0)),
+        paid_amount: 0,
+        status: 'cancel_requested',
+        notes: [phone ? `טלפון: ${phone}` : '', dec.nt || ''].filter(Boolean).join(' | '),
+        created_at: new Date().toISOString().slice(0, 10),
+      };
+      db.orders.push(order);
+    }
+
+    if (!order) throwErr('ההזמנה לא נמצאה', 404);
+
+    if (action === 'approve') {
+      order.status = 'cancelled';
+      order.total_amount = 0;
+      order.paid_amount = 0;
+      order.delivery_fee = 0;
+      order.credit_discount = 0;
+    } else {
+      order.status = 'received';
+    }
+    saveDb(db);
+    return { ok: true, action, order } as T;
+  }
+
   if (path === '/api/public/customer-history' && method === 'GET') {
     const cid = Number(q.get('customer_id') || 0);
     const phoneParam = String(q.get('phone') || '').replace(/\D/g, '');
@@ -1234,7 +1344,15 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
     if (!ord) throwErr('ההזמנה לא נמצאה', 404);
 
     if (method === 'PATCH') {
-      if (body.status) ord.status = body.status as OrderStatus;
+      if (body.status) {
+        ord.status = body.status as OrderStatus;
+        if (ord.status === 'cancelled') {
+          ord.total_amount = 0;
+          ord.paid_amount = 0;
+          ord.delivery_fee = 0;
+          ord.credit_discount = 0;
+        }
+      }
       if (body.notes !== undefined) ord.notes = String(body.notes);
       if (body.paid_amount !== undefined) {
         const nextPaid = Math.max(0, Number(body.paid_amount));

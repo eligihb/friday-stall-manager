@@ -89,7 +89,19 @@ export const ORDER_STATUS_LABELS: Record<OrderStatus, string> = {
   received: 'התקבל',
   ready: 'מוכן למסירה',
   delivered: 'נמסר',
+  cancel_requested: 'ממתין לאישור ביטול',
+  cancelled: 'בוטל',
 };
+
+/**
+ * Returns true if cancellation is still allowed (strictly before 06:00 AM on the order's Friday).
+ */
+export function isBeforeFridayCancelCutoff(fridayDate: string, now = new Date()): boolean {
+  if (!fridayDate || !/^\d{4}-\d{2}-\d{2}$/.test(fridayDate)) return false;
+  const cutoff = new Date(`${fridayDate}T06:00:00`);
+  if (Number.isNaN(cutoff.getTime())) return false;
+  return now.getTime() < cutoff.getTime();
+}
 
 export const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
   cash: 'מזומן',
