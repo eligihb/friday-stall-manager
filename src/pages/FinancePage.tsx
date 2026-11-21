@@ -2,28 +2,40 @@ import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import {
   Plus,
   Trash2,
-  ArrowUpCircle,
-  ArrowDownCircle,
   Repeat,
-  Store,
-  Receipt,
   Download,
   CheckCircle2,
   Edit3,
   X,
-  Filter,
-  PlayCircle,
-  AlertOctagon,
-  Calculator,
+  TrendingUp,
+  TrendingDown,
+  BarChart3,
+  ShoppingBag,
+  Users,
+  Wallet,
 } from 'lucide-react';
 import { apiFetch } from '../lib/api';
-import { formatHebrewDate, formatILS, getNextFridayISO, PAYMENT_METHOD_LABELS } from '../lib/format';
+import {
+  formatFridayLabel,
+  formatHebrewDate,
+  formatILS,
+  getNextFridayISO,
+  PAYMENT_METHOD_LABELS,
+} from '../lib/format';
 import { downloadCsv } from '../lib/csvExport';
-import { FridaySelector } from '../components/FridaySelector';
-import { BottomSheet } from '../components/BottomSheet';
-import { WasteTrackingSheet } from '../components/WasteTrackingSheet';
+import { useFriday } from '../context/FridayContext';
 import { useContactDrawer } from '../context/ContactDrawerContext';
-import type { FixedExpense, PaymentMethod, Transaction, WasteLogResponse } from '../types';
+import { loadAllCashRegisters } from '../lib/cashRegisterStore';
+import type { FixedExpense, Order, PaymentMethod, Transaction, WasteLogResponse } from '../types';
+
+type FinancePeriodKey = 'this_friday' | 'this_month' | 'prev_month' | 'yearly';
+
+const PERIOD_TABS: Array<{ key: FinancePeriodKey; label: string }> = [
+  { key: 'this_friday', label: 'שישי הזה' },
+  { key: 'this_month', label: 'חודש נוכחי' },
+  { key: 'prev_month', label: 'חודש קודם' },
+  { key: 'yearly', label: 'שנתי' },
+];
 
 const EXPENSE_PRESETS: Array<{ label: string; defaultMethod?: PaymentMethod }> = [
   { label: 'רכש מאפייה (מזומן)', defaultMethod: 'cash' },
@@ -32,80 +44,82 @@ const EXPENSE_PRESETS: Array<{ label: string; defaultMethod?: PaymentMethod }> =
   { label: 'כביש 6', defaultMethod: 'transfer' },
   { label: 'אריזות וכלים חד-פעמיים', defaultMethod: 'cash' },
   { label: 'חומרי גלם (סלסה, כבד קצוץ ותבלינים)', defaultMethod: 'cash' },
+  { label: 'שכירות / דמי דוכן', defaultMethod: 'transfer' },
+  { label: 'שיווק ופרסום', defaultMethod: 'transfer' },
 ];
 
+const HEBREW_MONTHS = [
+  'ינו׳',
+  'פבר׳',
+  'מרץ',
+  'אפר׳',
+  'מאי',
+  'יוני',
+  'יולי',
+  'אוג׳',
+  'ספט׳',
+  'אוק׳',
+  'נוב׳',
+  'דצמ׳',
+];
+
+function shiftDays(isoDate: string, days: number): string {
+  const d = new Date(`${isoDate}T12:00:00`);
+  d.setDate(d.getDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+function getMonthRange(year: number, month1to12: number): { from: string; to: string; ym: string } {
+  const ym = `${year}-${String(month1to12).padStart(2, '0')}`;
+  const lastDay = new Date(year, month1to12, 0).getDate();
+  return {
+    from: `${ym}-01`,
+    to: `${ym}-${String(lastDay).padStart(2, '0')}`,
+    ym,
+  };
+}
+
+function calcPctChange(current: number, previous: number): { pct: number; dir: 'up' | 'down' | 'flat' } {
+  if (Math.abs(previous) < 0.01) {
+    if (current > 0) return { pct: 100, dir: 'up' };
+    if (current < 0) return { pct: -100, dir: 'down' };
+    return { pct: 0, dir: 'flat' };
+  }
+  const raw = Math.round(((current - previous) / Math.abs(previous)) * 100);
+  return {
+    pct: raw,
+    dir: raw > 0 ? 'up' : raw < 0 ? 'down' : 'flat',
+  };
+}
+
 export function FinancePage() {
+  const { fridayDate: globalFriday } = useFriday();
   const { openContactById } = useContactDrawer();
+
+  const [period, setPeriod] = useState<FinancePeriodKey>('this_friday');
+  const [orders, setOrders] = useState<Order[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [fixedExpenses, setFixedExpenses] = useState<FixedExpense[]>([]);
-  const [wasteSummary, setWasteSummary] = useState<{ units: number; cost: number }>({ units: 0, cost: 0 });
-  const [wasteOpen, setWasteOpen] = useState(false);
+  const [wasteByFriday, setWasteByFriday] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [toast, setToast] = useState('');
+  const [selectedChartIndex, setSelectedChartIndex] = useState<number | null>(null);
 
-  // סינון יומן הכנסות והוצאות
-  const [filterFriday, setFilterFriday] = useState('');
-  const [filterFrom, setFilterFrom] = useState('');
-  const [filterTo, setFilterTo] = useState('');
-  const [filterType, setFilterType] = useState<'' | 'income' | 'expense'>('');
-  const [filterPayment, setFilterPayment] = useState<'' | PaymentMethod>('');
-
-  // טופס מהיר 1: סיכום קופת דוכן (מזומן + פייבוקס + העברה בנקאית)
-  const [stallFriday, setStallFriday] = useState(getNextFridayISO());
-  const [stallCash, setStallCash] = useState('');
-  const [stallPaybox, setStallPaybox] = useState('');
-  const [stallTransfer, setStallTransfer] = useState('');
-  const [stallNotes, setStallNotes] = useState('');
-  const [savingStall, setSavingStall] = useState(false);
-
-  // טופס מהיר 2: הזנת הוצאה משתנה
-  const [expFriday, setExpFriday] = useState(getNextFridayISO());
-  const [expCategory, setExpCategory] = useState(EXPENSE_PRESETS[0].label);
-  const [expAmount, setExpAmount] = useState('');
-  const [expMethod, setExpMethod] = useState<PaymentMethod>('cash');
-  const [expNotes, setExpNotes] = useState('');
-  const [savingExp, setSavingExp] = useState(false);
-
-  // מודאל תנועה כללית / הוספת הוצאה / עריכת הוצאה
-  const [showTxModal, setShowTxModal] = useState(false);
+  // מודאל קופץ להזנת הוצאה שבועית / חודשית
+  const [expenseModalMode, setExpenseModalMode] = useState<'weekly' | 'monthly' | null>(null);
   const [editingTx, setEditingTx] = useState<Transaction | null>(null);
-  const [txIsGeneral, setTxIsGeneral] = useState(false);
-  const [txForm, setTxForm] = useState({
+  const [expForm, setExpForm] = useState({
     date: new Date().toISOString().slice(0, 10),
-    friday_date: getNextFridayISO(),
-    type: 'expense' as 'income' | 'expense',
-    category: '',
+    friday_date: globalFriday || getNextFridayISO(),
+    category: EXPENSE_PRESETS[0].label,
     payment_method: 'cash' as PaymentMethod,
     amount: '',
     notes: '',
+    saveAsFixed: false,
   });
 
-  // מחשבון פדיון וספירת קופה (שטרות ומטבעות + עודף פתיחה)
-  const [calcOpen, setCalcOpen] = useState(false);
-  const [openingFloat, setOpeningFloat] = useState('200');
-  const [cashCounts, setCashCounts] = useState<Record<string, string>>({
-    '200': '',
-    '100': '',
-    '50': '',
-    '20': '',
-    '10': '',
-    '5': '',
-    '2': '',
-    '1': '',
-    '0.5': '',
-    '0.1': '',
-  });
-
-  const cashCalcTotals = useMemo(() => {
-    const denoms = [200, 100, 50, 20, 10, 5, 2, 1, 0.5, 0.1];
-    const gross = denoms.reduce((sum, d) => sum + d * (Number(cashCounts[String(d)]) || 0), 0);
-    const floatVal = Math.max(0, Number(openingFloat) || 0);
-    const net = Math.max(0, Math.round((gross - floatVal) * 100) / 100);
-    return { gross: Math.round(gross * 100) / 100, floatVal, net };
-  }, [cashCounts, openingFloat]);
-
-  // מודאל הוצאה קבועה (יצירה / עריכה)
+  // מודאל הוצאה קבועה
   const [showFixedModal, setShowFixedModal] = useState(false);
   const [editingFixed, setEditingFixed] = useState<FixedExpense | null>(null);
   const [fixedForm, setFixedForm] = useState({
@@ -115,210 +129,360 @@ export function FinancePage() {
     payment_method: 'transfer' as PaymentMethod,
   });
 
+  // אישור מחיקת תנועה / הוצאה קבועה ללא window.confirm
+  const [deleteTxId, setDeleteTxId] = useState<number | null>(null);
+  const [deleteFixedId, setDeleteFixedId] = useState<number | null>(null);
+
   const showToast = (msg: string) => {
     setToast(msg);
     setTimeout(() => setToast(''), 2600);
   };
 
-  const load = useCallback(async () => {
+  const loadAll = useCallback(async () => {
     setLoading(true);
     try {
-      const qs = new URLSearchParams();
-      if (filterFriday) qs.set('friday_date', filterFriday);
-      if (filterFrom) qs.set('from_date', filterFrom);
-      if (filterTo) qs.set('to_date', filterTo);
-      if (filterType) qs.set('type', filterType);
-      if (filterPayment) qs.set('payment_method', filterPayment);
-
-      const [txRes, fixRes, wasteRes] = await Promise.all([
-        apiFetch<{ transactions: Transaction[] }>(`/api/finance/transactions?${qs.toString()}`),
+      const [ordRes, txRes, fixRes, wasteRes] = await Promise.all([
+        apiFetch<{ orders: Order[] }>('/api/orders'),
+        apiFetch<{ transactions: Transaction[] }>('/api/finance/transactions'),
         apiFetch<{ fixed_expenses: FixedExpense[] }>('/api/finance/fixed-expenses'),
-        apiFetch<WasteLogResponse>(`/api/finance/waste?friday_date=${stallFriday}`),
+        apiFetch<WasteLogResponse>(`/api/finance/waste?friday_date=${globalFriday}`).catch(() => ({
+          friday_date: globalFriday,
+          items: [],
+          total_waste_units: 0,
+          total_waste_cost: 0,
+        })),
       ]);
-      setTransactions(txRes.transactions);
-      setFixedExpenses(fixRes.fixed_expenses);
-      setWasteSummary({ units: wasteRes.total_waste_units, cost: wasteRes.total_waste_cost });
+      setOrders(ordRes.orders || []);
+      setTransactions(txRes.transactions || []);
+      setFixedExpenses(fixRes.fixed_expenses || []);
+      setWasteByFriday((prev) => ({
+        ...prev,
+        [globalFriday]: wasteRes.total_waste_cost || 0,
+      }));
       setError('');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'שגיאה בטעינת נתונים כספיים');
+      setError(err instanceof Error ? err.message : 'שגיאה בטעינת נתוני כספים');
     } finally {
       setLoading(false);
     }
-  }, [filterFriday, filterFrom, filterTo, filterType, filterPayment, stallFriday]);
+  }, [globalFriday]);
 
   useEffect(() => {
-    load();
-  }, [load]);
+    loadAll();
+  }, [loadAll]);
 
-  const summary = useMemo(() => {
-    let cashIn = 0;
-    let cashOut = 0;
-    let payboxIn = 0;
-    let payboxOut = 0;
-    let transferIn = 0;
-    let transferOut = 0;
-    for (const t of transactions) {
-      if (t.type === 'income') {
-        if (t.payment_method === 'cash') cashIn += t.amount;
-        else if (t.payment_method === 'paybox') payboxIn += t.amount;
-        else transferIn += t.amount;
-      } else {
-        if (t.payment_method === 'cash') cashOut += t.amount;
-        else if (t.payment_method === 'paybox') payboxOut += t.amount;
-        else transferOut += t.amount;
+  // חישוב טווחי תאריכים לתקופה הנוכחית ולתקופה הקודמת להשוואה
+  const periodBounds = useMemo(() => {
+    const baseDate = new Date(`${globalFriday || getNextFridayISO()}T12:00:00`);
+    const y = baseDate.getFullYear();
+    const m = baseDate.getMonth() + 1;
+
+    if (period === 'this_friday') {
+      const curFri = globalFriday || getNextFridayISO();
+      const prevFri = shiftDays(curFri, -7);
+      return {
+        current: { from: curFri, to: curFri, label: formatFridayLabel(curFri), weeks: 1, months: 1 / 4.33 },
+        previous: { from: prevFri, to: prevFri, label: formatFridayLabel(prevFri), weeks: 1, months: 1 / 4.33 },
+      };
+    }
+
+    if (period === 'this_month') {
+      const curM = getMonthRange(y, m);
+      const prevYear = m === 1 ? y - 1 : y;
+      const prevMonth = m === 1 ? 12 : m - 1;
+      const prevM = getMonthRange(prevYear, prevMonth);
+      return {
+        current: { from: curM.from, to: curM.to, label: `חודש ${curM.ym}`, weeks: 4.33, months: 1 },
+        previous: { from: prevM.from, to: prevM.to, label: `חודש ${prevM.ym}`, weeks: 4.33, months: 1 },
+      };
+    }
+
+    if (period === 'prev_month') {
+      const prevYear = m === 1 ? y - 1 : y;
+      const prevMonth = m === 1 ? 12 : m - 1;
+      const curM = getMonthRange(prevYear, prevMonth);
+      const twoAgoYear = prevMonth === 1 ? prevYear - 1 : prevYear;
+      const twoAgoMonth = prevMonth === 1 ? 12 : prevMonth - 1;
+      const prevM = getMonthRange(twoAgoYear, twoAgoMonth);
+      return {
+        current: { from: curM.from, to: curM.to, label: `חודש קודם (${curM.ym})`, weeks: 4.33, months: 1 },
+        previous: { from: prevM.from, to: prevM.to, label: `חודש ${prevM.ym}`, weeks: 4.33, months: 1 },
+      };
+    }
+
+    // yearly
+    return {
+      current: {
+        from: `${y}-01-01`,
+        to: `${y}-12-31`,
+        label: `שנת ${y}`,
+        weeks: 52,
+        months: 12,
+      },
+      previous: {
+        from: `${y - 1}-01-01`,
+        to: `${y - 1}-12-31`,
+        label: `שנת ${y - 1}`,
+        weeks: 52,
+        months: 12,
+      },
+    };
+  }, [period, globalFriday]);
+
+  // פונקציית חישוב מדדים לכל טווח תאריכים
+  const computeRangeMetrics = useCallback(
+    (from: string, to: string, weeksFactor: number, monthsFactor: number) => {
+      const inRange = (d: string) => Boolean(d && d >= from && d <= to);
+      const cashRegisters = loadAllCashRegisters();
+
+      // הזמנות תקפות בטווח (ללא מבוטלות וללא ממתינות לאישור)
+      const validOrders = orders.filter(
+        (o) =>
+          inRange(o.friday_date) &&
+          o.status !== 'cancelled' &&
+          o.status !== 'awaiting_approval'
+      );
+
+      // 1. הכנסות מהזמנות + פדיון מזומן נטו מהקופה / דוכן
+      const ordersRevenue = validOrders
+        .filter((o) => o.order_type !== 'charity')
+        .reduce((s, o) => s + (Number(o.total_amount) || 0), 0);
+
+      const rangeTx = transactions.filter((t) => inRange(t.friday_date || t.date));
+      const stallTxIncome = rangeTx
+        .filter((t) => t.type === 'income' && t.category.includes('דוכן'))
+        .reduce((s, t) => s + (Number(t.amount) || 0), 0);
+
+      let registerNetCash = 0;
+      for (const [fDate, reg] of Object.entries(cashRegisters)) {
+        if (!inRange(fDate)) continue;
+        const alreadyInTx = rangeTx.some(
+          (t) =>
+            (t.friday_date || t.date) === fDate &&
+            t.type === 'income' &&
+            t.category.includes('דוכן')
+        );
+        if (!alreadyInTx && reg.netCashRevenue > 0) {
+          registerNetCash += reg.netCashRevenue;
+        }
+      }
+
+      const revenue = Math.round((ordersRevenue + stallTxIncome + registerNetCash) * 100) / 100;
+
+      // 2. הוצאות (עלות סחורה / הוצאות תפעול + הוצאות קבועות יחסיות + פחת אבוד)
+      const ordersCogs = validOrders.reduce(
+        (s, o) =>
+          s +
+          (o.items || []).reduce(
+            (isum, it) => isum + it.quantity * (Number(it.cost_price_snapshot) || 0),
+            0
+          ),
+        0
+      );
+
+      const txExpenses = rangeTx
+        .filter((t) => t.type === 'expense')
+        .reduce((s, t) => s + (Number(t.amount) || 0), 0);
+
+      const activeFixed = fixedExpenses.filter((f) => f.is_active);
+      const proratedFixed = activeFixed.reduce(
+        (s, f) => s + f.amount * (f.frequency === 'weekly' ? weeksFactor : monthsFactor),
+        0
+      );
+
+      // אם כבר נרשמו רכישות מאפייה בתנועות, לא נכפיל מול ordersCogs
+      const hasBakeryTx = rangeTx.some(
+        (t) => t.type === 'expense' && t.category.includes('מאפייה')
+      );
+      const effectiveCogs = hasBakeryTx ? 0 : ordersCogs;
+
+      let wasteLoss = 0;
+      for (const [fDate, wCost] of Object.entries(wasteByFriday)) {
+        if (inRange(fDate)) wasteLoss += wCost;
+      }
+
+      const expenses =
+        Math.round((effectiveCogs + txExpenses + proratedFixed + wasteLoss) * 100) / 100;
+      const netProfit = Math.round((revenue - expenses) * 100) / 100;
+
+      // 4. כמות מוצרים שהוזמנו
+      const unitsOrdered = validOrders.reduce(
+        (s, o) => s + (o.items || []).reduce((isum, it) => isum + it.quantity, 0),
+        0
+      );
+
+      // 5. כמות לקוחות שהזמינו
+      const uniqueCustomers = new Set(
+        validOrders.map((o) => (o.user_id ? `u_${o.user_id}` : `n_${o.recipient_name.trim()}`))
+      ).size;
+
+      return {
+        revenue,
+        expenses,
+        netProfit,
+        unitsOrdered,
+        uniqueCustomers,
+      };
+    },
+    [orders, transactions, fixedExpenses, wasteByFriday]
+  );
+
+  const currentMetrics = useMemo(
+    () =>
+      computeRangeMetrics(
+        periodBounds.current.from,
+        periodBounds.current.to,
+        periodBounds.current.weeks,
+        periodBounds.current.months
+      ),
+    [computeRangeMetrics, periodBounds]
+  );
+
+  const prevMetrics = useMemo(
+    () =>
+      computeRangeMetrics(
+        periodBounds.previous.from,
+        periodBounds.previous.to,
+        periodBounds.previous.weeks,
+        periodBounds.previous.months
+      ),
+    [computeRangeMetrics, periodBounds]
+  );
+
+  // נתוני הגרף האינטראקטיבי (לפי ימי שישי או לפי חודשים בשנת הבסיס)
+  const chartSeries = useMemo(() => {
+    const baseDate = new Date(`${globalFriday || getNextFridayISO()}T12:00:00`);
+    const y = baseDate.getFullYear();
+
+    if (period === 'yearly') {
+      return HEBREW_MONTHS.map((mLabel, idx) => {
+        const mRange = getMonthRange(y, idx + 1);
+        const mMetrics = computeRangeMetrics(mRange.from, mRange.to, 4.33, 1);
+        return {
+          label: mLabel,
+          fullLabel: `${mLabel} ${y}`,
+          ...mMetrics,
+        };
+      });
+    }
+
+    // לימי שישי: אסוף את 6 ימי השישי הרלוונטיים לתקופה
+    const curFri = globalFriday || getNextFridayISO();
+    const fridaysList: string[] = [];
+    if (period === 'this_friday') {
+      for (let i = -5; i <= 0; i++) {
+        fridaysList.push(shiftDays(curFri, i * 7));
+      }
+    } else {
+      // כל ימי השישי בחודש הנבחר
+      const start = new Date(`${periodBounds.current.from}T12:00:00`);
+      const end = new Date(`${periodBounds.current.to}T12:00:00`);
+      for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+        if (d.getDay() === 5) {
+          fridaysList.push(d.toISOString().slice(0, 10));
+        }
       }
     }
-    const income = cashIn + payboxIn + transferIn;
-    const expense = cashOut + payboxOut + transferOut;
-    const weeklyFixed = fixedExpenses
-      .filter((f) => f.is_active && f.frequency === 'weekly')
-      .reduce((s, f) => s + f.amount, 0);
-    const monthlyFixed = fixedExpenses
-      .filter((f) => f.is_active && f.frequency === 'monthly')
-      .reduce((s, f) => s + f.amount, 0);
-    return {
-      income,
-      expense,
-      net: income - expense,
-      cashNet: cashIn - cashOut,
-      payboxNet: payboxIn - payboxOut,
-      transferNet: transferIn - transferOut,
-      weeklyFixed,
-      monthlyFixed,
-    };
-  }, [transactions, fixedExpenses]);
 
-  const handleStallCloseout = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setSavingStall(true);
-    setError('');
-    try {
-      await apiFetch('/api/finance/stall-closeout', {
-        method: 'POST',
-        body: JSON.stringify({
-          friday_date: stallFriday,
-          cash_amount: Number(stallCash) || 0,
-          paybox_amount: Number(stallPaybox) || 0,
-          transfer_amount: Number(stallTransfer) || 0,
-          notes: stallNotes.trim(),
-        }),
+    return fridaysList.map((fIso) => {
+      const m = computeRangeMetrics(fIso, fIso, 1, 1 / 4.33);
+      const [, mm, dd] = fIso.split('-');
+      return {
+        label: `${dd}/${mm}`,
+        fullLabel: formatFridayLabel(fIso),
+        ...m,
+      };
+    });
+  }, [period, globalFriday, periodBounds, computeRangeMetrics]);
+
+  const maxChartVal = useMemo(() => {
+    let max = 100;
+    for (const pt of chartSeries) {
+      max = Math.max(max, pt.revenue, Math.abs(pt.netProfit), pt.expenses);
+    }
+    return max;
+  }, [chartSeries]);
+
+  const openExpenseModal = (mode: 'weekly' | 'monthly', txToEdit?: Transaction) => {
+    setExpenseModalMode(mode);
+    if (txToEdit) {
+      setEditingTx(txToEdit);
+      setExpForm({
+        date: txToEdit.date,
+        friday_date: txToEdit.friday_date || globalFriday || getNextFridayISO(),
+        category: txToEdit.category,
+        payment_method: txToEdit.payment_method,
+        amount: String(txToEdit.amount),
+        notes: txToEdit.notes || '',
+        saveAsFixed: false,
       });
-      setStallCash('');
-      setStallPaybox('');
-      setStallTransfer('');
-      setStallNotes('');
-      showToast('סיכום קופת הדוכן (מזומן, פייבוקס והעברה) נרשם ביומן ההכנסות!');
-      await load();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'שגיאה ברישום סיכום הקופה');
-    } finally {
-      setSavingStall(false);
+    } else {
+      setEditingTx(null);
+      setExpForm({
+        date: new Date().toISOString().slice(0, 10),
+        friday_date: globalFriday || getNextFridayISO(),
+        category: mode === 'monthly' ? 'שכירות / דמי דוכן' : EXPENSE_PRESETS[0].label,
+        payment_method: mode === 'monthly' ? 'transfer' : 'cash',
+        amount: '',
+        notes: '',
+        saveAsFixed: false,
+      });
     }
   };
 
-  const handleQuickExpense = async (e: React.FormEvent) => {
+  const handleSaveExpenseModal = async (e: React.FormEvent) => {
     e.preventDefault();
-    setSavingExp(true);
-    setError('');
-    try {
-      await apiFetch('/api/finance/transactions', {
-        method: 'POST',
-        body: JSON.stringify({
-          date: new Date().toISOString().slice(0, 10),
-          friday_date: expFriday || null,
-          type: 'expense',
-          category: expCategory.trim(),
-          payment_method: expMethod,
-          amount: Number(expAmount),
-          notes: expNotes.trim(),
-        }),
-      });
-      setExpAmount('');
-      setExpNotes('');
-      showToast('ההוצאה המשתנה נרשמה בהצלחה!');
-      await load();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'שגיאה ברישום ההוצאה');
-    } finally {
-      setSavingExp(false);
-    }
-  };
-
-  const openAddExpenseModal = () => {
-    setEditingTx(null);
-    setTxIsGeneral(false);
-    setTxForm({
-      date: new Date().toISOString().slice(0, 10),
-      friday_date: getNextFridayISO(),
-      type: 'expense',
-      category: EXPENSE_PRESETS[0].label,
-      payment_method: 'cash',
-      amount: '',
-      notes: '',
-    });
-    setShowTxModal(true);
-  };
-
-  const openEditTxModal = (t: Transaction) => {
-    setEditingTx(t);
-    setTxIsGeneral(!t.friday_date);
-    setTxForm({
-      date: t.date,
-      friday_date: t.friday_date || getNextFridayISO(),
-      type: t.type,
-      category: t.category,
-      payment_method: t.payment_method,
-      amount: String(t.amount),
-      notes: t.notes || '',
-    });
-    setShowTxModal(true);
-  };
-
-  const handleCreateTx = async (e: React.FormEvent) => {
-    e.preventDefault();
+    if (!expenseModalMode) return;
     try {
       if (editingTx) {
         await apiFetch(`/api/finance/transactions/${editingTx.id}`, { method: 'DELETE' });
       }
+      const prefix =
+        expenseModalMode === 'monthly' ? '[הוצאה חודשית]' : '[הוצאה שבועית]';
+      const cleanNotes = expForm.notes.trim();
+      const combinedNotes = cleanNotes.startsWith('[הוצאה')
+        ? cleanNotes
+        : [prefix, cleanNotes].filter(Boolean).join(' ');
+
       await apiFetch('/api/finance/transactions', {
         method: 'POST',
         body: JSON.stringify({
-          ...txForm,
-          friday_date: txIsGeneral ? null : txForm.friday_date || null,
-          amount: Number(txForm.amount),
+          date: expForm.date,
+          friday_date: expenseModalMode === 'weekly' ? expForm.friday_date : expForm.date,
+          type: 'expense',
+          category: expForm.category.trim(),
+          payment_method: expForm.payment_method,
+          amount: Number(expForm.amount),
+          notes: combinedNotes,
         }),
       });
-      setShowTxModal(false);
+
+      if (expForm.saveAsFixed && !editingTx) {
+        await apiFetch('/api/finance/fixed-expenses', {
+          method: 'POST',
+          body: JSON.stringify({
+            name: expForm.category.trim(),
+            amount: Number(expForm.amount),
+            frequency: expenseModalMode,
+            payment_method: expForm.payment_method,
+          }),
+        });
+      }
+
+      setExpenseModalMode(null);
       setEditingTx(null);
-      setTxForm((f) => ({ ...f, category: '', amount: '', notes: '' }));
-      showToast(editingTx ? 'התנועה עודכנה ביומן!' : 'התנועה נשמרה ביומן!');
-      await load();
+      showToast(editingTx ? 'ההוצאה עודכנה בהצלחה ✓' : 'ההוצאה נשמרה בהצלחה ✓');
+      await loadAll();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'שגיאה ברישום תנועה');
+      setError(err instanceof Error ? err.message : 'שגיאה בשמירת ההוצאה');
     }
   };
 
-  const handleDeleteTx = async (id: number) => {
-    if (!window.confirm('למחוק תנועה זו מהיומן?')) return;
+  const handleConfirmDeleteTx = async (id: number) => {
+    setDeleteTxId(null);
     await apiFetch(`/api/finance/transactions/${id}`, { method: 'DELETE' });
-    await load();
-  };
-
-  const openAddFixed = () => {
-    setEditingFixed(null);
-    setFixedForm({ name: '', amount: '', frequency: 'weekly', payment_method: 'transfer' });
-    setShowFixedModal(true);
-  };
-
-  const openEditFixed = (f: FixedExpense) => {
-    setEditingFixed(f);
-    setFixedForm({
-      name: f.name,
-      amount: String(f.amount),
-      frequency: f.frequency,
-      payment_method: f.payment_method,
-    });
-    setShowFixedModal(true);
+    showToast('התנועה נמחקה מהיומן');
+    await loadAll();
   };
 
   const handleSaveFixed = async (e: React.FormEvent) => {
@@ -336,41 +500,28 @@ export function FinancePage() {
         });
       }
       setShowFixedModal(false);
-      await load();
+      showToast('ההוצאה הקבועה נשמרה');
+      await loadAll();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'שגיאה בשמירת ההוצאה הקבועה');
-    }
-  };
-
-  const handleApplyFixedBulk = async (frequency: 'weekly' | 'monthly') => {
-    const lbl = frequency === 'weekly' ? 'השבועיות' : 'החודשיות';
-    if (!window.confirm(`להחיל את כל ההוצאות הקבועות ${lbl} הפעילות ליומן התנועות?`)) return;
-    try {
-      const res = await apiFetch<{ count: number }>('/api/finance/fixed-expenses/apply', {
-        method: 'POST',
-        body: JSON.stringify({ frequency, friday_date: stallFriday }),
-      });
-      showToast(`נרשמו ${res.count} הוצאות קבועות ${lbl} ביומן!`);
-      await load();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'שגיאה בהחלת הוצאות קבועות');
+      setError(err instanceof Error ? err.message : 'שגיאה בשמירת הוצאה קבועה');
     }
   };
 
   const toggleFixed = async (id: number) => {
     await apiFetch(`/api/finance/fixed-expenses/${id}/toggle`, { method: 'PATCH' });
-    await load();
+    await loadAll();
   };
 
-  const deleteFixed = async (id: number) => {
-    if (!window.confirm('למחוק הוצאה קבועה זו?')) return;
+  const handleConfirmDeleteFixed = async (id: number) => {
+    setDeleteFixedId(null);
     await apiFetch(`/api/finance/fixed-expenses/${id}`, { method: 'DELETE' });
-    await load();
+    showToast('ההוצאה הקבועה נמחקה');
+    await loadAll();
   };
 
   const exportTransactionsCsv = () => {
     downloadCsv(
-      `יומן-תנועות-${new Date().toISOString().slice(0, 10)}.csv`,
+      `דוח-כספים-${new Date().toISOString().slice(0, 10)}.csv`,
       ['תאריך', 'יום שישי', 'סוג', 'קטגוריה', 'אמצעי תשלום', 'סכום (₪)', 'לקוח/ספק', 'הערות'],
       transactions.map((t) => [
         t.date,
@@ -385,68 +536,104 @@ export function FinancePage() {
     );
   };
 
-  const stallTotalInput =
-    (Number(stallCash) || 0) + (Number(stallPaybox) || 0) + (Number(stallTransfer) || 0);
+  const renderComparisonBadge = (currentVal: number, prevVal: number, invertColors = false) => {
+    const cmp = calcPctChange(currentVal, prevVal);
+    const isGood = invertColors ? cmp.dir === 'down' : cmp.dir === 'up';
+    const isBad = invertColors ? cmp.dir === 'up' : cmp.dir === 'down';
+    return (
+      <span
+        className={`inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full text-[10px] font-extrabold tabular-nums ${
+          isGood
+            ? 'bg-emerald-100 text-emerald-800'
+            : isBad
+            ? 'bg-red-100 text-red-700'
+            : 'bg-slate-100 text-slate-600'
+        }`}
+        title={`בהשוואה ל${periodBounds.previous.label} (${prevVal})`}
+      >
+        {cmp.dir === 'up' ? (
+          <>
+            <TrendingUp className="w-3 h-3" />
+            <span dir="ltr">+{cmp.pct}% ▲</span>
+          </>
+        ) : cmp.dir === 'down' ? (
+          <>
+            <TrendingDown className="w-3 h-3" />
+            <span dir="ltr">{cmp.pct}% ▼</span>
+          </>
+        ) : (
+          <span>0%</span>
+        )}
+      </span>
+    );
+  };
+
+  const activeChartPoint =
+    selectedChartIndex !== null && chartSeries[selectedChartIndex]
+      ? chartSeries[selectedChartIndex]
+      : chartSeries[chartSeries.length - 1] || null;
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+    <div className="space-y-6 pb-16">
+      {/* כותרת עליונה + כפתורי מודאל הוצאה קופץ */}
+      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
         <div>
-          <h2 className="font-serif text-3xl font-bold text-slateink-800">
-            יומן הכנסות והוצאות (מזומן, פייבוקס והעברה)
-          </h2>
-          <p className="text-sm text-slate-600 mt-1">
-            סיכום קופת הדוכן, תיעוד הוצאות שישי ופחת סוף יום, והוצאות קבועות.
+          <h2 className="font-serif text-3xl font-bold text-slateink-800">כספים וביצועים</h2>
+          <p className="text-sm text-slate-600 mt-0.5">
+            סיכום מכירות, הוצאות, רווח נקי, השוואת תקופות וגרף ביצועים ({periodBounds.current.label} מול {periodBounds.previous.label}).
           </p>
         </div>
-        <div className="flex flex-wrap gap-2 w-full sm:w-auto">
+
+        <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
-            onClick={openAddExpenseModal}
-            className="flex-1 sm:flex-none min-h-[48px] md:min-h-[40px] inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 text-white font-bold text-xs shadow-sm"
+            onClick={() => openExpenseModal('weekly')}
+            className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 text-white font-extrabold text-xs shadow-sm"
           >
-            <Plus className="w-4 h-4 shrink-0" />
-            <span>+ הוסף הוצאה</span>
+            <Plus className="w-4 h-4" />
+            <span>+ הזן הוצאה שבועית</span>
           </button>
           <button
             type="button"
-            onClick={() => setCalcOpen(true)}
-            className="flex-1 sm:flex-none min-h-[48px] md:min-h-[40px] inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl bg-[#FFF7ED] hover:bg-[#FFEDD5] border border-[#C85A17]/40 text-[#8A330B] font-bold text-xs shadow-sm"
+            onClick={() => openExpenseModal('monthly')}
+            className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-[#2B1B12] hover:bg-[#3d281c] text-amber-50 font-extrabold text-xs shadow-sm"
           >
-            <Calculator className="w-4 h-4 shrink-0" />
-            <span>מחשבון פדיון וקופה</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setWasteOpen(true)}
-            className="flex-1 sm:flex-none min-h-[48px] md:min-h-[40px] inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-red-50 hover:bg-red-100 border border-red-200 text-red-800 font-bold text-xs shadow-sm"
-          >
-            <AlertOctagon className="w-4 h-4 shrink-0" />
-            <span>
-              ניהול פחת סוף יום{wasteSummary.cost > 0 ? ` (${formatILS(wasteSummary.cost)})` : ''}
-            </span>
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setEditingTx(null);
-              setTxIsGeneral(false);
-              setShowTxModal(true);
-            }}
-            className="flex-1 sm:flex-none min-h-[48px] md:min-h-[40px] inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-[#1E242B] hover:bg-slate-800 text-white font-bold text-xs shadow-sm"
-          >
-            <Plus className="w-4 h-4 shrink-0" />
-            <span>תנועה ידנית</span>
+            <Plus className="w-4 h-4" />
+            <span>+ הזן הוצאה חודשית</span>
           </button>
           <button
             type="button"
             onClick={exportTransactionsCsv}
-            className="w-full sm:w-auto min-h-[48px] md:min-h-[40px] inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-white border border-[#E8D5BE] hover:border-[#C85A17] text-slate-800 font-bold text-xs"
+            className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-white border border-[#E8D5BE] hover:border-[#C85A17] text-slate-800 font-bold text-xs"
           >
-            <Download className="w-4 h-4 text-[#C85A17] shrink-0" />
-            <span>ייצוא יומן (CSV)</span>
+            <Download className="w-4 h-4 text-[#C85A17]" />
+            <span>ייצוא CSV</span>
           </button>
         </div>
+      </div>
+
+      {/* בורר תקופות מהיר: שישי הזה | חודש נוכחי | חודש קודם | שנתי */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 p-1.5 rounded-2xl bg-white border border-[#E8D5BE] shadow-soft">
+        {PERIOD_TABS.map((tab) => {
+          const active = period === tab.key;
+          return (
+            <button
+              key={tab.key}
+              type="button"
+              onClick={() => {
+                setPeriod(tab.key);
+                setSelectedChartIndex(null);
+              }}
+              className={`py-2.5 px-3 rounded-xl text-xs sm:text-sm font-extrabold transition-all ${
+                active
+                  ? 'bg-[#C85A17] text-white shadow-sm'
+                  : 'text-slate-600 hover:bg-[#FAF6F0]'
+              }`}
+            >
+              {tab.label}
+            </button>
+          );
+        })}
       </div>
 
       {toast && (
@@ -461,822 +648,676 @@ export function FinancePage() {
         </div>
       )}
 
-      {/* שני טפסים מהירים: סיכום קופת דוכן + הוצאה משתנה */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-        {/* טופס 1: סיכום קופת דוכן */}
-        <form
-          onSubmit={handleStallCloseout}
-          className="bg-gradient-to-br from-[#FFF7ED] to-white rounded-3xl border border-[#E8D5BE] shadow-soft p-5 space-y-4"
-        >
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2.5">
-              <div className="w-9 h-9 rounded-xl bg-[#C85A17] text-white flex items-center justify-center shrink-0">
-                <Store className="w-5 h-5" />
-              </div>
-              <div>
-                <h3 className="font-serif text-xl font-bold text-slate-900">סיכום קופת דוכן (סוף יום שישי)</h3>
-                <p className="text-xs text-slate-500">
-                  הזנת פדיון מכירות חופשיות בדוכן במזומן, פייבוקס והעברה בנקאית.
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-            <div>
-              <label className="block text-xs font-bold text-slate-600 mb-1">יום שישי</label>
-              <input
-                type="date"
-                required
-                value={stallFriday}
-                onChange={(e) => setStallFriday(e.target.value)}
-                className="w-full px-2.5 py-2.5 rounded-xl border border-[#E8D5BE] bg-white text-xs font-semibold"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-emerald-800 mb-1">מזומן (₪)</label>
-              <input
-                type="number"
-                inputMode="decimal"
-                min="0"
-                step="0.5"
-                dir="ltr"
-                placeholder="0.00"
-                value={stallCash}
-                onChange={(e) => setStallCash(e.target.value)}
-                className="w-full px-3 py-2 rounded-xl border border-emerald-300 bg-white text-left tabular-nums font-extrabold text-emerald-800"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-sky-800 mb-1">פייבוקס (₪)</label>
-              <input
-                type="number"
-                inputMode="decimal"
-                min="0"
-                step="0.5"
-                dir="ltr"
-                placeholder="0.00"
-                value={stallPaybox}
-                onChange={(e) => setStallPaybox(e.target.value)}
-                className="w-full px-3 py-2 rounded-xl border border-sky-300 bg-white text-left tabular-nums font-extrabold text-sky-800"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-amber-800 mb-1">העברה (₪)</label>
-              <input
-                type="number"
-                inputMode="decimal"
-                min="0"
-                step="0.5"
-                dir="ltr"
-                placeholder="0.00"
-                value={stallTransfer}
-                onChange={(e) => setStallTransfer(e.target.value)}
-                className="w-full px-3 py-2 rounded-xl border border-amber-300 bg-white text-left tabular-nums font-extrabold text-amber-800"
-              />
-            </div>
-          </div>
-
-          <div className="flex flex-col sm:flex-row gap-2.5 items-stretch sm:items-center">
-            <input
-              type="text"
-              value={stallNotes}
-              onChange={(e) => setStallNotes(e.target.value)}
-              placeholder="הערה (לדוגמה: דוכן שוק ראש העין)"
-              className="flex-1 px-3 py-2 rounded-xl border border-[#E8D5BE] bg-white text-sm"
-            />
-            <button
-              type="submit"
-              disabled={savingStall || stallTotalInput <= 0}
-              className="min-h-[48px] px-5 py-2.5 rounded-xl bg-[#C85A17] hover:bg-[#A9440F] disabled:opacity-50 text-white font-bold text-sm shadow-sm whitespace-nowrap"
-            >
-              {savingStall ? 'רושם...' : `רשום קופה (${formatILS(stallTotalInput)})`}
-            </button>
-          </div>
-        </form>
-
-        {/* טופס 2: הזנת הוצאה משתנה מהירה */}
-        <form
-          onSubmit={handleQuickExpense}
-          className="bg-white rounded-3xl border border-[#E8D5BE] shadow-soft p-5 space-y-3.5"
-        >
-          <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl bg-red-100 text-red-700 flex items-center justify-center shrink-0">
-              <Receipt className="w-5 h-5" />
-            </div>
-            <div>
-              <h3 className="font-serif text-xl font-bold text-slate-900">רישום הוצאות תפעול שישי</h3>
-              <p className="text-xs text-slate-500">
-                רכש מאפייה במזומן, שכר עובד יומי, דלק / נסיעות, כביש 6 ועוד.
-              </p>
-            </div>
-          </div>
-
-          <div className="flex flex-wrap gap-1.5">
-            {EXPENSE_PRESETS.map((preset) => (
-              <button
-                key={preset.label}
-                type="button"
-                onClick={() => {
-                  setExpCategory(preset.label);
-                  if (preset.defaultMethod) setExpMethod(preset.defaultMethod);
-                }}
-                className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold transition-colors ${
-                  expCategory === preset.label
-                    ? 'bg-red-700 text-white'
-                    : 'bg-[#FAF6F0] text-slate-600 hover:bg-[#F3E9DC]'
-                }`}
-              >
-                {preset.label}
-              </button>
-            ))}
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-            <input
-              type="text"
-              required
-              value={expCategory}
-              onChange={(e) => setExpCategory(e.target.value)}
-              placeholder="קטגוריה"
-              className="sm:col-span-1 px-3 py-2 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] text-sm"
-            />
-            <input
-              type="number"
-              inputMode="decimal"
-              min="0.01"
-              step="0.01"
-              required
-              dir="ltr"
-              placeholder="סכום (₪)"
-              value={expAmount}
-              onChange={(e) => setExpAmount(e.target.value)}
-              className="px-3 py-2.5 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] text-left tabular-nums font-bold text-sm"
-            />
-            <select
-              value={expMethod}
-              onChange={(e) => setExpMethod(e.target.value as PaymentMethod)}
-              className="px-3 py-2 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] text-sm font-semibold"
-            >
-              {(['cash', 'paybox', 'transfer'] as const).map((pm) => (
-                <option key={pm} value={pm}>
-                  {PAYMENT_METHOD_LABELS[pm]}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="flex flex-col sm:flex-row gap-2.5 items-stretch sm:items-center">
-            <input
-              type="date"
-              value={expFriday}
-              onChange={(e) => setExpFriday(e.target.value)}
-              className="px-3 py-2 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] text-xs font-semibold"
-              title="שיוך לשישי"
-            />
-            <input
-              type="text"
-              value={expNotes}
-              onChange={(e) => setExpNotes(e.target.value)}
-              placeholder="פירוט / הערה"
-              className="flex-1 px-3 py-2 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] text-sm"
-            />
-            <button
-              type="submit"
-              disabled={savingExp}
-              className="min-h-[48px] px-5 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 text-white font-bold text-sm whitespace-nowrap"
-            >
-              {savingExp ? 'שומר...' : 'רשום הוצאה'}
-            </button>
-          </div>
-        </form>
-      </div>
-
-      {/* כרטיסי תזרים לחיצים לפירוט וסינון מהיר */}
+      {/* 5 כרטיסי סיכום בראש דף הכספים + השוואה אוטומטית לתקופה הקודמת */}
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 tabular-nums">
-        <button
-          type="button"
-          onClick={() => setFilterType((cur) => (cur === 'income' ? '' : 'income'))}
-          className={`text-right bg-white rounded-2xl p-4 border shadow-soft transition-all ${
-            filterType === 'income' ? 'border-emerald-500 ring-2 ring-emerald-200' : 'border-[#E8D5BE]/80 hover:border-emerald-300'
-          }`}
-        >
-          <div className="text-xs font-bold text-slate-500">הכנסות (לחץ לפירוט)</div>
-          <div className="text-xl font-extrabold text-emerald-700 mt-1">{formatILS(summary.income)}</div>
-        </button>
-        <button
-          type="button"
-          onClick={() => setFilterType((cur) => (cur === 'expense' ? '' : 'expense'))}
-          className={`text-right bg-white rounded-2xl p-4 border shadow-soft transition-all ${
-            filterType === 'expense' ? 'border-red-500 ring-2 ring-red-200' : 'border-[#E8D5BE]/80 hover:border-red-300'
-          }`}
-        >
-          <div className="text-xs font-bold text-slate-500">הוצאות (לחץ לפירוט)</div>
-          <div className="text-xl font-extrabold text-red-700 mt-1">{formatILS(summary.expense)}</div>
-        </button>
-        <button
-          type="button"
-          onClick={() => setFilterPayment((cur) => (cur === 'cash' ? '' : 'cash'))}
-          className={`text-right bg-white rounded-2xl p-4 border shadow-soft transition-all ${
-            filterPayment === 'cash' ? 'border-emerald-600 ring-2 ring-emerald-200' : 'border-emerald-200 hover:border-emerald-400'
-          }`}
-        >
-          <div className="text-xs font-bold text-emerald-800">נטו מזומן</div>
-          <div className="text-xl font-extrabold text-slate-900 mt-1">{formatILS(summary.cashNet)}</div>
-        </button>
-        <button
-          type="button"
-          onClick={() => setFilterPayment((cur) => (cur === 'paybox' ? '' : 'paybox'))}
-          className={`text-right bg-white rounded-2xl p-4 border shadow-soft transition-all ${
-            filterPayment === 'paybox' ? 'border-sky-600 ring-2 ring-sky-200' : 'border-sky-200 hover:border-sky-400'
-          }`}
-        >
-          <div className="text-xs font-bold text-sky-800">נטו פייבוקס</div>
-          <div className="text-xl font-extrabold text-slate-900 mt-1">{formatILS(summary.payboxNet)}</div>
-        </button>
-        <button
-          type="button"
-          onClick={() => setFilterPayment((cur) => (cur === 'transfer' ? '' : 'transfer'))}
-          className={`text-right bg-white rounded-2xl p-4 border shadow-soft transition-all ${
-            filterPayment === 'transfer' ? 'border-amber-600 ring-2 ring-amber-200' : 'border-amber-200 hover:border-amber-400'
-          }`}
-        >
-          <div className="text-xs font-bold text-amber-800">נטו העברה בנקאית</div>
-          <div className="text-xl font-extrabold text-slate-900 mt-1">{formatILS(summary.transferNet)}</div>
-        </button>
-      </div>
-
-      {/* יומן תנועות + הוצאות קבועות */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* ספר תנועות עם סינון מלא */}
-        <div className="lg:col-span-2 bg-white rounded-3xl border border-[#E8D5BE] shadow-soft overflow-hidden">
-          <div className="p-4 border-b border-[#F3E9DC] space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Filter className="w-4 h-4 text-[#C85A17]" />
-                <h3 className="font-bold text-lg text-slate-900">יומן תנועות כספיות</h3>
-              </div>
-              <span className="text-xs font-bold text-slate-500 tabular-nums">
-                {transactions.length} רשומות
-              </span>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2 text-xs">
-              <FridaySelector value={filterFriday} onChange={setFilterFriday} allowAll label="" />
-              <input
-                type="date"
-                value={filterFrom}
-                onChange={(e) => setFilterFrom(e.target.value)}
-                className="w-full min-h-[48px] md:min-h-[38px] px-2.5 py-2 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7]"
-                title="מתאריך"
-              />
-              <input
-                type="date"
-                value={filterTo}
-                onChange={(e) => setFilterTo(e.target.value)}
-                className="w-full min-h-[48px] md:min-h-[38px] px-2.5 py-2 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7]"
-                title="עד תאריך"
-              />
-              <select
-                value={filterType}
-                onChange={(e) => setFilterType(e.target.value as '' | 'income' | 'expense')}
-                className="w-full min-h-[48px] md:min-h-[38px] px-2.5 py-2 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] font-semibold"
-              >
-                <option value="">הכנסות והוצאות</option>
-                <option value="income">הכנסות בלבד</option>
-                <option value="expense">הוצאות בלבד</option>
-              </select>
-              <select
-                value={filterPayment}
-                onChange={(e) => setFilterPayment(e.target.value as '' | PaymentMethod)}
-                className="w-full min-h-[48px] md:min-h-[38px] px-2.5 py-2 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] font-semibold"
-              >
-                <option value="">כל אמצעי התשלום</option>
-                <option value="cash">מזומן</option>
-                <option value="paybox">פייבוקס</option>
-                <option value="transfer">העברה בנקאית</option>
-              </select>
-            </div>
+        {/* 1. הכנסות (פדיון מכירות) */}
+        <div className="bg-white rounded-2xl border border-[#E8D5BE] p-4 shadow-soft space-y-2">
+          <div className="flex items-center justify-between gap-1">
+            <span className="text-xs font-extrabold text-slate-600">הכנסות (פדיון מכירות)</span>
+            {renderComparisonBadge(currentMetrics.revenue, prevMetrics.revenue)}
           </div>
-
-          {loading ? (
-            <div className="p-8 text-center text-slate-400">טוען תנועות...</div>
-          ) : transactions.length === 0 ? (
-            <div className="p-10 text-center text-slate-400 text-sm">
-              לא נמצאו תנועות לפי הסינון הנוכחי.
-            </div>
-          ) : (
-            <div className="divide-y divide-[#F3E9DC]">
-              {transactions.map((t) => (
-                <div key={t.id} className="p-4 flex items-center justify-between gap-3 hover:bg-[#FDFBF7]">
-                  <div className="flex items-start gap-3">
-                    {t.type === 'income' ? (
-                      <ArrowUpCircle className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
-                    ) : (
-                      <ArrowDownCircle className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />
-                    )}
-                    <div>
-                      <div className="font-bold text-sm text-slate-900">{t.category}</div>
-                      <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-500 mt-0.5">
-                        <span>{formatHebrewDate(t.date)}</span>
-                        <span>·</span>
-                        <span
-                          className={`px-2 py-0.5 rounded-md font-bold text-[11px] ${
-                            t.payment_method === 'cash'
-                              ? 'bg-emerald-50 text-emerald-800'
-                              : t.payment_method === 'paybox'
-                              ? 'bg-sky-50 text-sky-800'
-                              : 'bg-amber-50 text-amber-800'
-                          }`}
-                        >
-                          {PAYMENT_METHOD_LABELS[t.payment_method]}
-                        </span>
-                        {t.user_name && (
-                          t.user_id ? (
-                            <button
-                              type="button"
-                              onClick={() => openContactById(t.user_id!)}
-                              className="text-[#C85A17] hover:underline font-bold"
-                            >
-                              · {t.user_name}
-                            </button>
-                          ) : (
-                            <span>· {t.user_name}</span>
-                          )
-                        )}
-                      </div>
-                      {t.notes && <div className="text-xs text-slate-400 mt-0.5">{t.notes}</div>}
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2.5 shrink-0">
-                    <span
-                      className={`font-extrabold tabular-nums text-sm ${
-                        t.type === 'income' ? 'text-emerald-700' : 'text-red-700'
-                      }`}
-                    >
-                      {t.type === 'income' ? '+' : '-'}
-                      {formatILS(t.amount)}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => openEditTxModal(t)}
-                      className="p-1.5 rounded-lg text-slate-400 hover:text-amber-700 hover:bg-amber-50"
-                      title="ערוך תנועה"
-                    >
-                      <Edit3 className="w-4 h-4" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteTx(t.id)}
-                      className="p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50"
-                      title="מחק תנועה"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
+          <div className="text-2xl font-extrabold text-emerald-700">
+            {formatILS(currentMetrics.revenue)}
+          </div>
+          <div className="text-[11px] text-slate-400">
+            קודם: {formatILS(prevMetrics.revenue)}
+          </div>
         </div>
 
-        {/* הוצאות קבועות */}
-        <div className="bg-white rounded-3xl border border-[#E8D5BE] shadow-soft p-5 space-y-4">
-          <div className="flex items-center justify-between gap-2">
+        {/* 2. הוצאות (כולל פחת אבוד) */}
+        <div className="bg-white rounded-2xl border border-[#E8D5BE] p-4 shadow-soft space-y-2">
+          <div className="flex items-center justify-between gap-1">
+            <span className="text-xs font-extrabold text-slate-600">הוצאות (כולל פחת)</span>
+            {renderComparisonBadge(currentMetrics.expenses, prevMetrics.expenses, true)}
+          </div>
+          <div className="text-2xl font-extrabold text-red-600">
+            {formatILS(currentMetrics.expenses)}
+          </div>
+          <div className="text-[11px] text-slate-400">
+            קודם: {formatILS(prevMetrics.expenses)}
+          </div>
+        </div>
+
+        {/* 3. רווח נקי בפועל */}
+        <div
+          className={`rounded-2xl border-2 p-4 shadow-soft space-y-2 ${
+            currentMetrics.netProfit >= 0
+              ? 'bg-emerald-50/50 border-emerald-300'
+              : 'bg-red-50/50 border-red-300'
+          }`}
+        >
+          <div className="flex items-center justify-between gap-1">
+            <span className="text-xs font-extrabold text-slate-800">רווח נקי בפועל</span>
+            {renderComparisonBadge(currentMetrics.netProfit, prevMetrics.netProfit)}
+          </div>
+          <div
+            className={`text-2xl font-extrabold ${
+              currentMetrics.netProfit >= 0 ? 'text-emerald-800' : 'text-red-700'
+            }`}
+          >
+            {formatILS(currentMetrics.netProfit)}
+          </div>
+          <div className="text-[11px] text-slate-500">
+            קודם: {formatILS(prevMetrics.netProfit)}
+          </div>
+        </div>
+
+        {/* 4. כמות מוצרים שהוזמנו */}
+        <div className="bg-white rounded-2xl border border-[#E8D5BE] p-4 shadow-soft space-y-2">
+          <div className="flex items-center justify-between gap-1">
+            <span className="text-xs font-extrabold text-slate-600 flex items-center gap-1">
+              <ShoppingBag className="w-3.5 h-3.5 text-[#C85A17]" />
+              <span>מוצרים שהוזמנו</span>
+            </span>
+            {renderComparisonBadge(currentMetrics.unitsOrdered, prevMetrics.unitsOrdered)}
+          </div>
+          <div className="text-2xl font-extrabold text-slate-900">
+            {currentMetrics.unitsOrdered.toLocaleString('he-IL')} יח׳
+          </div>
+          <div className="text-[11px] text-slate-400">
+            קודם: {prevMetrics.unitsOrdered.toLocaleString('he-IL')} יח׳
+          </div>
+        </div>
+
+        {/* 5. כמות לקוחות שהזמינו */}
+        <div className="col-span-2 lg:col-span-1 bg-white rounded-2xl border border-[#E8D5BE] p-4 shadow-soft space-y-2">
+          <div className="flex items-center justify-between gap-1">
+            <span className="text-xs font-extrabold text-slate-600 flex items-center gap-1">
+              <Users className="w-3.5 h-3.5 text-[#C85A17]" />
+              <span>לקוחות שהזמינו</span>
+            </span>
+            {renderComparisonBadge(currentMetrics.uniqueCustomers, prevMetrics.uniqueCustomers)}
+          </div>
+          <div className="text-2xl font-extrabold text-slate-900">
+            {currentMetrics.uniqueCustomers} לקוחות
+          </div>
+          <div className="text-[11px] text-slate-400">
+            קודם: {prevMetrics.uniqueCustomers} לקוחות
+          </div>
+        </div>
+      </div>
+
+      {/* גרף אינטראקטיבי של מכירות ורווחים לפי ימי שישי או חודשים */}
+      <section className="bg-white rounded-3xl border border-[#E8D5BE] shadow-soft p-5 space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div>
+            <h3 className="font-serif text-xl font-bold text-slate-900 flex items-center gap-2">
+              <BarChart3 className="w-5 h-5 text-[#C85A17]" />
+              <span>
+                גרף מכירות ורווח נקי ({period === 'yearly' ? 'לפי חודשים' : 'לפי ימי שישי'})
+              </span>
+            </h3>
+            <p className="text-xs text-slate-500">
+              לחץ על כל עמודה להצגת פירוט מלא של הכנסות, הוצאות, רווח נקי וכמות הזמנות.
+            </p>
+          </div>
+          <div className="flex items-center gap-4 text-xs font-bold">
+            <span className="inline-flex items-center gap-1.5">
+              <span className="w-3 h-3 rounded-sm bg-[#C85A17]" />
+              <span>הכנסות (מכירות)</span>
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <span className="w-3 h-3 rounded-sm bg-emerald-600" />
+              <span>רווח נקי</span>
+            </span>
+          </div>
+        </div>
+
+        {/* פירוט העמודה הנבחרת */}
+        {activeChartPoint && (
+          <div className="p-3 rounded-2xl bg-[#FAF6F0] border border-[#E8D5BE] flex flex-wrap items-center justify-between gap-3 text-xs tabular-nums">
+            <span className="font-extrabold text-slate-900">{activeChartPoint.fullLabel}</span>
+            <div className="flex flex-wrap items-center gap-4">
+              <span>
+                הכנסות: <strong className="text-[#C85A17]">{formatILS(activeChartPoint.revenue)}</strong>
+              </span>
+              <span>
+                הוצאות: <strong className="text-red-600">{formatILS(activeChartPoint.expenses)}</strong>
+              </span>
+              <span>
+                רווח נקי:{' '}
+                <strong
+                  className={
+                    activeChartPoint.netProfit >= 0 ? 'text-emerald-700' : 'text-red-600'
+                  }
+                >
+                  {formatILS(activeChartPoint.netProfit)}
+                </strong>
+              </span>
+              <span>
+                מוצרים: <strong>{activeChartPoint.unitsOrdered} יח׳</strong> ({activeChartPoint.uniqueCustomers} לקוחות)
+              </span>
+            </div>
+          </div>
+        )}
+
+        {/* עמודות הגרף */}
+        <div className="h-52 pt-4 pb-2 px-2 flex items-end justify-between gap-2 border-b border-[#E8D5BE]">
+          {chartSeries.map((pt, idx) => {
+            const revHeightPct = Math.max(6, Math.round((pt.revenue / maxChartVal) * 100));
+            const profitHeightPct = Math.max(
+              6,
+              Math.round((Math.max(0, pt.netProfit) / maxChartVal) * 100)
+            );
+            const isSelected =
+              selectedChartIndex === idx ||
+              (selectedChartIndex === null && idx === chartSeries.length - 1);
+
+            return (
+              <button
+                key={pt.label + idx}
+                type="button"
+                onClick={() => setSelectedChartIndex(idx)}
+                className={`flex-1 h-full flex flex-col justify-end items-center gap-1.5 rounded-xl p-1 transition-colors ${
+                  isSelected ? 'bg-[#FFF7ED] ring-1 ring-[#C85A17]' : 'hover:bg-[#FAF6F0]'
+                }`}
+              >
+                <div className="w-full flex-1 flex items-end justify-center gap-1 px-1">
+                  <div
+                    style={{ height: `${revHeightPct}%` }}
+                    className="w-3 sm:w-4 rounded-t-md bg-[#C85A17] transition-all"
+                    title={`הכנסות: ${formatILS(pt.revenue)}`}
+                  />
+                  <div
+                    style={{ height: `${profitHeightPct}%` }}
+                    className={`w-3 sm:w-4 rounded-t-md transition-all ${
+                      pt.netProfit >= 0 ? 'bg-emerald-600' : 'bg-red-500'
+                    }`}
+                    title={`רווח נקי: ${formatILS(pt.netProfit)}`}
+                  />
+                </div>
+                <span className="text-[10px] font-extrabold text-slate-700 tabular-nums truncate max-w-full">
+                  {pt.label}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </section>
+
+      {/* ניהול הוצאות קבועות (שבועיות וחודשיות) */}
+      <section className="bg-white rounded-3xl border border-[#E8D5BE] shadow-soft p-5 space-y-4">
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <div className="flex items-center gap-2">
+            <Repeat className="w-5 h-5 text-[#C85A17]" />
             <div>
-              <h3 className="font-bold text-lg text-slate-900 flex items-center gap-2">
-                <Repeat className="w-4 h-4 text-[#C85A17]" />
-                <span>הוצאות קבועות</span>
+              <h3 className="font-serif text-xl font-bold text-slate-900">
+                הוצאות קבועות (שבועיות וחודשיות)
               </h3>
-              <p className="text-xs text-slate-500 mt-0.5 tabular-nums">
-                שבועי פעיל: {formatILS(summary.weeklyFixed)} · חודשי פעיל: {formatILS(summary.monthlyFixed)}
+              <p className="text-xs text-slate-500">
+                משוקללות אוטומטית בחישוב הרווח הנקי לפי התקופה שנבחרה.
               </p>
             </div>
-            <button
-              type="button"
-              onClick={openAddFixed}
-              className="p-2 rounded-xl bg-[#FFF7ED] text-[#C85A17] hover:bg-[#FFEDD5]"
-              title="הוסף הוצאה קבועה"
-            >
-              <Plus className="w-4 h-4" />
-            </button>
           </div>
+          <button
+            type="button"
+            onClick={() => {
+              setEditingFixed(null);
+              setFixedForm({ name: '', amount: '', frequency: 'weekly', payment_method: 'transfer' });
+              setShowFixedModal(true);
+            }}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#FAF6F0] border border-[#E8D5BE] hover:border-[#C85A17] text-xs font-extrabold text-[#8A330B]"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            <span>+ הוצאה קבועה חדשה</span>
+          </button>
+        </div>
 
-          <div className="grid grid-cols-2 gap-2">
-            <button
-              type="button"
-              onClick={() => handleApplyFixedBulk('weekly')}
-              className="min-h-[48px] md:min-h-[40px] py-2 px-2.5 rounded-xl bg-[#FAF6F0] hover:bg-[#FFF7ED] border border-[#E8D5BE] text-[11px] font-bold text-[#8A330B] flex items-center justify-center gap-1"
-            >
-              <PlayCircle className="w-3.5 h-3.5 shrink-0" />
-              <span>החל שבועיות ליומן</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => handleApplyFixedBulk('monthly')}
-              className="min-h-[48px] md:min-h-[40px] py-2 px-2.5 rounded-xl bg-[#FAF6F0] hover:bg-[#FFF7ED] border border-[#E8D5BE] text-[11px] font-bold text-[#8A330B] flex items-center justify-center gap-1"
-            >
-              <PlayCircle className="w-3.5 h-3.5 shrink-0" />
-              <span>החל חודשיות ליומן</span>
-            </button>
+        {fixedExpenses.length === 0 ? (
+          <div className="py-4 text-center text-xs text-slate-400">
+            אין עדיין הוצאות קבועות מוגדרות.
           </div>
-
-          <div className="space-y-2.5">
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
             {fixedExpenses.map((f) => (
               <div
                 key={f.id}
-                className={`p-3.5 rounded-2xl border ${
-                  f.is_active ? 'border-[#E8D5BE] bg-[#FDFBF7]' : 'border-slate-200 bg-slate-50 opacity-60'
+                className={`p-3 rounded-2xl border flex items-center justify-between gap-2 ${
+                  f.is_active ? 'bg-[#FAF6F0] border-[#E8D5BE]' : 'bg-slate-50 border-slate-200 opacity-60'
                 }`}
               >
-                <div className="flex items-center justify-between gap-2">
-                  <span className="font-bold text-sm text-slate-900">{f.name}</span>
-                  <span className="font-extrabold text-sm text-slate-900 tabular-nums">
-                    {formatILS(f.amount)}
-                  </span>
+                <div className="min-w-0">
+                  <div className="font-extrabold text-xs text-slate-900 truncate">{f.name}</div>
+                  <div className="text-[11px] text-slate-500 tabular-nums">
+                    {formatILS(f.amount)} · {f.frequency === 'weekly' ? 'שבועי' : 'חודשי'}
+                  </div>
                 </div>
-                <div className="text-xs text-slate-500 mt-1">
-                  {f.frequency === 'weekly' ? 'שבועי' : 'חודשי'} · {PAYMENT_METHOD_LABELS[f.payment_method]}
-                </div>
-                <div className="flex items-center justify-between mt-3 pt-2 border-t border-[#F3E9DC]">
+                <div className="flex items-center gap-1 shrink-0">
                   <button
                     type="button"
                     onClick={() => toggleFixed(f.id)}
-                    className={`text-xs font-bold ${
-                      f.is_active ? 'text-emerald-700' : 'text-slate-500'
+                    className={`px-2 py-0.5 rounded-lg text-[10px] font-extrabold ${
+                      f.is_active ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-600'
                     }`}
                   >
-                    {f.is_active ? 'פעיל (השבת)' : 'מושבת (הפעל)'}
+                    {f.is_active ? 'פעיל' : 'מושהה'}
                   </button>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => openEditFixed(f)}
-                      className="text-slate-400 hover:text-slate-800"
-                    >
-                      <Edit3 className="w-3.5 h-3.5" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => deleteFixed(f.id)}
-                      className="text-slate-400 hover:text-red-600"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingFixed(f);
+                      setFixedForm({
+                        name: f.name,
+                        amount: String(f.amount),
+                        frequency: f.frequency,
+                        payment_method: f.payment_method,
+                      });
+                      setShowFixedModal(true);
+                    }}
+                    className="p-1.5 text-slate-500 hover:text-slate-900"
+                  >
+                    <Edit3 className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDeleteFixedId(f.id)}
+                    className="p-1.5 text-slate-400 hover:text-red-600"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
                 </div>
               </div>
             ))}
           </div>
+        )}
+      </section>
+
+      {/* יומן תנועות כספיות */}
+      <section className="bg-white rounded-3xl border border-[#E8D5BE] shadow-soft p-5 space-y-4">
+        <div className="flex items-center justify-between">
+          <h3 className="font-serif text-xl font-bold text-slate-900 flex items-center gap-2">
+            <Wallet className="w-5 h-5 text-[#C85A17]" />
+            <span>יומן תנועות והוצאות ({transactions.length})</span>
+          </h3>
         </div>
-      </div>
 
-      {/* חלונית ניהול פחת סוף יום */}
-      <WasteTrackingSheet
-        open={wasteOpen}
-        initialFriday={stallFriday}
-        onClose={() => setWasteOpen(false)}
-        onSaved={load}
-      />
-
-      {/* חלונית תנועה ידנית / הוספה ועריכת הוצאה */}
-      <BottomSheet
-        open={showTxModal}
-        onClose={() => {
-          setShowTxModal(false);
-          setEditingTx(null);
-        }}
-        title={editingTx ? 'עריכת תנועה / הוצאה' : txForm.type === 'expense' ? 'הוספת הוצאה' : 'רישום תנועה ידנית'}
-        subtitle="ניתן לשייך לתאריך שישי ספציפי או לסמן כהוצאה כללית"
-        maxWidthClass="md:max-w-md"
-      >
-        <form onSubmit={handleCreateTx} className="space-y-3.5">
-          <div className="grid grid-cols-2 gap-2">
-            <button
-              type="button"
-              onClick={() => setTxForm({ ...txForm, type: 'income' })}
-              className={`min-h-[44px] py-2 rounded-xl text-sm font-bold border ${
-                txForm.type === 'income'
-                  ? 'bg-emerald-600 text-white border-emerald-600'
-                  : 'border-[#E8D5BE] text-slate-600'
-              }`}
-            >
-              הכנסה
-            </button>
-            <button
-              type="button"
-              onClick={() => setTxForm({ ...txForm, type: 'expense' })}
-              className={`min-h-[44px] py-2 rounded-xl text-sm font-bold border ${
-                txForm.type === 'expense'
-                  ? 'bg-red-600 text-white border-red-600'
-                  : 'border-[#E8D5BE] text-slate-600'
-              }`}
-            >
-              הוצאה
-            </button>
-          </div>
-          <label className="inline-flex items-center gap-2 text-xs font-bold text-slate-700 cursor-pointer select-none">
-            <input
-              type="checkbox"
-              checked={txIsGeneral}
-              onChange={(e) => setTxIsGeneral(e.target.checked)}
-              className="w-4 h-4 accent-[#C85A17]"
-            />
-            <span>הוצאה/תנועה כללית (אינה שייכת לתאריך שישי ספציפי)</span>
-          </label>
-          {!txIsGeneral && (
-            <div>
-              <label className="block text-xs font-semibold text-slate-600 mb-1">שיוך לתאריך שישי</label>
-              <input
-                type="date"
-                value={txForm.friday_date}
-                onChange={(e) => setTxForm({ ...txForm, friday_date: e.target.value })}
-                className="w-full px-3.5 py-2 rounded-xl border border-[#E8D5BE] text-sm"
-              />
-            </div>
-          )}
-          <div>
-            <label className="block text-xs font-semibold text-slate-600 mb-1">קטגוריה / תיאור</label>
-            <input
-              type="text"
-              required
-              value={txForm.category}
-              onChange={(e) => setTxForm({ ...txForm, category: e.target.value })}
-              className="w-full px-3.5 py-2.5 rounded-xl border border-[#E8D5BE] text-sm"
-            />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-semibold text-slate-600 mb-1">סכום (₪)</label>
-              <input
-                type="number"
-                inputMode="decimal"
-                step="0.01"
-                min="0.01"
-                required
-                dir="ltr"
-                value={txForm.amount}
-                onChange={(e) => setTxForm({ ...txForm, amount: e.target.value })}
-                className="w-full px-3 py-2.5 rounded-xl border border-[#E8D5BE] text-left tabular-nums font-bold"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-slate-600 mb-1">אמצעי תשלום</label>
-              <select
-                value={txForm.payment_method}
-                onChange={(e) => setTxForm({ ...txForm, payment_method: e.target.value as PaymentMethod })}
-                className="w-full px-3 py-2.5 rounded-xl border border-[#E8D5BE] text-sm"
-              >
-                {(['cash', 'paybox', 'transfer'] as const).map((pm) => (
-                  <option key={pm} value={pm}>
-                    {PAYMENT_METHOD_LABELS[pm]}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-semibold text-slate-600 mb-1">תאריך</label>
-              <input
-                type="date"
-                value={txForm.date}
-                onChange={(e) => setTxForm({ ...txForm, date: e.target.value })}
-                className="w-full px-3 py-2.5 rounded-xl border border-[#E8D5BE] text-sm"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-slate-600 mb-1">שיוך לשישי</label>
-              <input
-                type="date"
-                value={txForm.friday_date}
-                onChange={(e) => setTxForm({ ...txForm, friday_date: e.target.value })}
-                className="w-full px-3 py-2.5 rounded-xl border border-[#E8D5BE] text-sm"
-              />
-            </div>
-          </div>
-          <div>
-            <label className="block text-xs font-semibold text-slate-600 mb-1">הערות</label>
-            <input
-              type="text"
-              value={txForm.notes}
-              onChange={(e) => setTxForm({ ...txForm, notes: e.target.value })}
-              className="w-full px-3 py-2.5 rounded-xl border border-[#E8D5BE] text-sm"
-            />
-          </div>
-          <button
-            type="submit"
-            className="w-full min-h-[50px] py-2.5 rounded-2xl bg-[#C85A17] hover:bg-[#A9440F] text-white font-extrabold text-base"
-          >
-            שמור תנועה
-          </button>
-        </form>
-      </BottomSheet>
-
-      {/* חלונית הוצאה קבועה */}
-      <BottomSheet
-        open={showFixedModal}
-        onClose={() => setShowFixedModal(false)}
-        title={editingFixed ? 'עריכת הוצאה קבועה' : 'הוספת הוצאה קבועה'}
-        subtitle="משוקלל אוטומטית בדוח הרווח וההפסד לפי תקופה"
-        maxWidthClass="md:max-w-md"
-      >
-        <form onSubmit={handleSaveFixed} className="space-y-3.5">
-          <div>
-            <label className="block text-xs font-semibold text-slate-600 mb-1">שם ההוצאה</label>
-            <input
-              type="text"
-              required
-              value={fixedForm.name}
-              onChange={(e) => setFixedForm({ ...fixedForm, name: e.target.value })}
-              placeholder="לדוגמה: שכירות דוכן / ביטוח / אחסון / תוכנה"
-              className="w-full px-3.5 py-2.5 rounded-xl border border-[#E8D5BE] text-sm"
-            />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-semibold text-slate-600 mb-1">סכום (₪)</label>
-              <input
-                type="number"
-                inputMode="decimal"
-                step="0.01"
-                min="0.01"
-                required
-                dir="ltr"
-                value={fixedForm.amount}
-                onChange={(e) => setFixedForm({ ...fixedForm, amount: e.target.value })}
-                className="w-full px-3 py-2.5 rounded-xl border border-[#E8D5BE] text-left tabular-nums font-bold"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-slate-600 mb-1">תדירות</label>
-              <select
-                value={fixedForm.frequency}
-                onChange={(e) =>
-                  setFixedForm({ ...fixedForm, frequency: e.target.value as 'weekly' | 'monthly' })
-                }
-                className="w-full px-3 py-2.5 rounded-xl border border-[#E8D5BE] text-sm"
-              >
-                <option value="weekly">שבועי</option>
-                <option value="monthly">חודשי</option>
-              </select>
-            </div>
-          </div>
-          <div>
-            <label className="block text-xs font-semibold text-slate-600 mb-1">אמצעי תשלום</label>
-            <select
-              value={fixedForm.payment_method}
-              onChange={(e) =>
-                setFixedForm({ ...fixedForm, payment_method: e.target.value as PaymentMethod })
-              }
-              className="w-full px-3 py-2.5 rounded-xl border border-[#E8D5BE] text-sm"
-            >
-              {(['cash', 'paybox', 'transfer'] as const).map((pm) => (
-                <option key={pm} value={pm}>
-                  {PAYMENT_METHOD_LABELS[pm]}
-                </option>
-              ))}
-            </select>
-          </div>
-          <button
-            type="submit"
-            className="w-full min-h-[50px] py-2.5 rounded-2xl bg-[#C85A17] hover:bg-[#A9440F] text-white font-extrabold text-base"
-          >
-            {editingFixed ? 'עדכן הוצאה קבועה' : 'שמור הוצאה קבועה'}
-          </button>
-        </form>
-      </BottomSheet>
-
-      {/* מחשבון פדיון וספירת קופה לפי שטרות ומטבעות + הפחתת עודף פתיחת יום */}
-      <BottomSheet
-        open={calcOpen}
-        onClose={() => setCalcOpen(false)}
-        title="מחשבון פדיון וספירת קופה"
-        subtitle="ספירת שטרות ומטבעות והפחתה אוטומטית של עודף פתיחת היום"
-        maxWidthClass="md:max-w-xl"
-      >
-        <div className="space-y-4">
-          <div className="p-3.5 rounded-2xl bg-amber-50/80 border border-amber-200 flex items-center justify-between gap-3">
-            <div>
-              <div className="text-xs font-extrabold text-amber-950">סכום פתיחת יום (עודף התחלתי)</div>
-              <div className="text-[11px] text-amber-800">מופחת אוטומטית מסך המזומן בקופה</div>
-            </div>
-            <input
-              type="number"
-              inputMode="decimal"
-              min="0"
-              step="10"
-              dir="ltr"
-              value={openingFloat}
-              onChange={(e) => setOpeningFloat(e.target.value)}
-              className="w-28 px-3 py-2 rounded-xl border border-amber-300 bg-white text-left tabular-nums font-extrabold text-sm"
-            />
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {/* שטרות */}
-            <div className="space-y-2">
-              <div className="text-xs font-extrabold text-slate-700">שטרות (₪)</div>
-              {(['200', '100', '50', '20'] as const).map((d) => {
-                const cnt = Number(cashCounts[d]) || 0;
-                return (
-                  <div key={d} className="flex items-center justify-between gap-2 p-2 rounded-xl bg-[#FAF6F0] border border-[#E8D5BE]">
-                    <span className="font-extrabold text-sm text-slate-800 w-12 tabular-nums">₪{d}</span>
-                    <input
-                      type="number"
-                      inputMode="numeric"
-                      min="0"
-                      dir="ltr"
-                      placeholder="כמות"
-                      value={cashCounts[d]}
-                      onChange={(e) => setCashCounts((prev) => ({ ...prev, [d]: e.target.value }))}
-                      className="w-20 px-2.5 py-1.5 rounded-lg border border-[#E8D5BE] bg-white text-left tabular-nums font-bold text-sm"
-                    />
-                    <span className="text-xs font-bold text-emerald-700 w-20 text-left tabular-nums">
-                      {formatILS(Number(d) * cnt)}
+        {loading ? (
+          <div className="py-8 text-center text-sm text-slate-400">טוען יומן תנועות...</div>
+        ) : transactions.length === 0 ? (
+          <div className="py-8 text-center text-sm text-slate-400">אין תנועות רשומות עדיין.</div>
+        ) : (
+          <div className="divide-y divide-[#F3E9DC]">
+            {transactions.slice(0, 30).map((t) => (
+              <div key={t.id} className="py-3 flex items-center justify-between gap-3 text-xs">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-extrabold text-slate-900">{t.category}</span>
+                    <span className="px-2 py-0.5 rounded-full bg-[#FAF6F0] border border-[#E8D5BE] text-[10px] font-bold text-slate-600">
+                      {PAYMENT_METHOD_LABELS[t.payment_method]}
                     </span>
+                    {t.user_id && t.user_name && (
+                      <button
+                        type="button"
+                        onClick={() => openContactById(t.user_id!)}
+                        className="text-[#C85A17] font-bold hover:underline"
+                      >
+                        {t.user_name}
+                      </button>
+                    )}
                   </div>
-                );
-              })}
-            </div>
-
-            {/* מטבעות */}
-            <div className="space-y-2">
-              <div className="text-xs font-extrabold text-slate-700">מטבעות (₪)</div>
-              {(['10', '5', '2', '1', '0.5', '0.1'] as const).map((d) => {
-                const cnt = Number(cashCounts[d]) || 0;
-                return (
-                  <div key={d} className="flex items-center justify-between gap-2 p-2 rounded-xl bg-[#FAF6F0] border border-[#E8D5BE]">
-                    <span className="font-extrabold text-sm text-slate-800 w-12 tabular-nums">₪{d}</span>
-                    <input
-                      type="number"
-                      inputMode="numeric"
-                      min="0"
-                      dir="ltr"
-                      placeholder="כמות"
-                      value={cashCounts[d]}
-                      onChange={(e) => setCashCounts((prev) => ({ ...prev, [d]: e.target.value }))}
-                      className="w-20 px-2.5 py-1.5 rounded-lg border border-[#E8D5BE] bg-white text-left tabular-nums font-bold text-sm"
-                    />
-                    <span className="text-xs font-bold text-emerald-700 w-20 text-left tabular-nums">
-                      {formatILS(Number(d) * cnt)}
-                    </span>
+                  <div className="text-[11px] text-slate-500 mt-0.5">
+                    {formatHebrewDate(t.friday_date || t.date)}
+                    {t.notes ? ` · ${t.notes}` : ''}
                   </div>
-                );
-              })}
-            </div>
-          </div>
+                </div>
 
-          <div className="p-4 rounded-2xl bg-[#1E242B] text-white space-y-2 tabular-nums">
-            <div className="flex justify-between text-xs text-slate-300">
-              <span>סה״כ מזומן שנספר בקופה:</span>
-              <span className="font-bold">{formatILS(cashCalcTotals.gross)}</span>
-            </div>
-            <div className="flex justify-between text-xs text-amber-300">
-              <span>פחות עודף פתיחת יום:</span>
-              <span className="font-bold">-{formatILS(cashCalcTotals.floatVal)}</span>
-            </div>
-            <div className="flex justify-between text-lg font-extrabold text-emerald-400 pt-2 border-t border-white/15">
-              <span>פדיון מזומן נטו ליום:</span>
-              <span>{formatILS(cashCalcTotals.net)}</span>
-            </div>
+                <div className="flex items-center gap-2 shrink-0 tabular-nums">
+                  <span
+                    className={`font-extrabold text-sm ${
+                      t.type === 'income' ? 'text-emerald-700' : 'text-red-600'
+                    }`}
+                  >
+                    {t.type === 'income' ? '+' : '-'}
+                    {formatILS(t.amount)}
+                  </span>
+                  {t.type === 'expense' && (
+                    <button
+                      type="button"
+                      onClick={() => openExpenseModal('weekly', t)}
+                      className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500"
+                      title="ערוך"
+                    >
+                      <Edit3 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setDeleteTxId(t.id)}
+                    className="p-1.5 rounded-lg hover:bg-red-50 text-slate-400 hover:text-red-600"
+                    title="מחק"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+            ))}
           </div>
+        )}
+      </section>
 
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={() =>
-                setCashCounts({
-                  '200': '',
-                  '100': '',
-                  '50': '',
-                  '20': '',
-                  '10': '',
-                  '5': '',
-                  '2': '',
-                  '1': '',
-                  '0.5': '',
-                  '0.1': '',
-                })
-              }
-              className="px-4 py-2.5 rounded-xl border border-[#E8D5BE] text-xs font-bold text-slate-600"
-            >
-              אפס ספירה
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setStallCash(String(cashCalcTotals.net));
-                setCalcOpen(false);
-                showToast(`הפדיון נטו (${formatILS(cashCalcTotals.net)}) הועבר לטופס קופת הדוכן!`);
-              }}
-              className="flex-1 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-sm"
-            >
-              העבר פדיון נטו ({formatILS(cashCalcTotals.net)}) לקופת המזומן
-            </button>
+      {/* =====================================================================
+          חלונית קופצת (Modal) ממורכזת ונקייה להזנת הוצאה שבועית / חודשית
+      ===================================================================== */}
+      {expenseModalMode && (
+        <div
+          className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4"
+          onClick={() => setExpenseModalMode(null)}
+        >
+          <div
+            className="max-w-md w-full bg-white rounded-3xl border border-[#E8D5BE] shadow-card p-5 sm:p-6 space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between gap-2 pb-2 border-b border-[#F3E9DC]">
+              <div>
+                <h3 className="font-serif text-xl font-extrabold text-slate-900">
+                  {editingTx
+                    ? 'עריכת הוצאה'
+                    : expenseModalMode === 'weekly'
+                    ? 'הזנת הוצאה שבועית'
+                    : 'הזנת הוצאה חודשית'}
+                </h3>
+                <p className="text-xs text-slate-500">
+                  ההוצאה תתווסף מיד לחישוב הרווח וההפסד.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setExpenseModalMode(null)}
+                className="w-8 h-8 rounded-xl bg-[#FAF6F0] hover:bg-slate-200 flex items-center justify-center text-slate-600"
+                title="סגור"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveExpenseModal} className="space-y-3.5">
+              {/* צ'יפים מהירים לקטגוריות */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                  בחר קטגוריה מהירה או הקלד:
+                </label>
+                <div className="flex flex-wrap gap-1.5 mb-2">
+                  {EXPENSE_PRESETS.map((preset) => (
+                    <button
+                      key={preset.label}
+                      type="button"
+                      onClick={() =>
+                        setExpForm((f) => ({
+                          ...f,
+                          category: preset.label,
+                          payment_method: preset.defaultMethod || f.payment_method,
+                        }))
+                      }
+                      className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-colors ${
+                        expForm.category === preset.label
+                          ? 'bg-[#C85A17] text-white'
+                          : 'bg-[#FAF6F0] text-slate-700 hover:bg-[#F3E9DC]'
+                      }`}
+                    >
+                      {preset.label}
+                    </button>
+                  ))}
+                </div>
+                <input
+                  type="text"
+                  required
+                  value={expForm.category}
+                  onChange={(e) => setExpForm({ ...expForm, category: e.target.value })}
+                  placeholder="שם הקטגוריה *"
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] text-sm font-bold"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">סכום (₪) *</label>
+                  <input
+                    type="number"
+                    inputMode="decimal"
+                    required
+                    min="0.01"
+                    step="0.01"
+                    dir="ltr"
+                    placeholder="0.00"
+                    value={expForm.amount}
+                    onChange={(e) => setExpForm({ ...expForm, amount: e.target.value })}
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] text-left font-extrabold text-sm tabular-nums"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">אמצעי תשלום</label>
+                  <select
+                    value={expForm.payment_method}
+                    onChange={(e) =>
+                      setExpForm({ ...expForm, payment_method: e.target.value as PaymentMethod })
+                    }
+                    className="w-full px-3 py-2.5 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] text-sm font-semibold"
+                  >
+                    {(['cash', 'paybox', 'transfer'] as const).map((pm) => (
+                      <option key={pm} value={pm}>
+                        {PAYMENT_METHOD_LABELS[pm]}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    {expenseModalMode === 'weekly' ? 'שיוך ליום שישי' : 'תאריך הוצאה'}
+                  </label>
+                  <input
+                    type="date"
+                    required
+                    value={expenseModalMode === 'weekly' ? expForm.friday_date : expForm.date}
+                    onChange={(e) =>
+                      setExpForm(
+                        expenseModalMode === 'weekly'
+                          ? { ...expForm, friday_date: e.target.value }
+                          : { ...expForm, date: e.target.value }
+                      )
+                    }
+                    className="w-full px-3 py-2 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] text-xs font-semibold"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">תיאור / הערה</label>
+                  <input
+                    type="text"
+                    value={expForm.notes}
+                    onChange={(e) => setExpForm({ ...expForm, notes: e.target.value })}
+                    placeholder="פירוט אופציונלי..."
+                    className="w-full px-3 py-2 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] text-xs"
+                  />
+                </div>
+              </div>
+
+              {!editingTx && (
+                <label className="flex items-center gap-2 text-xs font-bold text-slate-700 cursor-pointer pt-1">
+                  <input
+                    type="checkbox"
+                    checked={expForm.saveAsFixed}
+                    onChange={(e) => setExpForm({ ...expForm, saveAsFixed: e.target.checked })}
+                    className="rounded border-[#E8D5BE] text-[#C85A17]"
+                  />
+                  <span>
+                    שמור גם כהוצאה קבועה ({expenseModalMode === 'weekly' ? 'שבועית' : 'חודשית'})
+                  </span>
+                </label>
+              )}
+
+              <div className="grid grid-cols-2 gap-2.5 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setExpenseModalMode(null)}
+                  className="py-2.5 rounded-xl border border-[#E8D5BE] bg-[#FAF6F0] text-slate-700 font-bold text-xs"
+                >
+                  ביטול
+                </button>
+                <button
+                  type="submit"
+                  className="py-2.5 rounded-xl bg-red-600 hover:bg-red-700 text-white font-extrabold text-xs shadow-sm"
+                >
+                  שמור הוצאה
+                </button>
+              </div>
+            </form>
           </div>
         </div>
-      </BottomSheet>
+      )}
+
+      {/* חלונית קופצת להוצאה קבועה */}
+      {showFixedModal && (
+        <div
+          className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4"
+          onClick={() => setShowFixedModal(false)}
+        >
+          <div
+            className="max-w-sm w-full bg-white rounded-3xl border border-[#E8D5BE] shadow-card p-5 space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between pb-2 border-b border-[#F3E9DC]">
+              <h3 className="font-serif text-lg font-extrabold text-slate-900">
+                {editingFixed ? 'עריכת הוצאה קבועה' : 'הוצאה קבועה חדשה'}
+              </h3>
+              <button
+                type="button"
+                onClick={() => setShowFixedModal(false)}
+                className="w-8 h-8 rounded-xl bg-[#FAF6F0] flex items-center justify-center text-slate-600"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <form onSubmit={handleSaveFixed} className="space-y-3">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">שם ההוצאה *</label>
+                <input
+                  type="text"
+                  required
+                  value={fixedForm.name}
+                  onChange={(e) => setFixedForm({ ...fixedForm, name: e.target.value })}
+                  placeholder="לדוגמה: שכירות דוכן / רואה חשבון"
+                  className="w-full px-3 py-2 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] text-sm font-bold"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-2.5">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">סכום (₪) *</label>
+                  <input
+                    type="number"
+                    required
+                    min="1"
+                    step="0.5"
+                    dir="ltr"
+                    value={fixedForm.amount}
+                    onChange={(e) => setFixedForm({ ...fixedForm, amount: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] text-left font-bold text-sm tabular-nums"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">תדירות</label>
+                  <select
+                    value={fixedForm.frequency}
+                    onChange={(e) =>
+                      setFixedForm({
+                        ...fixedForm,
+                        frequency: e.target.value as 'weekly' | 'monthly',
+                      })
+                    }
+                    className="w-full px-3 py-2 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] text-sm font-semibold"
+                  >
+                    <option value="weekly">שבועי</option>
+                    <option value="monthly">חודשי</option>
+                  </select>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowFixedModal(false)}
+                  className="py-2.5 rounded-xl border border-[#E8D5BE] text-xs font-bold text-slate-600"
+                >
+                  ביטול
+                </button>
+                <button
+                  type="submit"
+                  className="py-2.5 rounded-xl bg-[#C85A17] hover:bg-[#A9440F] text-white text-xs font-extrabold"
+                >
+                  שמור
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* מודאל אישור מחיקת תנועה */}
+      {deleteTxId !== null && (
+        <div
+          className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
+          onClick={() => setDeleteTxId(null)}
+        >
+          <div
+            className="max-w-xs w-full bg-white rounded-3xl border border-[#E8D5BE] shadow-card p-5 text-center space-y-3"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="font-serif text-lg font-extrabold text-slate-900">
+              למחוק תנועה זו מהיומן?
+            </h3>
+            <p className="text-xs text-slate-600">הרווח וההפסד יתעדכנו מיידית.</p>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setDeleteTxId(null)}
+                className="py-2 rounded-xl border border-[#E8D5BE] text-xs font-bold text-slate-600"
+              >
+                ביטול
+              </button>
+              <button
+                type="button"
+                onClick={() => handleConfirmDeleteTx(deleteTxId)}
+                className="py-2 rounded-xl bg-red-600 text-white text-xs font-extrabold"
+              >
+                מחק
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* מודאל אישור מחיקת הוצאה קבועה */}
+      {deleteFixedId !== null && (
+        <div
+          className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
+          onClick={() => setDeleteFixedId(null)}
+        >
+          <div
+            className="max-w-xs w-full bg-white rounded-3xl border border-[#E8D5BE] shadow-card p-5 text-center space-y-3"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="font-serif text-lg font-extrabold text-slate-900">
+              למחוק הוצאה קבועה זו?
+            </h3>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setDeleteFixedId(null)}
+                className="py-2 rounded-xl border border-[#E8D5BE] text-xs font-bold text-slate-600"
+              >
+                ביטול
+              </button>
+              <button
+                type="button"
+                onClick={() => handleConfirmDeleteFixed(deleteFixedId)}
+                className="py-2 rounded-xl bg-red-600 text-white text-xs font-extrabold"
+              >
+                מחק
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

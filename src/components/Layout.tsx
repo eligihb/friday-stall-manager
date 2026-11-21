@@ -19,6 +19,7 @@ import {
   Edit3,
   UserPlus,
   Image as ImageIcon,
+  Coins,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useFriday } from '../context/FridayContext';
@@ -37,6 +38,7 @@ export type AdminTab =
   | 'products'
   | 'flyer'
   | 'finance'
+  | 'cash-waste'
   | 'reports'
   | 'settings';
 
@@ -54,7 +56,8 @@ const ADMIN_NAV: NavItem[] = [
   { id: 'users', label: 'לקוחות וספקים', icon: Users },
   { id: 'products', label: 'מחירון מוצרים', icon: Tag },
   { id: 'flyer', label: 'פלייר מחירון', icon: ImageIcon },
-  { id: 'finance', label: 'הכנסות, הוצאות וקבועות', icon: Wallet },
+  { id: 'finance', label: 'כספים', icon: Wallet },
+  { id: 'cash-waste', label: 'קופה ופחת', icon: Coins },
   { id: 'reports', label: 'דוחות וניתוח נתונים', icon: BarChart3 },
   { id: 'settings', label: 'הגדרות ומשתמשים', icon: Settings },
 ];
@@ -67,7 +70,8 @@ const TAB_TITLES: Record<AdminTab, string> = {
   users: 'לקוחות וספקים',
   products: 'מחירון מוצרים',
   flyer: 'פלייר מחירון',
-  finance: 'כספים וקופה',
+  finance: 'כספים',
+  'cash-waste': 'קופה ופחת',
   reports: 'דוחות ורווח והפסד',
   settings: 'הגדרות ומשתמשים',
 };
@@ -509,9 +513,16 @@ export function Layout({ activeTab, onSelectTab, children }: LayoutProps) {
               color: 'bg-amber-50 text-amber-800',
             },
             {
+              tab: 'cash-waste' as AdminTab,
+              title: 'קופה ופחת',
+              desc: 'סופר שטרות ומטבעות לפתיחה וסגירת קופה + ניהול פחת גמיש',
+              icon: Coins,
+              color: 'bg-amber-100 text-[#8A330B]',
+            },
+            {
               tab: 'finance' as AdminTab,
-              title: 'הוצאות קבועות, פחת ויומן כספים',
-              desc: 'שכירות, פחת סוף יום, קופת דוכן מזומן ופייבוקס',
+              title: 'כספים (מכירות, השוואות והוצאות)',
+              desc: 'סיכום רווח נקי, השוואת תקופות, גרף מכירות והזנת הוצאות',
               icon: Repeat,
               color: 'bg-emerald-50 text-emerald-800',
             },

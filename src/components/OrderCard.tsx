@@ -67,7 +67,10 @@ export function OrderCard({
 
   const handleCopyCustomerLink = async () => {
     if (!order.user_id) return;
-    await navigator.clipboard.writeText(buildCustomerPortalUrl(order.user_id));
+    const base = buildCustomerPortalUrl(order.user_id);
+    const targetUrl =
+      order.order_type === 'supplier' ? base.replace(/#\/c\//, '#/s/') : base;
+    await navigator.clipboard.writeText(targetUrl);
     setCopiedLink(true);
     setTimeout(() => setCopiedLink(false), 1800);
   };

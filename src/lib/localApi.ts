@@ -15,6 +15,7 @@ import type {
 import { getNextFridayISO, isBeforeFridayCancelCutoff } from './format';
 import { getFridayPricingStatus } from './pricingCutoff';
 import { loadImportedOrdersBackup, removeImportedOrderBackup } from './orderLinkCodec';
+import { loadAllCashRegisters } from './cashRegisterStore';
 
 const STORAGE_KEY = 'ht_static_db_v1';
 const SESSION_KEY = 'ht_static_session_uid';
@@ -874,6 +875,61 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
     } as T;
   }
 
+  // מסך / קישור ספק משותף ללא חשיפת מחירי עלות פנימיים
+  if (path === '/api/public/supplier-portal' && method === 'GET') {
+    const sid = Number(q.get('supplier_id') || 0);
+    const found = sid ? db.users.find((u) => u.id === sid && u.role === 'supplier') || null : null;
+    if (!found) {
+      return { supplier: null, orders: [] } as T;
+    }
+    const pMap = new Map(db.products.map((p) => [p.id, p]));
+    const supOrders = db.orders
+      .filter((o) => o.user_id === found.id && o.status !== 'cancelled')
+      .sort((a, b) => b.friday_date.localeCompare(a.friday_date) || b.id - a.id)
+      .map((o) => ({
+        id: o.id,
+        user_id: o.user_id,
+        recipient_name: o.recipient_name,
+        friday_date: o.friday_date,
+        order_type: o.order_type,
+        delivery_fee: o.delivery_fee,
+        credit_discount: o.credit_discount,
+        total_amount: o.total_amount,
+        paid_amount: o.paid_amount,
+        status: o.status,
+        notes: o.notes,
+        created_at: o.created_at,
+        items: db.order_items
+          .filter((it) => it.order_id === o.id)
+          .map((it) => ({
+            id: it.id,
+            order_id: it.order_id,
+            product_id: it.product_id,
+            product_name: pMap.get(it.product_id)?.name || `#${it.product_id}`,
+            quantity: it.quantity,
+            unit_price_snapshot: 0,
+            cost_price_snapshot: 0,
+          })),
+      }));
+
+    const totalOrdered = round2(supOrders.reduce((s, o) => s + (Number(o.total_amount) || 0), 0));
+    const totalPaid = round2(supOrders.reduce((s, o) => s + (Number(o.paid_amount) || 0), 0));
+    const openBalance = round2(totalOrdered - totalPaid);
+
+    return {
+      supplier: {
+        id: found.id,
+        name: found.name,
+        phone: found.phone,
+        notes: found.notes,
+        total_ordered: totalOrdered,
+        total_paid: totalPaid,
+        open_balance: openBalance,
+      },
+      orders: supOrders,
+    } as T;
+  }
+
   if (path === '/api/public/orders' && method === 'POST') {
     const friday_date = String(body.friday_date || getNextFridayISO()).slice(0, 10);
     const recipient_name = String(body.recipient_name || '').trim();
@@ -1609,6 +1665,9 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
       }
       db.orders = db.orders.filter((o) => String(o.id) !== String(oidRaw));
       db.order_items = db.order_items.filter((i) => String(i.order_id) !== String(oidRaw));
+      // הסרת תנועות כספיות המשויכות להזמנה שנמחקה כדי שרווח והפסד והדוחות יתעדכנו בזמן אמת
+      const orderTag = `#${oidRaw}`;
+      db.transactions = db.transactions.filter((t) => !String(t.notes || '').includes(orderTag));
       removeImportedOrderBackup(oidRaw, ord.recipient_name, ord.friday_date);
       saveDb(db);
       return { ok: true } as T;
@@ -1666,13 +1725,22 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
     }
     if (!action && method === 'DELETE') {
       if (uid === me.id) throwErr('לא ניתן למחוק את המשתמש המחובר כרגע', 400);
-      db.orders.forEach((o) => {
-        if (o.user_id === uid) o.user_id = null;
+      // מחיקת כל ההזמנות, שורות ההזמנה והתנועות הכספיות של הלקוח/ספק כדי לסנכרן רווח והפסד ודוחות בזמן אמת
+      const userOrders = db.orders.filter((o) => String(o.user_id) === String(uid));
+      const userOrderIds = new Set(userOrders.map((o) => String(o.id)));
+      for (const o of userOrders) {
+        removeImportedOrderBackup(o.id, o.recipient_name, o.friday_date);
+      }
+      db.order_items = db.order_items.filter((oi) => !userOrderIds.has(String(oi.order_id)));
+      db.orders = db.orders.filter((o) => String(o.user_id) !== String(uid));
+      db.transactions = db.transactions.filter((t) => {
+        if (String(t.user_id) === String(uid)) return false;
+        for (const oidStr of userOrderIds) {
+          if (String(t.notes || '').includes(`#${oidStr}`)) return false;
+        }
+        return true;
       });
-      db.transactions.forEach((t) => {
-        if (t.user_id === uid) t.user_id = null;
-      });
-      db.users = db.users.filter((x) => x.id !== uid);
+      db.users = db.users.filter((x) => String(x.id) !== String(uid));
       saveDb(db);
       return { ok: true } as T;
     }
@@ -1928,11 +1996,12 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
         .map((p) => {
           const w = wMap.get(p.id);
           const qty = w ? w.quantity : 0;
-          const unitCost = w && w.unit_cost > 0 ? w.unit_cost : p.cost_price;
+          const unitCost = w && w.unit_cost !== undefined ? w.unit_cost : p.cost_price;
           return {
             product_id: p.id,
             product_name: p.name,
-            cost_price: round2(unitCost),
+            cost_price: round2(p.cost_price),
+            effective_unit_cost: round2(unitCost),
             quantity: qty,
             line_cost: round2(qty * unitCost),
             notes: w?.notes || '',
@@ -1961,8 +2030,18 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
           const hist = (db.product_price_history || [])
             .filter((h) => h.product_id === pid && h.effective_date <= fri)
             .sort((a, b) => b.effective_date.localeCompare(a.effective_date) || b.id - a.id)[0];
-          const unitCost = round2(hist ? hist.cost_price : p.cost_price);
-          db.waste_logs.push({ friday_date: fri, product_id: pid, quantity: qty, unit_cost: unitCost, notes });
+          const baseUnitCost = round2(hist ? hist.cost_price : p.cost_price);
+          const effectiveUnitCost =
+            row.effective_unit_cost !== undefined
+              ? Math.max(0, round2(Number(row.effective_unit_cost) || 0))
+              : baseUnitCost;
+          db.waste_logs.push({
+            friday_date: fri,
+            product_id: pid,
+            quantity: qty,
+            unit_cost: effectiveUnitCost,
+            notes,
+          });
         }
       }
       saveDb(db);
@@ -2210,6 +2289,26 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
       rec.cash.net = round2(rec.cash.in - rec.cash.out);
       rec.paybox.net = round2(rec.paybox.in - rec.paybox.out);
       rec.transfer.net = round2(rec.transfer.in - rec.transfer.out);
+
+      // שילוב אוטומטי של פדיון מזומן נטו מסופר הקופה (סגירה פחות פתיחה) עבור ימי שישי בטווח
+      const cashRegisters = loadAllCashRegisters();
+      for (const [fDate, reg] of Object.entries(cashRegisters)) {
+        if (!inRange(fDate)) continue;
+        if (reg.netCashRevenue > 0) {
+          const hasStallTxForDate = pTx.some(
+            (t) =>
+              (t.friday_date || t.date) === fDate &&
+              t.type === 'income' &&
+              t.payment_method === 'cash' &&
+              t.category.includes('דוכן')
+          );
+          if (!hasStallTxForDate) {
+            walkin_stall_cash = round2(walkin_stall_cash + reg.netCashRevenue);
+            rec.cash.in = round2(rec.cash.in + reg.netCashRevenue);
+            rec.cash.net = round2(rec.cash.in - rec.cash.out);
+          }
+        }
+      }
 
       const walkin_stall_revenue = round2(walkin_stall_cash + walkin_stall_paybox + walkin_stall_transfer);
       const prorated_fixed_items = db.fixed_expenses

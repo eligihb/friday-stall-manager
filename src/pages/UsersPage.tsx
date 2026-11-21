@@ -16,7 +16,7 @@ import {
 import { apiFetch } from '../lib/api';
 import { formatILS, PAYMENT_METHOD_LABELS, ROLE_LABELS } from '../lib/format';
 import { BottomSheet } from '../components/BottomSheet';
-import type { AdminProduct, PaymentMethod, User, UserRole } from '../types';
+import type { AdminProduct, Order, PaymentMethod, User, UserRole } from '../types';
 
 const ACTIVE_STORAGE_KEY = 'fsm_user_active_map';
 
@@ -40,6 +40,7 @@ function saveActiveMap(map: Record<number, boolean>) {
 export function UsersPage() {
   const [users, setUsers] = useState<User[]>([]);
   const [products, setProducts] = useState<AdminProduct[]>([]);
+  const [orders, setOrders] = useState<Order[]>([]);
   const [activeMap, setActiveMap] = useState<Record<number, boolean>>(() => loadActiveMap());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -85,12 +86,14 @@ export function UsersPage() {
   const load = async () => {
     setLoading(true);
     try {
-      const [uRes, pRes] = await Promise.all([
+      const [uRes, pRes, oRes] = await Promise.all([
         apiFetch<{ users: User[] }>('/api/users'),
         apiFetch<{ products: AdminProduct[] }>('/api/products'),
+        apiFetch<{ orders: Order[] }>('/api/orders').catch(() => ({ orders: [] as Order[] })),
       ]);
       setUsers(uRes.users);
       setProducts(pRes.products.filter((p) => p.is_active));
+      setOrders(oRes.orders || []);
       setError('');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'שגיאה בטעינת לקוחות וספקים');
@@ -217,8 +220,9 @@ export function UsersPage() {
     setDeleting(true);
     try {
       await apiFetch(`/api/users/${deleteTarget.id}`, { method: 'DELETE' });
-      setUsers((prev) => prev.filter((u) => u.id !== deleteTarget.id));
-      showToast(`${deleteTarget.name} נמחק בהצלחה`);
+      setUsers((prev) => prev.filter((u) => String(u.id) !== String(deleteTarget.id)));
+      setOrders((prev) => prev.filter((o) => String(o.user_id) !== String(deleteTarget.id)));
+      showToast(`${deleteTarget.name} וכל הזמנותיו ותנועותיו נמחקו בהצלחה`);
       setDeleteTarget(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'שגיאה במחיקת המשתמש');
@@ -661,39 +665,73 @@ export function UsersPage() {
         </form>
       </BottomSheet>
 
-      {/* חלונית אזהרת מחיקה */}
+      {/* חלונית אזהרת מחיקה עם בדיקת חוב פתוח והזמנות פעילות */}
       <BottomSheet
         open={!!deleteTarget}
         onClose={() => setDeleteTarget(null)}
-        title="אישור מחיקת משתמש"
+        title="אישור מחיקת לקוח / ספק"
       >
-        {deleteTarget && (
-          <div className="space-y-4">
-            <div className="p-3.5 rounded-2xl bg-red-50 border border-red-200 text-red-800 text-sm flex items-start gap-2.5">
-              <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" />
-              <div>
-                האם למחוק לצמיתות את <strong>{deleteTarget.name}</strong>? פעולה זו אינה ניתנת לביטול.
+        {deleteTarget && (() => {
+          const targetOrders = orders.filter(
+            (o) => String(o.user_id) === String(deleteTarget.id) && o.status !== 'cancelled'
+          );
+          const openOrders = targetOrders.filter(
+            (o) =>
+              o.status === 'awaiting_approval' ||
+              o.status === 'pending' ||
+              o.status === 'received' ||
+              o.status === 'ready'
+          );
+          const unpaidFromOrders = targetOrders.reduce(
+            (s, o) => s + Math.max(0, (Number(o.total_amount) || 0) - (Number(o.paid_amount) || 0)),
+            0
+          );
+          const balanceDebt = deleteTarget.balance < 0 ? Math.abs(deleteTarget.balance) : 0;
+          const openDebt = Math.max(unpaidFromOrders, balanceDebt);
+          const hasWarning = openDebt > 0.01 || openOrders.length > 0;
+
+          return (
+            <div className="space-y-4">
+              {hasWarning ? (
+                <div className="p-4 rounded-2xl bg-red-100 border-2 border-red-400 text-red-950 text-sm space-y-2 shadow-sm">
+                  <div className="flex items-start gap-2.5 font-extrabold">
+                    <AlertTriangle className="w-5 h-5 text-red-700 shrink-0 mt-0.5" />
+                    <span>
+                      זהירות: ללקוח זה יש חוב של {formatILS(openDebt)} ו-{openOrders.length} הזמנות פתוחות. האם למחוק בכל זאת?
+                    </span>
+                  </div>
+                  <p className="text-xs text-red-800 leading-relaxed">
+                    אישור המחיקה ימחק לצמיתות את <strong>{deleteTarget.name}</strong> וכן יסיר את כל ההזמנות ({targetOrders.length}) והתנועות הכספיות שלו מחישובי הרווח וההפסד ודוחות המכירות.
+                  </p>
+                </div>
+              ) : (
+                <div className="p-3.5 rounded-2xl bg-red-50 border border-red-200 text-red-800 text-sm flex items-start gap-2.5">
+                  <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" />
+                  <div>
+                    האם למחוק לצמיתות את <strong>{deleteTarget.name}</strong>? כל ההזמנות והתנועות המשויכות אליו יוסרו מחישובי הרווח וההפסד. פעולה זו אינה ניתנת לביטול.
+                  </div>
+                </div>
+              )}
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setDeleteTarget(null)}
+                  className="px-4 py-2 rounded-xl border border-[#E8D5BE] text-sm font-bold text-slate-600"
+                >
+                  ביטול
+                </button>
+                <button
+                  type="button"
+                  disabled={deleting}
+                  onClick={handleConfirmDelete}
+                  className="px-5 py-2 rounded-xl bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white text-sm font-extrabold"
+                >
+                  {deleting ? 'מוחק...' : hasWarning ? 'מחק בכל זאת לצמיתות' : 'מחק לצמיתות'}
+                </button>
               </div>
             </div>
-            <div className="flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setDeleteTarget(null)}
-                className="px-4 py-2 rounded-xl border border-[#E8D5BE] text-sm font-bold text-slate-600"
-              >
-                ביטול
-              </button>
-              <button
-                type="button"
-                disabled={deleting}
-                onClick={handleConfirmDelete}
-                className="px-5 py-2 rounded-xl bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white text-sm font-bold"
-              >
-                {deleting ? 'מוחק...' : 'מחק לצמיתות'}
-              </button>
-            </div>
-          </div>
-        )}
+          );
+        })()}
       </BottomSheet>
 
       {/* חלונית רישום תשלום */}

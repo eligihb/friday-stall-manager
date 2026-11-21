@@ -13,6 +13,7 @@ import { CharityOrdersPage } from './pages/CharityOrdersPage';
 import { UsersPage } from './pages/UsersPage';
 import { ProductsCatalog } from './pages/ProductsCatalog';
 import { FinancePage } from './pages/FinancePage';
+import { CashAndWastePage } from './pages/CashAndWastePage';
 import { ReportsPage } from './pages/ReportsPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { SupplierPortal } from './pages/SupplierPortal';
@@ -35,12 +36,14 @@ const VALID_TABS: AdminTab[] = [
   'products',
   'flyer',
   'finance',
+  'cash-waste',
   'reports',
   'settings',
 ];
 
 function parseSpecialRoute(): {
   customerPortalId: number | null;
+  supplierPortalId: number | null;
   quickApproveOrderId: number | null;
   approveCancelOrderId: number | null;
   directOrderId: number | null;
@@ -56,6 +59,7 @@ function parseSpecialRoute(): {
   if (hashPath === 'menu' || hashPath === 'order') {
     return {
       customerPortalId: null,
+      supplierPortalId: null,
       quickApproveOrderId: null,
       approveCancelOrderId: null,
       directOrderId: null,
@@ -68,6 +72,7 @@ function parseSpecialRoute(): {
   if (queryCustomer && /^\d+$/.test(queryCustomer)) {
     return {
       customerPortalId: Number(queryCustomer),
+      supplierPortalId: null,
       quickApproveOrderId: null,
       approveCancelOrderId: null,
       directOrderId: null,
@@ -80,6 +85,20 @@ function parseSpecialRoute(): {
   if (cMatch) {
     return {
       customerPortalId: Number(cMatch[1]),
+      supplierPortalId: null,
+      quickApproveOrderId: null,
+      approveCancelOrderId: null,
+      directOrderId: null,
+      encodedOrderData: null,
+      isDigitalMenu: false,
+    };
+  }
+
+  const sMatch = hashPath.match(/^s\/(\d+)/);
+  if (sMatch) {
+    return {
+      customerPortalId: null,
+      supplierPortalId: Number(sMatch[1]),
       quickApproveOrderId: null,
       approveCancelOrderId: null,
       directOrderId: null,
@@ -92,6 +111,7 @@ function parseSpecialRoute(): {
   if (approveMatch) {
     return {
       customerPortalId: null,
+      supplierPortalId: null,
       quickApproveOrderId: Number(approveMatch[1]),
       approveCancelOrderId: null,
       directOrderId: null,
@@ -104,6 +124,7 @@ function parseSpecialRoute(): {
   if (cancelApproveMatch) {
     return {
       customerPortalId: null,
+      supplierPortalId: null,
       quickApproveOrderId: null,
       approveCancelOrderId: Number(cancelApproveMatch[1]),
       directOrderId: null,
@@ -116,6 +137,7 @@ function parseSpecialRoute(): {
   if (orderMatch) {
     return {
       customerPortalId: null,
+      supplierPortalId: null,
       quickApproveOrderId: null,
       approveCancelOrderId: null,
       directOrderId: Number(orderMatch[1]),
@@ -126,6 +148,7 @@ function parseSpecialRoute(): {
 
   return {
     customerPortalId: null,
+    supplierPortalId: null,
     quickApproveOrderId: null,
     approveCancelOrderId: null,
     directOrderId: null,
@@ -232,6 +255,11 @@ function AppRouter() {
     return <CustomerLivePortal customerId={specialRoute.customerPortalId} />;
   }
 
+  // מסך / קישור כרטסת ספק משותף ללא חשיפת מחירי עלות (#/s/:id)
+  if (specialRoute.supplierPortalId !== null) {
+    return <SupplierPortal supplierId={specialRoute.supplierPortalId} />;
+  }
+
   if (loading) {
     return (
       <div className="min-h-screen bg-[#FAF6F0] flex items-center justify-center">
@@ -263,6 +291,7 @@ function AppRouter() {
           {adminTab === 'products' && <ProductsCatalog />}
           {adminTab === 'flyer' && <FlyerPage />}
           {adminTab === 'finance' && <FinancePage />}
+          {adminTab === 'cash-waste' && <CashAndWastePage />}
           {adminTab === 'reports' && <ReportsPage />}
           {adminTab === 'settings' && <SettingsPage />}
         </>
