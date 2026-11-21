@@ -150,7 +150,7 @@ export function FlyerPage() {
 
     drawSection('✨ פריטים מיוחדים ומארזים', [
       { right: 'זלביה — מארז שלישייה (3 יח׳)', left: '₪12', sub: 'מבצע: 2 מארזים ב-20 ₪!' },
-      { right: 'פיתות / לחם (זעתר, שום, שומשום) — שלישייה', left: '₪12', sub: 'מבצע: 2 מארזים ב-20 ₪ | יחידה ב-5 ₪' },
+      { right: "ג'בטה מאורכת בטעמים (שום, זעתר, שומשום, רגיל)", left: '₪12', sub: 'מבצע: 2 מארזים (6 יח׳) ב-20 ₪ (ניתן לשלב!) | יחידה 5 ₪' },
       { right: 'חילבה טרייה — קטן (250 גר׳) / גדול (500 גר׳)', left: '₪12 / ₪20' },
     ]);
 
@@ -290,9 +290,9 @@ export function FlyerPage() {
               </div>
               <div className="flex items-center justify-between gap-2 pt-1.5 border-t border-[#F3E9DC]">
                 <div>
-                  <div className="font-extrabold text-slate-900">פיתות / לחם (זעתר, שום, שומשום)</div>
+                  <div className="font-extrabold text-slate-900">ג&apos;בטה מאורכת בטעמים (שום, זעתר, שומשום, רגיל)</div>
                   <div className="text-[10px] font-extrabold text-emerald-700">
-                    שלישייה 12 ₪ (2 ב-20 ₪) · יחידה 5 ₪
+                    שלישייה 12 ₪ (2 ב-20 ₪ — ניתן לשלב טעמים!) · יחידה 5 ₪
                   </div>
                 </div>
                 <span className="font-extrabold text-base text-[#C85A17] tabular-nums">₪12</span>
