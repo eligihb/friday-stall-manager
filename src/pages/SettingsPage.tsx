@@ -34,6 +34,7 @@ import {
   type StorefrontConfig,
 } from '../lib/storefrontConfig';
 import { BottomSheet } from '../components/BottomSheet';
+import { BackupRestoreCard } from '../components/BackupRestoreCard';
 import {
   clearCloudConfig,
   getSavedCloudConfig,
@@ -495,6 +496,14 @@ export function SettingsPage() {
           </form>
         )}
       </div>
+
+      {/* כרטיסיית גיבוי ושחזור גרסאות (ימי שישי + קובץ חיצוני) */}
+      <BackupRestoreCard
+        onAfterRestore={() => {
+          setStorefrontCfg(loadStorefrontConfig());
+          loadAll();
+        }}
+      />
 
       {loading ? (
         <div className="bg-white rounded-3xl p-10 text-center text-slate-400 border border-[#E8D5BE]">

@@ -26,6 +26,7 @@ import { FlyerPage } from './pages/FlyerPage';
 import { APP_BRAND_NAME } from './lib/version';
 import { apiFetch } from './lib/api';
 import { decodeOrderLinkPayload, persistImportedOrderBackup } from './lib/orderLinkCodec';
+import { ensureWeeklyFridayBackup } from './lib/backupManager';
 
 const VALID_TABS: AdminTab[] = [
   'dashboard',
@@ -193,6 +194,9 @@ function AppRouter() {
   }, []);
 
   useEffect(() => {
+    // שמירה אוטומטית של נקודת שחזור שבועית בכל יום שישי (עד 12 גרסאות אחרונות)
+    ensureWeeklyFridayBackup();
+
     const onHashChange = () => {
       setAdminTabState(getTabFromHash());
       setShowStaffLogin(isLoginHash());

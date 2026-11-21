@@ -177,6 +177,10 @@ function createInitialDb(): LocalDb {
 let memoryDbFallback: LocalDb | null = null;
 let memorySessionUid: string | null = null;
 
+export function invalidateLocalDbCache(): void {
+  memoryDbFallback = null;
+}
+
 function safeGetItem(key: string): string | null {
   try {
     return localStorage.getItem(key);
