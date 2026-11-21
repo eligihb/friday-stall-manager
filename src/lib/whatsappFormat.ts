@@ -1,6 +1,7 @@
 import type { BusinessSettings, FridayInventoryItem, Order, User } from '../types';
 import { formatFridayLabel, formatILS, ORDER_STATUS_LABELS } from './format';
 import { isProductVisibleToCustomers, loadStorefrontConfig } from './storefrontConfig';
+import { encodeOrderLinkPayload } from './orderLinkCodec';
 
 export function formatProductionWhatsApp(
   fridayDate: string,
@@ -44,12 +45,14 @@ export function buildCustomerPortalUrl(customerId: number): string {
   return `${getAppBaseUrl()}#/c/${customerId}`;
 }
 
-export function buildQuickApproveUrl(orderId: number): string {
-  return `${getAppBaseUrl()}#/approve-quick/${orderId}`;
+export function buildQuickApproveUrl(orderId: number, encodedData?: string): string {
+  const qs = encodedData ? `?d=${encodedData}` : '';
+  return `${getAppBaseUrl()}#/approve-quick/${orderId}${qs}`;
 }
 
-export function buildAdminOrderViewUrl(orderId: number): string {
-  return `${getAppBaseUrl()}#/order/${orderId}`;
+export function buildAdminOrderViewUrl(orderId: number, encodedData?: string): string {
+  const qs = encodedData ? `?d=${encodedData}` : '';
+  return `${getAppBaseUrl()}#/order/${orderId}${qs}`;
 }
 
 export function buildDigitalMenuUrl(): string {
@@ -135,15 +138,35 @@ export function formatPublicApprovalWhatsApp(payload: {
   phone: string;
   friday_date: string;
   pricing_mode: 'preorder' | 'stall';
-  items: Array<{ product_name: string; quantity: number; unit_price: number }>;
+  items: Array<{ product_id?: number; product_name: string; quantity: number; unit_price: number }>;
   total_amount: number;
+  mix_discount?: number;
   notes?: string;
 }): string {
   const cfg = loadStorefrontConfig();
-  const itemsText = payload.items
-    .map((it) => `• ${it.quantity} × ${it.product_name} — ${formatILS(it.quantity * it.unit_price)}`)
-    .join('\n');
+  const itemLines = payload.items.map(
+    (it) => `• ${it.quantity} × ${it.product_name} — ${formatILS(it.quantity * it.unit_price)}`
+  );
+  if ((payload.mix_discount ?? 0) > 0) {
+    itemLines.push(`✨ הנחת מבצע זוג מארזים (2 ב-20 ₪): -${formatILS(payload.mix_discount!)}`);
+  }
+  const itemsText = itemLines.join('\n');
   const notesLine = payload.notes ? `📝 הערה: ${payload.notes}` : '';
+
+  const encoded = encodeOrderLinkPayload({
+    id: payload.id,
+    n: payload.recipient_name,
+    p: payload.phone,
+    f: payload.friday_date,
+    t: payload.total_amount,
+    nt: payload.notes || '',
+    i: payload.items.map((it) => ({
+      pid: it.product_id ?? 0,
+      q: it.quantity,
+      u: it.unit_price,
+      nm: it.product_name,
+    })),
+  });
 
   return cfg.customerOrderTemplate
     .replace(/\{שם_עסק\}/g, payload.business_name)
@@ -154,9 +177,9 @@ export function formatPublicApprovalWhatsApp(payload: {
     .replace(/\{פריטים\}/g, itemsText)
     .replace(/\{סהכ\}/g, formatILS(payload.total_amount))
     .replace(/\{הערות\}/g, notesLine)
-    .replace(/\{קישור_אישור\}/g, buildQuickApproveUrl(payload.id))
-    .replace(/\{קישור_צפייה\}/g, buildAdminOrderViewUrl(payload.id))
-    .replace(/\{קישור\}/g, buildAdminOrderViewUrl(payload.id))
+    .replace(/\{קישור_אישור\}/g, buildQuickApproveUrl(payload.id, encoded))
+    .replace(/\{קישור_צפייה\}/g, buildAdminOrderViewUrl(payload.id, encoded))
+    .replace(/\{קישור\}/g, buildAdminOrderViewUrl(payload.id, encoded))
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 }

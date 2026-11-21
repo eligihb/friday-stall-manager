@@ -134,6 +134,7 @@ export function DigitalMenuPage() {
   const [selectedOptionId, setSelectedOptionId] = useState('');
   const [selectedFlavor, setSelectedFlavor] = useState<string>('שום');
   const [modalQty, setModalQty] = useState(1);
+  const [modalItemNote, setModalItemNote] = useState('');
 
   // זיהוי אוטומטי של לקוח חוזר ללא סיסמה (localStorage)
   const [savedProfile, setSavedProfile] = useState<SavedCustomerProfile | null>(() => loadSavedProfile());
@@ -478,6 +479,7 @@ export function DigitalMenuPage() {
     setSelectedOptionId(card.options[0]?.id || '');
     setSelectedFlavor(card.id === 'ciabatta' ? 'שום' : 'רגיל');
     setModalQty(1);
+    setModalItemNote('');
   };
 
   const activeOption = useMemo(() => {
@@ -485,14 +487,26 @@ export function DigitalMenuPage() {
     return activeCard.options.find((o) => o.id === selectedOptionId) || activeCard.options[0] || null;
   }, [activeCard, selectedOptionId]);
 
+  const modalPreviewPrice = useMemo(() => {
+    if (!activeOption) return 0;
+    if (activeOption.mixGroup === 'ciabatta_trio' || activeOption.mixGroup === 'zalabia_trio') {
+      const pairs = Math.floor(modalQty / 2);
+      const rem = modalQty % 2;
+      return pairs * 20 + rem * 12;
+    }
+    return Math.round(activeOption.price * modalQty * 100) / 100;
+  }, [activeOption, modalQty]);
+
   const handleAddFromModal = () => {
     if (!activeCard || !activeOption) return;
     const flavorPart = activeCard.hasFlavors ? ` (${selectedFlavor})` : '';
-    const rowKey = `${activeCard.id}__${activeOption.id}__${activeCard.hasFlavors ? selectedFlavor : ''}`;
+    const cleanItemNote = modalItemNote.trim();
+    const notePart = cleanItemNote ? ` [${cleanItemNote}]` : '';
+    const rowKey = `${activeCard.id}__${activeOption.id}__${activeCard.hasFlavors ? selectedFlavor : ''}__${cleanItemNote}`;
     const label =
       activeCard.options.length === 1 && !activeCard.hasFlavors
-        ? `${activeCard.title} — ${activeOption.label}`
-        : `${activeCard.title}${flavorPart} — ${activeOption.label}`;
+        ? `${activeCard.title} — ${activeOption.label}${notePart}`
+        : `${activeCard.title}${flavorPart} — ${activeOption.label}${notePart}`;
 
     setCartRows((prev) => {
       const existing = prev.find((r) => r.rowKey === rowKey);
@@ -618,12 +632,14 @@ export function DigitalMenuPage() {
         friday_date: fridayDate,
         pricing_mode: preorderOpen ? 'preorder' : 'stall',
         items: cartRows.map((r) => ({
+          product_id: r.productId,
           product_name: r.label,
           quantity: r.quantity,
           unit_price: r.unitPrice,
         })),
         total_amount: cartSummary.finalTotal,
-        notes: notes.trim(),
+        mix_discount: cartSummary.totalMixDiscount,
+        notes: combinedNotes,
       });
       const waUrl = buildWhatsAppShareUrl(waText, targetPhone);
       setSubmitted({ orderId, waUrl, total: cartSummary.finalTotal });
@@ -951,6 +967,20 @@ export function DigitalMenuPage() {
               </div>
             )}
 
+            {/* הערה אופציונלית לפריט */}
+            <div>
+              <label className="block text-xs font-extrabold text-slate-700 mb-1">
+                הערה לפריט (אופציונלי)
+              </label>
+              <input
+                type="text"
+                value={modalItemNote}
+                onChange={(e) => setModalItemNote(e.target.value)}
+                placeholder="למשל: שילוב טעמים / בקשה מיוחדת..."
+                className="w-full px-3.5 py-2 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] text-xs"
+              />
+            </div>
+
             {/* בקר כמות + כפתור הוסף לסל */}
             <div className="flex items-center justify-between gap-3 pt-2 border-t border-[#F3E9DC]">
               <div className="flex items-center gap-2">
@@ -976,7 +1006,7 @@ export function DigitalMenuPage() {
                 onClick={handleAddFromModal}
                 className="flex-1 min-h-[48px] px-4 py-3 rounded-2xl bg-[#C85A17] hover:bg-[#A9440F] text-white font-extrabold text-sm shadow-md active:scale-[0.98]"
               >
-                הוסף לסל — {formatILS(activeOption.price * modalQty)}
+                הוסף לסל — {formatILS(modalPreviewPrice)}
               </button>
             </div>
           </div>

@@ -22,6 +22,8 @@ import { QuickApproveView } from './pages/QuickApproveView';
 import { DigitalMenuPage } from './pages/DigitalMenuPage';
 import { FlyerPage } from './pages/FlyerPage';
 import { APP_BRAND_NAME } from './lib/version';
+import { apiFetch } from './lib/api';
+import { decodeOrderLinkPayload } from './lib/orderLinkCodec';
 
 const VALID_TABS: AdminTab[] = [
   'dashboard',
@@ -40,36 +42,76 @@ function parseSpecialRoute(): {
   customerPortalId: number | null;
   quickApproveOrderId: number | null;
   directOrderId: number | null;
+  encodedOrderData: string | null;
   isDigitalMenu: boolean;
 } {
-  const hashClean = window.location.hash.replace(/^#\/?/, '');
+  const rawHash = window.location.hash.replace(/^#\/?/, '');
+  const [hashPath, hashQuery] = rawHash.split('?');
+  const hashParams = new URLSearchParams(hashQuery || '');
   const searchParams = new URLSearchParams(window.location.search);
+  const encodedOrderData = hashParams.get('d') || searchParams.get('d') || null;
 
-  if (hashClean === 'menu' || hashClean === 'order') {
-    return { customerPortalId: null, quickApproveOrderId: null, directOrderId: null, isDigitalMenu: true };
+  if (hashPath === 'menu' || hashPath === 'order') {
+    return {
+      customerPortalId: null,
+      quickApproveOrderId: null,
+      directOrderId: null,
+      encodedOrderData: null,
+      isDigitalMenu: true,
+    };
   }
 
   const queryCustomer = searchParams.get('customer');
   if (queryCustomer && /^\d+$/.test(queryCustomer)) {
-    return { customerPortalId: Number(queryCustomer), quickApproveOrderId: null, directOrderId: null, isDigitalMenu: false };
+    return {
+      customerPortalId: Number(queryCustomer),
+      quickApproveOrderId: null,
+      directOrderId: null,
+      encodedOrderData: null,
+      isDigitalMenu: false,
+    };
   }
 
-  const cMatch = hashClean.match(/^c\/(\d+)/);
+  const cMatch = hashPath.match(/^c\/(\d+)/);
   if (cMatch) {
-    return { customerPortalId: Number(cMatch[1]), quickApproveOrderId: null, directOrderId: null, isDigitalMenu: false };
+    return {
+      customerPortalId: Number(cMatch[1]),
+      quickApproveOrderId: null,
+      directOrderId: null,
+      encodedOrderData: null,
+      isDigitalMenu: false,
+    };
   }
 
-  const approveMatch = hashClean.match(/^approve-quick\/(\d+)/);
+  const approveMatch = hashPath.match(/^approve-quick\/(\d+)/);
   if (approveMatch) {
-    return { customerPortalId: null, quickApproveOrderId: Number(approveMatch[1]), directOrderId: null, isDigitalMenu: false };
+    return {
+      customerPortalId: null,
+      quickApproveOrderId: Number(approveMatch[1]),
+      directOrderId: null,
+      encodedOrderData,
+      isDigitalMenu: false,
+    };
   }
 
-  const orderMatch = hashClean.match(/^order\/(\d+)/);
+  const orderMatch = hashPath.match(/^order\/(\d+)/);
   if (orderMatch) {
-    return { customerPortalId: null, quickApproveOrderId: null, directOrderId: Number(orderMatch[1]), isDigitalMenu: false };
+    return {
+      customerPortalId: null,
+      quickApproveOrderId: null,
+      directOrderId: Number(orderMatch[1]),
+      encodedOrderData,
+      isDigitalMenu: false,
+    };
   }
 
-  return { customerPortalId: null, quickApproveOrderId: null, directOrderId: null, isDigitalMenu: false };
+  return {
+    customerPortalId: null,
+    quickApproveOrderId: null,
+    directOrderId: null,
+    encodedOrderData: null,
+    isDigitalMenu: false,
+  };
 }
 
 function getTabFromHash(): AdminTab {
@@ -117,6 +159,28 @@ function AppRouter() {
     return () => window.removeEventListener('hashchange', onHashChange);
   }, []);
 
+  // ייבוא אוטומטי של הזמנה מקישור #/order/:id?d=... למאגר המנהל אם אינה קיימת במכשיר
+  useEffect(() => {
+    if (specialRoute.directOrderId !== null && specialRoute.encodedOrderData) {
+      const decoded = decodeOrderLinkPayload(specialRoute.encodedOrderData);
+      if (decoded) {
+        apiFetch('/api/public/import-order', {
+          method: 'POST',
+          body: JSON.stringify({
+            id: decoded.id || specialRoute.directOrderId,
+            recipient_name: decoded.n,
+            phone: decoded.p,
+            friday_date: decoded.f,
+            total_amount: decoded.t,
+            notes: decoded.nt || '',
+            items: decoded.i,
+            status: 'awaiting_approval',
+          }),
+        }).catch(() => {});
+      }
+    }
+  }, [specialRoute.directOrderId, specialRoute.encodedOrderData]);
+
   // עמוד תפריט לקוחות דיגיטלי מעוצב ללא סיסמה (#/menu ו-#/order)
   if (specialRoute.isDigitalMenu) {
     return <DigitalMenuPage />;
@@ -124,7 +188,12 @@ function AppRouter() {
 
   // אישור מיידי מהיר ללא טעינת מסכי הניהול
   if (specialRoute.quickApproveOrderId !== null) {
-    return <QuickApproveView orderId={specialRoute.quickApproveOrderId} />;
+    return (
+      <QuickApproveView
+        orderId={specialRoute.quickApproveOrderId}
+        encodedData={specialRoute.encodedOrderData}
+      />
+    );
   }
 
   // אזור אישי חי ללקוח ללא סיסמה (#/c/:id או ?customer=:id)

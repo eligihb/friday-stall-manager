@@ -1,42 +1,79 @@
 import React, { useEffect, useState } from 'react';
 import { CheckCircle2, AlertTriangle } from 'lucide-react';
 import { apiFetch } from '../lib/api';
+import { formatILS } from '../lib/format';
+import { decodeOrderLinkPayload } from '../lib/orderLinkCodec';
 
 interface QuickApproveViewProps {
   orderId: number;
+  encodedData?: string | null;
 }
 
-export function QuickApproveView({ orderId }: QuickApproveViewProps) {
+export function QuickApproveView({ orderId, encodedData }: QuickApproveViewProps) {
   const [status, setStatus] = useState<'loading' | 'done' | 'error'>('loading');
   const [errMsg, setErrMsg] = useState('');
+  const [summaryText, setSummaryText] = useState('');
 
   useEffect(() => {
     let active = true;
-    apiFetch(`/api/orders/${orderId}`, {
-      method: 'PATCH',
-      body: JSON.stringify({ status: 'received' }),
-    })
-      .then(() => {
+    const run = async () => {
+      try {
+        // 1. ניסיון אישור ישיר אם ההזמנה כבר קיימת במאגר המקומי/שרת
+        await apiFetch(`/api/orders/${orderId}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ status: 'received' }),
+        });
         if (!active) return;
         setStatus('done');
-        // ניסיון סגירה אוטומטית של החלונית אם הדפדפן מאפשר
-        setTimeout(() => {
+      } catch (firstErr) {
+        // 2. Fallback חוצה-מכשירים: פענוח וייבוא ההזמנה מפרמטר הקישור (?d=...)
+        const decoded = decodeOrderLinkPayload(encodedData);
+        if (decoded) {
           try {
-            window.close();
-          } catch {
-            // ignore
+            await apiFetch('/api/public/import-order', {
+              method: 'POST',
+              body: JSON.stringify({
+                id: decoded.id || orderId,
+                recipient_name: decoded.n,
+                phone: decoded.p,
+                friday_date: decoded.f,
+                total_amount: decoded.t,
+                notes: decoded.nt || '',
+                items: decoded.i,
+                status: 'received',
+              }),
+            });
+            if (!active) return;
+            setSummaryText(`${decoded.n} · ${formatILS(decoded.t)}`);
+            setStatus('done');
+          } catch (importErr) {
+            if (!active) return;
+            setErrMsg(importErr instanceof Error ? importErr.message : 'שגיאה בייבוא ואישור ההזמנה');
+            setStatus('error');
+            return;
           }
-        }, 1800);
-      })
-      .catch((err) => {
-        if (!active) return;
-        setErrMsg(err instanceof Error ? err.message : 'שגיאה באישור ההזמנה');
-        setStatus('error');
-      });
+        } else {
+          if (!active) return;
+          setErrMsg(firstErr instanceof Error ? firstErr.message : 'ההזמנה לא נמצאה');
+          setStatus('error');
+          return;
+        }
+      }
+
+      // ניסיון סגירה אוטומטית של החלונית אם הדפדפן מאפשר
+      setTimeout(() => {
+        try {
+          window.close();
+        } catch {
+          // ignore
+        }
+      }, 2000);
+    };
+    run();
     return () => {
       active = false;
     };
-  }, [orderId]);
+  }, [orderId, encodedData]);
 
   return (
     <div className="min-h-screen bg-[#FAF6F0] flex items-center justify-center p-6">
@@ -54,8 +91,11 @@ export function QuickApproveView({ orderId }: QuickApproveViewProps) {
             <h1 className="font-serif text-2xl font-extrabold text-emerald-800">
               ההזמנה אושרה בהצלחה ✓
             </h1>
+            {summaryText && (
+              <div className="text-sm font-extrabold text-slate-800">{summaryText}</div>
+            )}
             <p className="text-xs text-slate-500">
-              הזמנה #{orderId} הועברה לסטטוס ״התקבל״. ניתן לסגור חלונית זו.
+              הזמנה #{orderId} נקלטה והועברה לסטטוס ״התקבל״. ניתן לסגור חלונית זו.
             </p>
           </>
         ) : (

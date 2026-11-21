@@ -454,6 +454,121 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
     } as T;
   }
 
+  // ייבוא / אישור הזמנה מקישור וואטסאפ מקודד (?d=...) כאשר הלקוח הזמין ממכשיר אחר
+  if (path === '/api/public/import-order' && method === 'POST') {
+    const externalId = Number(body.id || 0);
+    const recipient_name = String(body.recipient_name || body.n || '').trim() || 'לקוח';
+    const phone = String(body.phone || body.p || '').trim();
+    const friday_date = String(body.friday_date || body.f || getNextFridayISO()).slice(0, 10);
+    const notesRaw = String(body.notes || body.nt || '').trim();
+    const targetStatus = (body.status === 'received' ? 'received' : 'awaiting_approval') as OrderStatus;
+    const rawItems = (Array.isArray(body.items) ? body.items : []) as Array<{
+      product_id?: number;
+      pid?: number;
+      quantity?: number;
+      q?: number;
+      unit_price?: number;
+      u?: number;
+      name?: string;
+      nm?: string;
+    }>;
+
+    // 1. איתור או יצירת לקוח לפי מספר טלפון מנורמל (ללא כפילויות)
+    const normTail = (p: string) => {
+      const d = p.replace(/\D/g, '');
+      return d.length >= 9 ? d.slice(-9) : d;
+    };
+    const phoneTail = normTail(phone);
+    let matchedCustomer =
+      (phoneTail.length >= 7
+        ? db.users.find((u) => u.role !== 'admin' && normTail(u.phone || '') === phoneTail)
+        : null) ||
+      db.users.find((u) => u.role !== 'admin' && u.name.trim().toLowerCase() === recipient_name.toLowerCase()) ||
+      null;
+
+    if (!matchedCustomer) {
+      const newUid = db.nextIds.users++;
+      matchedCustomer = {
+        id: newUid,
+        name: recipient_name,
+        phone,
+        email: `customer${newUid}@teimani.local`,
+        password: '',
+        role: 'customer',
+        balance: 0,
+        notes: 'יובא אוטומטית מקישור הזמנה בוואטסאפ',
+        created_at: new Date().toISOString().slice(0, 10),
+      };
+      db.users.push(matchedCustomer);
+    }
+
+    // 2. בדיקה אם ההזמנה כבר קיימת לפי ID או לפי אותו לקוח + תאריך + סכום
+    const incomingTotal = round2(Number(body.total_amount ?? body.t ?? 0));
+    const existingOrder =
+      (externalId ? db.orders.find((o) => o.id === externalId) : null) ||
+      db.orders.find(
+        (o) =>
+          o.user_id === matchedCustomer!.id &&
+          o.friday_date === friday_date &&
+          Math.abs(o.total_amount - incomingTotal) < 0.01 &&
+          o.notes.includes(notesRaw.slice(0, 20))
+      ) ||
+      null;
+
+    if (existingOrder) {
+      if (targetStatus === 'received' && (existingOrder.status === 'awaiting_approval' || existingOrder.status === 'pending')) {
+        existingOrder.status = 'received';
+        saveDb(db);
+      }
+      return { id: existingOrder.id, order: existingOrder, imported: false } as T;
+    }
+
+    // 3. יצירת ההזמנה במאגר המנהל
+    const orderId = externalId && !db.orders.some((o) => o.id === externalId) ? externalId : db.nextIds.orders++;
+    if (orderId >= db.nextIds.orders) db.nextIds.orders = orderId + 1;
+
+    const pMap = new Map(db.products.map((p) => [p.id, p]));
+    let calcTotal = 0;
+    for (const it of rawItems) {
+      const pid = Number(it.product_id ?? it.pid ?? 0);
+      const qty = Math.max(1, Number(it.quantity ?? it.q ?? 1));
+      const prod = pMap.get(pid) || db.products[0];
+      const unitPrice = Math.max(0, Number(it.unit_price ?? it.u ?? prod?.customer_price ?? 0));
+      calcTotal += qty * unitPrice;
+      if (prod) {
+        db.order_items.push({
+          id: db.nextIds.order_items++,
+          order_id: orderId,
+          product_id: prod.id,
+          quantity: qty,
+          unit_price_snapshot: unitPrice,
+          cost_price_snapshot: prod.cost_price,
+        });
+      }
+    }
+
+    const finalTotal = incomingTotal > 0 ? incomingTotal : round2(calcTotal);
+    const combinedNotes = [phone ? `טלפון: ${phone}` : '', notesRaw].filter(Boolean).join(' | ');
+    const newOrder: StoredOrder = {
+      id: orderId,
+      user_id: matchedCustomer.id,
+      recipient_name: matchedCustomer.name || recipient_name,
+      friday_date,
+      order_type: 'customer',
+      delivery_fee: 0,
+      credit_discount: 0,
+      total_amount: finalTotal,
+      paid_amount: 0,
+      status: targetStatus,
+      notes: combinedNotes,
+      created_at: new Date().toISOString().slice(0, 10),
+    };
+    db.orders.push(newOrder);
+    saveDb(db);
+
+    return { id: orderId, order: newOrder, imported: true } as T;
+  }
+
   if (path === '/api/public/customer-history' && method === 'GET') {
     const cid = Number(q.get('customer_id') || 0);
     const phoneParam = String(q.get('phone') || '').replace(/\D/g, '');
