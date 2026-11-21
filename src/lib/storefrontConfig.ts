@@ -4,12 +4,10 @@ export const DEFAULT_ADMIN_NAME = 'אליאב מנהל';
 export const DEFAULT_ADMIN_WHATSAPP = '0542452100';
 
 export const DEFAULT_MENU_SHARE_TEMPLATE = `🫓 *{שם_עסק}*
-🔥 מאפים תימניים טריים לשבת!
-✨ המחירים הם בהזמנה מוקדמת.
+🔥 מאפים תימניים טריים ולוהטים לשבת!
+✨ הזמינו עכשיו ותיהנו ממחירים מיוחדים להזמנה מוקדמת.
 
-{פריטים}
-
-🛒 להזמנה מהירה אונליין:
+🛒 לתפריט והזמנה מהירה אונליין:
 {קישור}`;
 
 export const DEFAULT_CUSTOMER_ORDER_TEMPLATE = `🫓 *{שם_עסק} — הזמנה חדשה לאישור (#{מספר})*
@@ -42,10 +40,15 @@ export function loadStorefrontConfig(): StorefrontConfig {
     const raw = localStorage.getItem(CONFIG_KEY);
     if (raw) {
       const parsed = JSON.parse(raw) as Partial<StorefrontConfig>;
+      let shareTpl = parsed.menuShareTemplate || DEFAULT_MENU_SHARE_TEMPLATE;
+      // שדרוג אוטומטי מהתבנית הישנה שכללה רשימת מחירים ארוכה ({פריטים}) להודעה קצרה ומזמינה
+      if (shareTpl.includes('{פריטים}') && shareTpl.includes('להזמנה מהירה אונליין')) {
+        shareTpl = DEFAULT_MENU_SHARE_TEMPLATE;
+      }
       return {
         customerPriceMode: parsed.customerPriceMode || 'auto',
         hiddenProductIds: parsed.hiddenProductIds || {},
-        menuShareTemplate: parsed.menuShareTemplate || DEFAULT_MENU_SHARE_TEMPLATE,
+        menuShareTemplate: shareTpl,
         customerOrderTemplate: parsed.customerOrderTemplate || DEFAULT_CUSTOMER_ORDER_TEMPLATE,
       };
     }

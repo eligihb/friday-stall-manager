@@ -18,6 +18,7 @@ import {
   Users,
   Edit3,
   UserPlus,
+  Image as ImageIcon,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useFriday } from '../context/FridayContext';
@@ -34,6 +35,7 @@ export type AdminTab =
   | 'charity-orders'
   | 'users'
   | 'products'
+  | 'flyer'
   | 'finance'
   | 'reports'
   | 'settings';
@@ -51,6 +53,7 @@ const ADMIN_NAV: NavItem[] = [
   { id: 'charity-orders', label: 'הזמנות מסובסדות', icon: HeartHandshake },
   { id: 'users', label: 'לקוחות וספקים', icon: Users },
   { id: 'products', label: 'מחירון מוצרים', icon: Tag },
+  { id: 'flyer', label: 'פלייר מחירון', icon: ImageIcon },
   { id: 'finance', label: 'הכנסות, הוצאות וקבועות', icon: Wallet },
   { id: 'reports', label: 'דוחות וניתוח נתונים', icon: BarChart3 },
   { id: 'settings', label: 'הגדרות ומשתמשים', icon: Settings },
@@ -63,6 +66,7 @@ const TAB_TITLES: Record<AdminTab, string> = {
   'charity-orders': 'הזמנות מסובסדות',
   users: 'לקוחות וספקים',
   products: 'מחירון מוצרים',
+  flyer: 'פלייר מחירון',
   finance: 'כספים וקופה',
   reports: 'דוחות ורווח והפסד',
   settings: 'הגדרות ומשתמשים',
@@ -284,23 +288,33 @@ export function Layout({ activeTab, onSelectTab, children }: LayoutProps) {
                   <UserPlus className="w-4 h-4" />
                 </button>
               )}
-              {isAdmin && (
-                <label className="inline-flex items-center gap-1 bg-white/10 border border-white/15 rounded-xl px-2 py-1.5 min-h-[40px] font-bold text-amber-200">
-                  <Calendar className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                  <select
-                    value={fridayDate}
-                    onChange={(e) => setFridayDate(e.target.value)}
-                    aria-label="בחירת יום שישי"
-                    className="bg-transparent text-amber-100 font-bold text-xs focus:outline-none max-w-[104px]"
-                  >
-                    {fridayOptions.map((f) => (
-                      <option key={f} value={f} className="text-slate-900">
-                        {formatShortFriday(f)}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              )}
+              {isAdmin && (() => {
+                const parts = fridayDate.slice(0, 10).split('-');
+                const ddMm = parts.length === 3 ? `${parts[2]}/${parts[1]}` : fridayDate;
+                return (
+                  <label className="relative inline-flex items-center gap-1.5 bg-white/10 border border-white/15 rounded-xl px-2.5 py-1.5 min-h-[38px] font-bold text-amber-100 whitespace-nowrap shrink-0">
+                    <Calendar className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                    <span className="text-xs font-extrabold whitespace-nowrap">
+                      יום שישי{' '}
+                      <span dir="ltr" className="inline-block tabular-nums">
+                        {ddMm}
+                      </span>
+                    </span>
+                    <select
+                      value={fridayDate}
+                      onChange={(e) => setFridayDate(e.target.value)}
+                      aria-label="בחירת יום שישי"
+                      className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                    >
+                      {fridayOptions.map((f) => (
+                        <option key={f} value={f} className="text-slate-900">
+                          {formatShortFriday(f)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                );
+              })()}
 
               {!isAdmin && (
                 <button
@@ -486,6 +500,13 @@ export function Layout({ activeTab, onSelectTab, children }: LayoutProps) {
               desc: 'הזמנות סיטונאיות, זכויות וחוב מצטבר',
               icon: Store,
               color: 'bg-orange-50 text-[#8A330B]',
+            },
+            {
+              tab: 'flyer' as AdminTab,
+              title: 'פלייר מחירון לשיתוף',
+              desc: 'פוסטר מחירון מעוצב למסך נייד ושיתוף ישיר לוואטסאפ',
+              icon: ImageIcon,
+              color: 'bg-amber-50 text-amber-800',
             },
             {
               tab: 'finance' as AdminTab,

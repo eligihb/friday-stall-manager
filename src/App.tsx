@@ -20,6 +20,7 @@ import { CustomerPortal } from './pages/CustomerPortal';
 import { CustomerLivePortal } from './pages/CustomerLivePortal';
 import { QuickApproveView } from './pages/QuickApproveView';
 import { DigitalMenuPage } from './pages/DigitalMenuPage';
+import { FlyerPage } from './pages/FlyerPage';
 import { APP_BRAND_NAME } from './lib/version';
 
 const VALID_TABS: AdminTab[] = [
@@ -29,6 +30,7 @@ const VALID_TABS: AdminTab[] = [
   'charity-orders',
   'users',
   'products',
+  'flyer',
   'finance',
   'reports',
   'settings',
@@ -159,6 +161,7 @@ function AppRouter() {
           {adminTab === 'charity-orders' && <CharityOrdersPage />}
           {adminTab === 'users' && <UsersPage />}
           {adminTab === 'products' && <ProductsCatalog />}
+          {adminTab === 'flyer' && <FlyerPage />}
           {adminTab === 'finance' && <FinancePage />}
           {adminTab === 'reports' && <ReportsPage />}
           {adminTab === 'settings' && <SettingsPage />}

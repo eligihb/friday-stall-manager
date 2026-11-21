@@ -136,6 +136,13 @@ export function AdminDashboard({ onNavigate }: AdminDashboardProps) {
           </a>
           <button
             type="button"
+            onClick={() => onNavigate('flyer')}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-[#FFF7ED] border border-[#C85A17]/40 hover:bg-[#FFEDD5] text-[#8A330B] font-extrabold text-xs shadow-sm"
+          >
+            <span>פלייר מחירון</span>
+          </button>
+          <button
+            type="button"
             onClick={handleCopyMenuLink}
             className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-white border border-[#E8D5BE] hover:border-[#C85A17] text-[#8A330B] font-extrabold text-xs shadow-sm"
           >
@@ -146,24 +153,31 @@ export function AdminDashboard({ onNavigate }: AdminDashboardProps) {
         </div>
       </div>
 
-      {/* כפתורי שיתוף תפריט גם במובייל */}
-      <div className="md:hidden grid grid-cols-2 gap-2">
+      {/* כפתורי שיתוף תפריט ופלייר גם במובייל */}
+      <div className="md:hidden grid grid-cols-3 gap-2">
         <a
           href={menuShareUrl}
           target="_blank"
           rel="noopener noreferrer"
-          className="py-2.5 px-3 rounded-xl bg-[#25D366] text-white font-extrabold text-xs flex items-center justify-center gap-1.5 shadow-sm"
+          className="py-2.5 px-2 rounded-xl bg-[#25D366] text-white font-extrabold text-[11px] flex items-center justify-center gap-1 shadow-sm"
         >
-          <Share2 className="w-4 h-4" />
-          <span>שתף תפריט בוואטסאפ</span>
+          <Share2 className="w-3.5 h-3.5 shrink-0" />
+          <span>שתף בוואטסאפ</span>
         </a>
         <button
           type="button"
-          onClick={handleCopyMenuLink}
-          className="py-2.5 px-3 rounded-xl bg-white border border-[#E8D5BE] text-[#8A330B] font-extrabold text-xs flex items-center justify-center gap-1.5 shadow-sm"
+          onClick={() => onNavigate('flyer')}
+          className="py-2.5 px-2 rounded-xl bg-[#FFF7ED] border border-[#C85A17]/40 text-[#8A330B] font-extrabold text-[11px] flex items-center justify-center gap-1 shadow-sm"
         >
-          {copiedMenuLink ? <Check className="w-4 h-4 text-emerald-600" /> : <Link2 className="w-4 h-4" />}
-          <span>{copiedMenuLink ? 'קישור הועתק!' : 'העתק קישור תפריט'}</span>
+          <span>פלייר מחירון</span>
+        </button>
+        <button
+          type="button"
+          onClick={handleCopyMenuLink}
+          className="py-2.5 px-2 rounded-xl bg-white border border-[#E8D5BE] text-[#8A330B] font-extrabold text-[11px] flex items-center justify-center gap-1 shadow-sm"
+        >
+          {copiedMenuLink ? <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" /> : <Link2 className="w-3.5 h-3.5 shrink-0" />}
+          <span>{copiedMenuLink ? 'הועתק!' : 'קישור תפריט'}</span>
         </button>
       </div>
 
