@@ -1,19 +1,35 @@
 import React, { useState } from 'react';
-import { Copy, Check, Smartphone, Wallet, ExternalLink, Banknote } from 'lucide-react';
+import { Copy, Check, Banknote } from 'lucide-react';
 import { formatILS } from '../lib/format';
 import { loadStorefrontConfig } from '../lib/storefrontConfig';
+
+export type CustomerPaymentChoice = 'prepay' | 'cash_pickup';
 
 interface QuickCustomerPayBoxProps {
   amountToPay: number;
   title?: string;
+  paymentChoice?: CustomerPaymentChoice;
+  onPaymentChoiceChange?: (choice: CustomerPaymentChoice) => void;
 }
 
-export function QuickCustomerPayBox({ amountToPay, title }: QuickCustomerPayBoxProps) {
+export function QuickCustomerPayBox({
+  amountToPay,
+  title,
+  paymentChoice,
+  onPaymentChoiceChange,
+}: QuickCustomerPayBoxProps) {
   const [cfg] = useState(() => loadStorefrontConfig());
+  const [internalChoice, setInternalChoice] = useState<CustomerPaymentChoice>('prepay');
   const [copied, setCopied] = useState(false);
   const [copyToast, setCopyToast] = useState('');
 
   if (amountToPay <= 0) return null;
+
+  const activeChoice = paymentChoice ?? internalChoice;
+  const setChoice = (next: CustomerPaymentChoice) => {
+    setInternalChoice(next);
+    onPaymentChoiceChange?.(next);
+  };
 
   const displayPhone = cfg.paymentPhone || '054-2452100';
   const cleanPhone = displayPhone.replace(/[^\d]/g, '');
@@ -37,132 +53,152 @@ export function QuickCustomerPayBox({ amountToPay, title }: QuickCustomerPayBoxP
     }
   };
 
-  const handleCopyOnly = async () => {
-    await copyTextSafe(cleanPhone || displayPhone);
+  const triggerCopyToast = (msg: string) => {
     setCopied(true);
-    setCopyToast(`המספר ${displayPhone} הועתק!`);
+    setCopyToast(msg);
     setTimeout(() => {
       setCopied(false);
+    }, 2800);
+    setTimeout(() => {
       setCopyToast('');
-    }, 3200);
+    }, 4000);
+  };
+
+  const handleCopyOnly = async () => {
+    await copyTextSafe(cleanPhone || displayPhone);
+    triggerCopyToast(`המספר ${displayPhone} הועתק! בחרו 'העברה לפי מספר נייד' והדביקו`);
   };
 
   const bitHref = cfg.bitLink.trim() || 'https://www.bitpay.co.il/app';
   const payboxHref = cfg.payboxLink.trim() || 'https://payboxapp.page.link';
 
-  const handleCopyAndOpenBit = async () => {
+  const handleOpenApp = async (href: string) => {
     await copyTextSafe(cleanPhone || displayPhone);
-    setCopied(true);
-    setCopyToast(
-      `המספר ${displayPhone} הועתק! בחרו ב-Bit 'העברה לפי מספר נייד' והדביקו`
-    );
-    setTimeout(() => {
-      setCopied(false);
-    }, 3500);
-    window.open(bitHref, '_blank', 'noopener,noreferrer');
-  };
-
-  const handleCopyAndOpenPayBox = async () => {
-    await copyTextSafe(cleanPhone || displayPhone);
-    setCopied(true);
-    setCopyToast(`המספר ${displayPhone} הועתק! פותח PayBox...`);
-    setTimeout(() => {
-      setCopied(false);
-    }, 3500);
-    window.open(payboxHref, '_blank', 'noopener,noreferrer');
+    triggerCopyToast(`המספר ${displayPhone} הועתק! בחרו 'העברה לפי מספר נייד' והדביקו`);
+    window.open(href, '_blank', 'noopener,noreferrer');
   };
 
   return (
-    <div className="p-3.5 rounded-2xl bg-gradient-to-br from-sky-50 via-white to-indigo-50/70 border border-sky-200 space-y-3">
-      {/* כותרת + סכום מדויק */}
+    <div className="p-3.5 rounded-2xl bg-[#FAF7F2] border border-[#E8D5BE] space-y-3">
+      {/* כותרת + סכום */}
       <div className="flex items-center justify-between gap-2">
-        <div>
-          <div className="text-xs font-extrabold text-slate-900">
-            {title || 'תשלום מהיר להזמנה'}
-          </div>
-          <div className="text-[11px] text-slate-500">סכום מדויק לתשלום</div>
-        </div>
-        <div className="text-xl font-extrabold text-[#C85A17] tabular-nums">
+        <span className="text-xs font-extrabold text-slate-800">
+          {title || 'אופן תשלום'}
+        </span>
+        <span className="text-base font-extrabold text-[#C85A17] tabular-nums">
           {formatILS(amountToPay)}
-        </div>
+        </span>
       </div>
 
-      {/* שורת מספר הטלפון להעברה + אייקון העתקה */}
-      <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-white border border-sky-200">
-        <div className="text-xs font-bold text-slate-600">מספר להעברה:</div>
-        <div className="flex items-center gap-2">
-          <span className="font-extrabold text-sm text-slate-900 tabular-nums" dir="ltr">
-            {displayPhone}
-          </span>
-          <button
-            type="button"
-            onClick={handleCopyOnly}
-            className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-extrabold transition-colors ${
-              copied
-                ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
-                : 'bg-sky-100 hover:bg-sky-200 text-sky-900 border border-sky-200'
-            }`}
-            title="העתק מספר להעברה"
-          >
-            {copied ? (
-              <>
-                <Check className="w-3.5 h-3.5" />
-                <span>הועתק ✓</span>
-              </>
-            ) : (
-              <>
-                <Copy className="w-3.5 h-3.5" />
-                <span>📋 העתק</span>
-              </>
-            )}
-          </button>
-        </div>
-      </div>
-
-      {/* התראת אישור העתקה */}
-      {copyToast && (
-        <div className="px-3 py-2 rounded-xl bg-emerald-50 border border-emerald-300 text-emerald-900 text-[11px] font-extrabold text-center">
-          ✓ {copyToast}
-        </div>
-      )}
-
-      {/* 1. אפשרות ראשית ובולטת — Bit */}
-      <div className="space-y-1.5">
+      {/* בורר נקי: תשלום מראש / תשלום באיסוף (מזומן) */}
+      <div className="grid grid-cols-2 gap-1.5 p-1 rounded-xl bg-white border border-[#E8D5BE]">
         <button
           type="button"
-          onClick={handleCopyAndOpenBit}
-          className="w-full py-3.5 px-4 rounded-2xl bg-[#00B4D8] hover:bg-[#0096C7] active:scale-[0.99] text-white font-extrabold text-sm flex items-center justify-center gap-2 shadow-md transition-all"
+          onClick={() => setChoice('prepay')}
+          className={`py-2 px-2 rounded-lg text-xs font-extrabold transition-all ${
+            activeChoice === 'prepay'
+              ? 'bg-[#2B1B12] text-amber-50 shadow-sm'
+              : 'text-slate-600 hover:bg-[#FAF6F0]'
+          }`}
         >
-          <Smartphone className="w-4 h-4 shrink-0" />
-          <span>העתק מספר ופתח Bit</span>
-          <ExternalLink className="w-3.5 h-3.5 opacity-90 shrink-0" />
+          💳 תשלום מראש
         </button>
-        <p className="text-[11px] text-slate-600 leading-snug bg-amber-50/80 border border-amber-200/80 rounded-xl px-2.5 py-1.5">
-          💡 בלחיצה על Bit המספר מועתק אוטומטית! באפליקציה בחרו &quot;העברה לפי מספר נייד&quot; (אין צורך לשמור באנשי קשר) והדביקו.
-        </p>
+        <button
+          type="button"
+          onClick={() => setChoice('cash_pickup')}
+          className={`py-2 px-2 rounded-lg text-xs font-extrabold transition-all ${
+            activeChoice === 'cash_pickup'
+              ? 'bg-emerald-700 text-white shadow-sm'
+              : 'text-slate-600 hover:bg-[#FAF6F0]'
+          }`}
+        >
+          💵 תשלום באיסוף (מזומן)
+        </button>
       </div>
 
-      {/* 2. אפשרות משנית — PayBox */}
-      <button
-        type="button"
-        onClick={handleCopyAndOpenPayBox}
-        className="w-full py-2 px-3 rounded-xl bg-[#4F46E5]/10 hover:bg-[#4F46E5]/15 border border-[#4F46E5]/30 text-[#3730A3] font-bold text-xs flex items-center justify-center gap-1.5 transition-colors"
-      >
-        <Wallet className="w-3.5 h-3.5 shrink-0" />
-        <span>העתק מספר ופתח PayBox</span>
-        <ExternalLink className="w-3 h-3 opacity-80 shrink-0" />
-      </button>
+      {activeChoice === 'cash_pickup' ? (
+        <div className="py-3 px-3 rounded-xl bg-white border border-emerald-200 text-emerald-900 text-xs font-bold flex items-center justify-center gap-2 text-center">
+          <Banknote className="w-4 h-4 text-emerald-700 shrink-0" />
+          <span>תשלום במזומן בעת האיסוף בדוכן</span>
+        </div>
+      ) : (
+        <div className="space-y-2.5">
+          {/* 2 קוביות קטנות ומעוצבות זו לצד זו — bit ו-PayBox */}
+          <div className="grid grid-cols-2 gap-2.5">
+            <button
+              type="button"
+              onClick={() => handleOpenApp(bitHref)}
+              className="py-3 px-3 rounded-2xl bg-gradient-to-br from-[#008C9E] to-[#00B4D8] hover:brightness-105 active:scale-[0.98] text-white shadow-sm flex flex-col items-center justify-center gap-1 transition-all"
+            >
+              <span
+                className="w-9 h-9 rounded-xl bg-white/20 border border-white/30 flex items-center justify-center font-black text-base tracking-tight"
+                dir="ltr"
+              >
+                bit
+              </span>
+              <span className="text-xs font-extrabold tracking-wide" dir="ltr">
+                bit
+              </span>
+            </button>
 
-      {/* 3. מזומן — נפוץ */}
-      <div className="px-3 py-2 rounded-xl bg-emerald-50/80 border border-emerald-200 text-emerald-900 text-xs font-bold flex items-center justify-center gap-1.5 text-center">
-        <Banknote className="w-4 h-4 text-emerald-700 shrink-0" />
-        <span>💵 ניתן לשלם גם במזומן בעת האיסוף בדוכן</span>
-      </div>
+            <button
+              type="button"
+              onClick={() => handleOpenApp(payboxHref)}
+              className="py-3 px-3 rounded-2xl bg-gradient-to-br from-[#4338CA] to-[#6366F1] hover:brightness-105 active:scale-[0.98] text-white shadow-sm flex flex-col items-center justify-center gap-1 transition-all"
+            >
+              <span
+                className="w-9 h-9 rounded-xl bg-white/20 border border-white/30 flex items-center justify-center font-black text-sm tracking-tight"
+                dir="ltr"
+              >
+                PB
+              </span>
+              <span className="text-xs font-extrabold tracking-wide" dir="ltr">
+                PayBox
+              </span>
+            </button>
+          </div>
 
-      {/* 4. העברה בנקאית — חריגים */}
-      <p className="text-[10px] text-slate-400 text-center">
-        העברה בנקאית — למקרים חריגים בתיאום מול המוכר
-      </p>
+          {/* חיווי Toast קצר בעת לחיצה */}
+          {copyToast && (
+            <div className="px-2.5 py-1.5 rounded-xl bg-emerald-50 border border-emerald-300 text-emerald-900 text-[11px] font-bold text-center">
+              ✓ {copyToast}
+            </div>
+          )}
+
+          {/* שורה קומפקטית אחת בלבד עם המספר וכפתור העתקה קטן */}
+          <div className="flex items-center justify-between gap-2 px-3 py-1.5 rounded-xl bg-white border border-[#E8D5BE]">
+            <span className="text-[11px] font-bold text-slate-500">נייד להעברה:</span>
+            <div className="flex items-center gap-2">
+              <span className="font-extrabold text-xs text-slate-900 tabular-nums" dir="ltr">
+                {displayPhone}
+              </span>
+              <button
+                type="button"
+                onClick={handleCopyOnly}
+                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-bold transition-colors ${
+                  copied
+                    ? 'bg-emerald-100 text-emerald-800'
+                    : 'bg-[#FAF6F0] hover:bg-[#F3E9DC] text-slate-700 border border-[#E8D5BE]'
+                }`}
+                title="העתק מספר"
+              >
+                {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                <span>{copied ? 'הועתק' : 'העתק'}</span>
+              </button>
+            </div>
+          </div>
+
+          {/* משפט עזר קצר בשורה אחת */}
+          <p className="text-[11px] text-slate-600 leading-snug text-center">
+            💡 המספר מועתק אוטומטית בלחיצה — באפליקציה בחרו &quot;העברה לפי מספר נייד&quot; (ללא שמירה באנשי קשר).
+          </p>
+
+          {/* העברה בנקאית — חריגים */}
+          <p className="text-[10px] text-slate-400 text-center">
+            העברה בנקאית — למקרים חריגים בתיאום מול המוכר
+          </p>
+        </div>
+      )}
     </div>
   );
 }

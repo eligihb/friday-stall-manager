@@ -27,7 +27,7 @@ import {
 } from '../lib/storefrontConfig';
 import { buildWhatsAppShareUrl, formatPublicApprovalWhatsApp } from '../lib/whatsappFormat';
 import { BottomSheet } from '../components/BottomSheet';
-import { QuickCustomerPayBox } from '../components/QuickCustomerPayBox';
+import { QuickCustomerPayBox, type CustomerPaymentChoice } from '../components/QuickCustomerPayBox';
 import type { Order, OrderStatus } from '../types';
 
 interface StorefrontProduct {
@@ -160,11 +160,13 @@ export function DigitalMenuPage() {
   const [showPastOrders, setShowPastOrders] = useState(false);
 
   const [notes, setNotes] = useState('');
+  const [paymentChoice, setPaymentChoice] = useState<CustomerPaymentChoice>('prepay');
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState<{
     orderId: number;
     waUrl: string;
     total: number;
+    paymentChoice: CustomerPaymentChoice;
   } | null>(null);
 
   const fetchCustomerHistory = async (profile: SavedCustomerProfile | null) => {
@@ -627,6 +629,7 @@ export function DigitalMenuPage() {
           recipient_name: customerName.trim(),
           phone: customerPhone.trim(),
           total_amount: cartSummary.finalTotal,
+          payment_preference: paymentChoice,
           notes: combinedNotes,
           items: Array.from(mergedItems.entries()).map(([product_id, quantity]) => ({
             product_id,
@@ -671,7 +674,7 @@ export function DigitalMenuPage() {
         notes: notes.trim(),
       });
       const waUrl = buildWhatsAppShareUrl(waText, targetPhone);
-      setSubmitted({ orderId, waUrl, total: cartSummary.finalTotal });
+      setSubmitted({ orderId, waUrl, total: cartSummary.finalTotal, paymentChoice });
       setCartRows([]);
       setNotes('');
       setCheckoutOpen(false);
@@ -779,7 +782,13 @@ export function DigitalMenuPage() {
             </div>
 
             {/* קופסת תשלום מהיר ב-Bit / PayBox / מזומן */}
-            <QuickCustomerPayBox amountToPay={submitted.total} />
+            <QuickCustomerPayBox
+              amountToPay={submitted.total}
+              paymentChoice={submitted.paymentChoice}
+              onPaymentChoiceChange={(next) =>
+                setSubmitted((prev) => (prev ? { ...prev, paymentChoice: next } : prev))
+              }
+            />
 
             {/* פעולות המשך */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
@@ -1162,21 +1171,17 @@ export function DigitalMenuPage() {
             className="w-full px-3.5 py-2.5 rounded-xl border border-[#E8D5BE] bg-white text-sm"
           />
 
-          {/* קופסת תשלום מהיר (Bit / PayBox / מזומן) כבר בתוך סל ההזמנה לפני השליחה */}
+          {/* קופסת תשלום נקייה (תשלום מראש / תשלום באיסוף) */}
           <QuickCustomerPayBox
             amountToPay={cartSummary.finalTotal}
-            title="אפשרויות תשלום (ניתן לשלם עכשיו או לאחר השליחה)"
+            paymentChoice={paymentChoice}
+            onPaymentChoiceChange={setPaymentChoice}
           />
-
-          <div className="p-2.5 rounded-xl bg-amber-50 border border-amber-300 text-amber-950 text-[11px] font-bold flex items-start gap-2">
-            <AlertCircle className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
-            <span>ההזמנה נשלחת בוואטסאפ למוכר לצורך אישור סופי.</span>
-          </div>
 
           <button
             type="submit"
             disabled={submitting || cartRows.length === 0}
-            className="w-full min-h-[50px] py-3 rounded-2xl bg-[#25D366] hover:bg-[#1EB958] text-white font-extrabold text-sm flex items-center justify-center gap-2 shadow-md"
+            className="w-full min-h-[52px] py-3.5 rounded-2xl bg-[#25D366] hover:bg-[#1EB958] text-white font-extrabold text-sm flex items-center justify-center gap-2 shadow-md"
           >
             <Send className="w-4 h-4" />
             <span>

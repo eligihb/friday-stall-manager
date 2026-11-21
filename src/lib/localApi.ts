@@ -900,7 +900,9 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
 
     const clientTotal = Number(body.total_amount ?? 0);
     total_amount = clientTotal > 0 ? round2(clientTotal) : round2(total_amount);
-    const combinedNotes = [`טלפון: ${phone}`, notesRaw].filter(Boolean).join(' | ');
+    const payPrefNote =
+      body.payment_preference === 'cash_pickup' ? 'תשלום מבוקש: מזומן באיסוף' : '';
+    const combinedNotes = [`טלפון: ${phone}`, payPrefNote, notesRaw].filter(Boolean).join(' | ');
     db.orders.push({
       id: orderId,
       user_id: matchedCustomer.id,
