@@ -185,6 +185,7 @@ export function DigitalMenuPage() {
         .map((p) => {
           const qty = cart[p.id];
           const calc = calcLinePrice(p, qty, preorderOpen);
+          const regularTotal = Math.round(p.customer_price * qty * 100) / 100;
           const flavor = supportsFlavor(p.name) ? flavors[p.id] || 'רגיל' : undefined;
           return {
             product: p,
@@ -192,6 +193,7 @@ export function DigitalMenuPage() {
             flavor,
             unit_price: calc.unitPrice,
             line_total: calc.lineTotal,
+            regular_total: regularTotal,
           };
         }),
     [visibleProducts, cart, flavors, preorderOpen]
@@ -202,6 +204,10 @@ export function DigitalMenuPage() {
     () => Math.round(cartLines.reduce((s, l) => s + l.line_total, 0) * 100) / 100,
     [cartLines]
   );
+  const totalSavings = useMemo(() => {
+    const regSum = cartLines.reduce((s, l) => s + l.regular_total, 0);
+    return Math.max(0, Math.round((regSum - totalAmount) * 100) / 100);
+  }, [cartLines, totalAmount]);
 
   const stepQty = (pid: number, delta: number) => {
     setCart((prev) => ({ ...prev, [pid]: Math.max(0, (prev[pid] || 0) + delta) }));
@@ -285,12 +291,12 @@ export function DigitalMenuPage() {
             </h1>
           </div>
 
-          <div className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-full bg-amber-400/20 border border-amber-300/40 text-[11px] font-bold text-amber-100">
+          <div className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-full bg-amber-400/20 border border-amber-300/40 text-xs font-bold text-amber-100">
             <Sparkles className="w-3.5 h-3.5 text-amber-300 shrink-0" />
             <span>
               {preorderOpen
-                ? `מבצע הזמנה מוקדמת פעיל (א׳–ו׳ 06:00) · ${formatFridayLabel(fridayDate)}`
-                : `מחירון דוכן רגיל · ${formatFridayLabel(fridayDate)}`}
+                ? `המחירים הם בהזמנה מוקדמת · ${formatFridayLabel(fridayDate)}`
+                : `מחירון יום שישי · ${formatFridayLabel(fridayDate)}`}
             </span>
           </div>
         </div>
@@ -349,9 +355,12 @@ export function DigitalMenuPage() {
               const hasFlavors = supportsFlavor(p.name);
               const calc = calcLinePrice(p, qty > 0 ? qty : 1, preorderOpen);
               const displayPrice =
-                salufLahoh && qty < 5
+                salufLahoh && qty > 0 && qty < 5
                   ? p.customer_price
+                  : salufLahoh && preorderOpen
+                  ? p.preorder_price
                   : calc.unitPrice;
+              const showStrikeOriginal = p.customer_price > displayPrice;
 
               return (
                 <div
@@ -381,14 +390,14 @@ export function DigitalMenuPage() {
                         <span className="text-base font-extrabold text-[#C85A17]">
                           {formatILS(displayPrice)}
                         </span>
-                        {salufLahoh && preorderOpen && qty < 5 && (
-                          <span className="text-[11px] font-bold text-amber-800 bg-amber-100/80 px-1.5 py-0.5 rounded-md">
-                            מבצע מוקדמת מ-5 יח&apos; ({formatILS(p.preorder_price)})
+                        {showStrikeOriginal && (
+                          <span className="text-xs font-bold text-slate-400 line-through decoration-red-600 decoration-2">
+                            {formatILS(p.customer_price)}
                           </span>
                         )}
-                        {salufLahoh && preorderOpen && qty >= 5 && (
-                          <span className="text-[11px] font-bold text-emerald-800 bg-emerald-100 px-1.5 py-0.5 rounded-md">
-                            מחיר מוקדמת פעיל ✓
+                        {salufLahoh && preorderOpen && qty < 5 && (
+                          <span className="text-[10px] font-bold text-slate-500">
+                            (מ-5 יח&apos;)
                           </span>
                         )}
                       </div>
@@ -467,8 +476,15 @@ export function DigitalMenuPage() {
       <div className="fixed bottom-0 inset-x-0 z-30 bg-white/95 backdrop-blur-md border-t border-[#E8D5BE] shadow-[0_-6px_24px_rgba(30,36,43,0.12)] px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
         <div className="max-w-lg mx-auto flex items-center justify-between gap-3">
           <div className="tabular-nums">
-            <div className="text-[11px] font-bold text-slate-500">
-              {totalItems > 0 ? `${totalItems} פריטים בסל` : 'בחר מוצרים מהתפריט'}
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] font-bold text-slate-500">
+                {totalItems > 0 ? `${totalItems} פריטים בסל` : 'בחר מוצרים מהתפריט'}
+              </span>
+              {totalSavings > 0 && (
+                <span className="text-[11px] font-extrabold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">
+                  חסכת {formatILS(totalSavings)}!
+                </span>
+              )}
             </div>
             <div className="text-xl font-extrabold text-[#C85A17]">{formatILS(totalAmount)}</div>
           </div>
@@ -500,12 +516,26 @@ export function DigitalMenuPage() {
                   {l.quantity}× {l.product.name}
                   {l.flavor ? ` (${l.flavor})` : ''}
                 </span>
-                <span className="font-extrabold text-[#8A330B] tabular-nums">
-                  {formatILS(l.line_total)}
-                </span>
+                <div className="flex items-center gap-1.5 tabular-nums">
+                  {l.regular_total > l.line_total && (
+                    <span className="text-[11px] text-slate-400 line-through decoration-red-600 decoration-2">
+                      {formatILS(l.regular_total)}
+                    </span>
+                  )}
+                  <span className="font-extrabold text-[#8A330B]">
+                    {formatILS(l.line_total)}
+                  </span>
+                </div>
               </div>
             ))}
           </div>
+
+          {totalSavings > 0 && (
+            <div className="p-2.5 rounded-xl bg-emerald-50 border border-emerald-300 text-emerald-800 text-xs font-extrabold flex items-center justify-between tabular-nums">
+              <span>🎉 חסכת בהזמנה זו:</span>
+              <span className="text-sm">{formatILS(totalSavings)}</span>
+            </div>
+          )}
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
             <input

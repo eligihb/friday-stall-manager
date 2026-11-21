@@ -71,7 +71,7 @@ export function formatDigitalMenuWhatsApp(
       const pre = formatILS(p.preorder_price);
       const reg = formatILS(p.customer_price);
       return p.preorder_price < p.customer_price
-        ? `• *${p.name}* — ${pre} במוקדמת (דוכן: ${reg})`
+        ? `• *${p.name}* — ${pre} (~${reg}~)`
         : `• *${p.name}* — ${reg}`;
     })
     .join('\n');
