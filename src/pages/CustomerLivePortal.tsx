@@ -178,29 +178,37 @@ export function CustomerLivePortal({ customerId }: CustomerLivePortalProps) {
 
   return (
     <div className="min-h-screen bg-[#FAF6F0] text-[#1E242B] pb-16">
-      {/* כותרת עליונה */}
-      <header className="bg-[#1E242B] text-white px-4 py-4 shadow-md">
-        <div className="max-w-2xl mx-auto flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2.5 min-w-0">
-            <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-[#C85A17] to-[#D97706] flex items-center justify-center shrink-0">
-              <Flame className="w-5 h-5 text-white" />
+      {/* סרגל עליון צף וקומפקטי (Sticky Header) */}
+      <header className="sticky top-0 z-40 bg-[#1E242B]/95 backdrop-blur-md text-white px-4 py-3 shadow-md border-b border-white/10">
+        <div className="max-w-2xl mx-auto flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-[#C85A17] to-[#D97706] flex items-center justify-center shrink-0">
+              <Flame className="w-4 h-4 text-white" />
             </div>
             <div className="min-w-0">
-              <h1 className="font-serif text-xl font-bold leading-tight truncate">
-                {settings?.business_name || APP_BRAND_NAME}
-              </h1>
-              <p className="text-xs text-amber-300 truncate">
-                אזור אישי · {customer ? customer.name : `לקוח #${customerId}`}
+              <div className="font-extrabold text-xs sm:text-sm text-amber-100 truncate">
+                היי {customer ? customer.name : `לקוח #${customerId}`} 👋
+              </div>
+              <p className="text-[11px] text-slate-300 truncate">
+                👤 האזור האישי · {settings?.business_name || APP_BRAND_NAME}
               </p>
             </div>
           </div>
-          <a
-            href="#/menu"
-            className="shrink-0 inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#C85A17] hover:bg-[#A9440F] text-white text-xs font-extrabold shadow-sm transition-colors"
-          >
-            <Plus className="w-4 h-4" />
-            <span>הזמנה חדשה</span>
-          </a>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <a
+              href="#/menu"
+              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-white/15 hover:bg-white/25 text-white text-xs font-extrabold transition-colors"
+            >
+              <span>🍽️ לתפריט</span>
+            </a>
+            <a
+              href="#/menu"
+              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-[#C85A17] hover:bg-[#A9440F] text-white text-xs font-extrabold shadow-sm transition-colors"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>🛒 הזמנה</span>
+            </a>
+          </div>
         </div>
       </header>
 

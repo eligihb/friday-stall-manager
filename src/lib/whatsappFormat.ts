@@ -146,6 +146,7 @@ export function formatPublicApprovalWhatsApp(payload: {
   items: Array<{ product_id?: number; product_name: string; quantity: number; unit_price: number }>;
   total_amount: number;
   mix_discount?: number;
+  payment_label?: string;
   notes?: string;
 }): string {
   const cfg = loadStorefrontConfig();
@@ -157,7 +158,10 @@ export function formatPublicApprovalWhatsApp(payload: {
   }
   const itemsText = itemLines.join('\n');
   const trimmedNotes = (payload.notes || '').trim();
-  const notesLine = trimmedNotes ? `📝 הערה: ${trimmedNotes}` : '';
+  const paymentLine = payload.payment_label ? `💰 אופן תשלום: ${payload.payment_label}` : '';
+  const notesLine = [paymentLine, trimmedNotes ? `📝 הערה: ${trimmedNotes}` : '']
+    .filter(Boolean)
+    .join('\n');
 
   const encoded = encodeOrderLinkPayload({
     id: payload.id,

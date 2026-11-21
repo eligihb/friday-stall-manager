@@ -15,6 +15,7 @@ import {
   Tag,
   ChevronLeft,
   Trash2,
+  ShoppingCart,
 } from 'lucide-react';
 import { apiFetch } from '../lib/api';
 import { formatFridayLabel, formatILS, getNextFridayISO, ORDER_STATUS_LABELS } from '../lib/format';
@@ -27,7 +28,11 @@ import {
 } from '../lib/storefrontConfig';
 import { buildWhatsAppShareUrl, formatPublicApprovalWhatsApp } from '../lib/whatsappFormat';
 import { BottomSheet } from '../components/BottomSheet';
-import { QuickCustomerPayBox, type CustomerPaymentChoice } from '../components/QuickCustomerPayBox';
+import {
+  QuickCustomerPayBox,
+  type CustomerPaymentChoice,
+  type PrepayMethod,
+} from '../components/QuickCustomerPayBox';
 import type { Order, OrderStatus } from '../types';
 
 interface StorefrontProduct {
@@ -161,13 +166,17 @@ export function DigitalMenuPage() {
 
   const [notes, setNotes] = useState('');
   const [paymentChoice, setPaymentChoice] = useState<CustomerPaymentChoice>('prepay');
+  const [prepayMethod, setPrepayMethod] = useState<PrepayMethod>(null);
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState<{
     orderId: number;
     waUrl: string;
     total: number;
     paymentChoice: CustomerPaymentChoice;
+    prepayMethod: PrepayMethod;
   } | null>(null);
+
+  const canSubmitPayment = paymentChoice === 'cash_pickup' || prepayMethod !== null;
 
   const fetchCustomerHistory = async (profile: SavedCustomerProfile | null) => {
     if (!profile || (!profile.customerId && !profile.phone)) {
@@ -616,6 +625,15 @@ export function DigitalMenuPage() {
       const breakdownNote = cartRows.map((r) => `${r.quantity}× ${r.label}`).join(' | ');
       const combinedNotes = [notes.trim(), breakdownNote].filter(Boolean).join(' · ');
 
+      const effectivePayPref =
+        paymentChoice === 'cash_pickup' ? 'cash_pickup' : prepayMethod || 'prepay';
+      const payLabelMap: Record<string, string> = {
+        cash_pickup: 'תשלום במזומן בעת האיסוף',
+        bank_transfer: 'תשלום בהעברה בנקאית',
+        bit: 'תשלום מראש ב-Bit',
+        paybox: 'תשלום מראש ב-PayBox',
+      };
+
       const res = await apiFetch<{
         id?: number;
         customer_id?: number;
@@ -629,7 +647,7 @@ export function DigitalMenuPage() {
           recipient_name: customerName.trim(),
           phone: customerPhone.trim(),
           total_amount: cartSummary.finalTotal,
-          payment_preference: paymentChoice,
+          payment_preference: effectivePayPref,
           notes: combinedNotes,
           items: Array.from(mergedItems.entries()).map(([product_id, quantity]) => ({
             product_id,
@@ -671,10 +689,17 @@ export function DigitalMenuPage() {
         })),
         total_amount: cartSummary.finalTotal,
         mix_discount: cartSummary.totalMixDiscount,
+        payment_label: payLabelMap[effectivePayPref] || '',
         notes: notes.trim(),
       });
       const waUrl = buildWhatsAppShareUrl(waText, targetPhone);
-      setSubmitted({ orderId, waUrl, total: cartSummary.finalTotal, paymentChoice });
+      setSubmitted({
+        orderId,
+        waUrl,
+        total: cartSummary.finalTotal,
+        paymentChoice,
+        prepayMethod,
+      });
       setCartRows([]);
       setNotes('');
       setCheckoutOpen(false);
@@ -688,14 +713,69 @@ export function DigitalMenuPage() {
 
   return (
     <div className="min-h-screen bg-[#FAF5EE] text-[#1E242B] pb-32">
+      {/* סרגל עליון צף וקומפקטי (Sticky Header) */}
+      <div className="sticky top-0 z-40 bg-[#1E242B]/95 backdrop-blur-md text-white border-b border-white/10 px-3.5 py-2.5 shadow-md">
+        <div className="max-w-lg mx-auto flex items-center justify-between gap-2">
+          {/* צד ימין: שם הלקוח המזוהה + כפתור החלף */}
+          <div className="flex items-center gap-1.5 min-w-0">
+            {savedProfile ? (
+              <>
+                <span className="font-extrabold text-xs sm:text-sm text-amber-100 truncate">
+                  היי {savedProfile.name} 👋
+                </span>
+                <button
+                  type="button"
+                  onClick={handleSwitchUser}
+                  className="px-2 py-0.5 rounded-lg bg-white/10 hover:bg-white/20 text-[10px] font-bold text-slate-200 shrink-0"
+                >
+                  החלף
+                </button>
+              </>
+            ) : (
+              <span className="font-serif font-extrabold text-sm text-amber-100 truncate flex items-center gap-1.5">
+                <Flame className="w-4 h-4 text-[#E59838] shrink-0" />
+                <span>דוכן שישי תימני</span>
+              </span>
+            )}
+          </div>
+
+          {/* צד שמאל: כפתור האזור האישי + כפתור סל קניות צף */}
+          <div className="flex items-center gap-1.5 shrink-0">
+            {savedProfile?.customerId && (
+              <a
+                href={`#/c/${savedProfile.customerId}`}
+                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-white/15 hover:bg-white/25 text-white text-[11px] font-extrabold transition-colors"
+              >
+                <span>👤 האזור האישי</span>
+              </a>
+            )}
+            <button
+              type="button"
+              onClick={() => {
+                if (cartSummary.totalCount > 0) setCheckoutOpen(true);
+              }}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-[#C85A17] hover:bg-[#A9440F] text-white text-[11px] font-extrabold tabular-nums shadow-sm transition-colors"
+            >
+              <ShoppingCart className="w-3.5 h-3.5" />
+              <span>🛒 {formatILS(cartSummary.finalTotal)}</span>
+              {cartSummary.totalCount > 0 && (
+                <span className="px-1.5 py-0.2 rounded-full bg-white text-[#C85A17] text-[10px] font-black">
+                  {cartSummary.totalCount}
+                </span>
+              )}
+            </button>
+          </div>
+        </div>
+      </div>
+
       {/* כותרת ממותגת חמה */}
-      <header className="px-4 pt-[max(1rem,env(safe-area-inset-top))] pb-4 bg-gradient-to-b from-[#2B1B12] to-[#4A2816] text-white shadow-md">
-        <div className="max-w-lg mx-auto space-y-2 text-center">
+      <header className="px-4 pt-3 pb-3.5 bg-gradient-to-b from-[#2B1B12] to-[#4A2816] text-white shadow-sm">
+        <div className="max-w-lg mx-auto space-y-1.5 text-center">
           <div className="flex items-center justify-center gap-2">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-[#E59838] to-[#C85A17] flex items-center justify-center shadow">
-              <Flame className="w-5 h-5 text-white" />
+            <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-[#E59838] to-[#C85A17] flex items-center justify-center shadow">
+              <Flame className="w-4 h-4 text-white" />
             </div>
-            <h1 className="font-serif text-2xl font-extrabold text-amber-50">
+            <h1 className="font-serif text-xl font-extrabold text-amber-50">
               המטבח התימני – תפריט שישי
             </h1>
           </div>
@@ -712,37 +792,6 @@ export function DigitalMenuPage() {
       </header>
 
       <main className="max-w-lg mx-auto px-3.5 pt-3 space-y-3">
-        {/* שורת ברכה קומפקטית ללקוח מזוהה */}
-        {savedProfile && (
-          <div className="bg-white rounded-2xl border border-[#DFC3A0] shadow-soft px-3.5 py-2.5 flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2 min-w-0">
-              <UserCheck className="w-4 h-4 text-emerald-600 shrink-0" />
-              <span className="font-extrabold text-sm text-slate-900 truncate">
-                היי {savedProfile.name} 👋
-              </span>
-            </div>
-            <div className="flex items-center gap-1.5 shrink-0">
-              {savedProfile.customerId && (
-                <a
-                  href={`#/c/${savedProfile.customerId}`}
-                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl bg-[#C85A17] hover:bg-[#A9440F] text-white text-[11px] font-extrabold shadow-sm"
-                >
-                  <Wallet className="w-3 h-3" />
-                  <span>לאזור האישי שלי</span>
-                </a>
-              )}
-              <button
-                type="button"
-                onClick={handleSwitchUser}
-                className="inline-flex items-center gap-1 px-2 py-1 rounded-xl bg-[#FAF6F0] border border-[#E8D5BE] text-[11px] font-bold text-slate-600 hover:text-red-600 shrink-0"
-              >
-                <LogOut className="w-3 h-3" />
-                <span>החלף משתמש</span>
-              </button>
-            </div>
-          </div>
-        )}
-
         {error && (
           <div className="p-3 rounded-2xl bg-red-50 border border-red-200 text-red-700 text-xs font-bold">
             {error}
@@ -788,26 +837,38 @@ export function DigitalMenuPage() {
               onPaymentChoiceChange={(next) =>
                 setSubmitted((prev) => (prev ? { ...prev, paymentChoice: next } : prev))
               }
+              prepayMethod={submitted.prepayMethod}
+              onPrepayMethodChange={(next) =>
+                setSubmitted((prev) => (prev ? { ...prev, prepayMethod: next } : prev))
+              }
             />
 
-            {/* פעולות המשך */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
-              {savedProfile?.customerId && (
+            {/* פעולות המשך — תמיד 2 כפתורים בשורה (50% / 50%) */}
+            <div className="grid grid-cols-2 gap-2.5 pt-1">
+              {savedProfile?.customerId ? (
                 <a
                   href={`#/c/${savedProfile.customerId}`}
-                  className="py-2.5 px-4 rounded-xl bg-[#2A1F18] hover:bg-[#3d2e24] text-white font-extrabold text-xs flex items-center justify-center gap-1.5"
+                  className="py-2.5 px-3 rounded-xl bg-[#2A1F18] hover:bg-[#3d2e24] text-white font-extrabold text-xs flex items-center justify-center gap-1.5 text-center"
                 >
-                  <Wallet className="w-3.5 h-3.5" />
+                  <Wallet className="w-3.5 h-3.5 shrink-0" />
                   <span>לאזור האישי שלי</span>
+                </a>
+              ) : (
+                <a
+                  href="#/menu"
+                  onClick={() => setSubmitted(null)}
+                  className="py-2.5 px-3 rounded-xl bg-[#2A1F18] hover:bg-[#3d2e24] text-white font-extrabold text-xs flex items-center justify-center gap-1.5 text-center"
+                >
+                  <span>🍽️ לתפריט הראשי</span>
                 </a>
               )}
               <button
                 type="button"
                 onClick={() => setSubmitted(null)}
-                className="py-2.5 px-4 rounded-xl bg-[#FAF6F0] border border-[#E8D5BE] text-[#8A330B] font-extrabold text-xs flex items-center justify-center gap-1.5 hover:bg-[#F3E9DC]"
+                className="py-2.5 px-3 rounded-xl bg-[#FAF6F0] border border-[#E8D5BE] text-[#8A330B] font-extrabold text-xs flex items-center justify-center gap-1.5 hover:bg-[#F3E9DC] text-center"
               >
-                <Plus className="w-3.5 h-3.5" />
-                <span>חזרה לתפריט / הזמנה נוספת</span>
+                <Plus className="w-3.5 h-3.5 shrink-0" />
+                <span>+ הזמנה נוספת</span>
               </button>
             </div>
 
@@ -1176,16 +1237,26 @@ export function DigitalMenuPage() {
             amountToPay={cartSummary.finalTotal}
             paymentChoice={paymentChoice}
             onPaymentChoiceChange={setPaymentChoice}
+            prepayMethod={prepayMethod}
+            onPrepayMethodChange={setPrepayMethod}
           />
 
           <button
             type="submit"
-            disabled={submitting || cartRows.length === 0}
-            className="w-full min-h-[52px] py-3.5 rounded-2xl bg-[#25D366] hover:bg-[#1EB958] text-white font-extrabold text-sm flex items-center justify-center gap-2 shadow-md"
+            disabled={submitting || cartRows.length === 0 || !canSubmitPayment}
+            className={`w-full min-h-[52px] py-3.5 rounded-2xl font-extrabold text-sm flex items-center justify-center gap-2 shadow-md transition-all ${
+              canSubmitPayment
+                ? 'bg-[#25D366] hover:bg-[#1EB958] text-white'
+                : 'bg-slate-200 text-slate-600 cursor-not-allowed'
+            }`}
           >
-            <Send className="w-4 h-4" />
+            <Send className="w-4 h-4 shrink-0" />
             <span>
-              {submitting ? 'שולח...' : `שלח הזמנה בוואטסאפ (${formatILS(cartSummary.finalTotal)})`}
+              {submitting
+                ? 'שולח...'
+                : !canSubmitPayment
+                ? 'יש ללחוץ לתשלום מראש לפני שליחת ההזמנה'
+                : `שלח הזמנה בוואטסאפ (${formatILS(cartSummary.finalTotal)})`}
             </span>
           </button>
         </form>

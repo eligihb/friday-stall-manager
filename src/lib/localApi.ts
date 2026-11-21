@@ -900,8 +900,13 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
 
     const clientTotal = Number(body.total_amount ?? 0);
     total_amount = clientTotal > 0 ? round2(clientTotal) : round2(total_amount);
-    const payPrefNote =
-      body.payment_preference === 'cash_pickup' ? 'תשלום מבוקש: מזומן באיסוף' : '';
+    const payPrefMap: Record<string, string> = {
+      cash_pickup: 'תשלום במזומן בעת האיסוף',
+      bank_transfer: 'תשלום בהעברה בנקאית',
+      bit: 'תשלום מראש ב-Bit',
+      paybox: 'תשלום מראש ב-PayBox',
+    };
+    const payPrefNote = payPrefMap[String(body.payment_preference || '')] || '';
     const combinedNotes = [`טלפון: ${phone}`, payPrefNote, notesRaw].filter(Boolean).join(' | ');
     db.orders.push({
       id: orderId,
