@@ -26,8 +26,7 @@ const CHOICE_TO_LABEL: Record<PaymentMethodChoice, PaymentMethodLabel> = {
 };
 
 export function QuickPaymentSheet({ order, onClose, onConfirm }: QuickPaymentSheetProps) {
-  const [payMode, setPayMode] = useState<'full' | 'partial' | 'unpaid'>('full');
-  const [amount, setAmount] = useState('');
+  const [partialAmount, setPartialAmount] = useState('');
   const [methodChoice, setMethodChoice] = useState<PaymentMethodChoice>('paybox');
   const [paidTime, setPaidTime] = useState(() => getCurrentHHMM());
   const [saving, setSaving] = useState(false);
@@ -35,22 +34,11 @@ export function QuickPaymentSheet({ order, onClose, onConfirm }: QuickPaymentShe
   useEffect(() => {
     if (order) {
       const existingMeta = getOrderPaymentMeta(order.id);
-      if (order.paid_amount >= order.total_amount && order.total_amount > 0) {
-        setPayMode('full');
-      } else if (order.paid_amount > 0) {
-        setPayMode('partial');
-      } else {
-        setPayMode('full');
-      }
-      setAmount(
-        order.paid_amount > 0 && order.paid_amount < order.total_amount
-          ? order.paid_amount.toFixed(2)
-          : order.total_amount.toFixed(2)
-      );
+      setPartialAmount(order.paid_amount > 0 ? String(order.paid_amount) : '');
       if (existingMeta) {
-        const found = (Object.entries(CHOICE_TO_LABEL) as Array<[PaymentMethodChoice, PaymentMethodLabel]>).find(
-          ([, lbl]) => lbl === existingMeta.methodLabel
-        );
+        const found = (
+          Object.entries(CHOICE_TO_LABEL) as Array<[PaymentMethodChoice, PaymentMethodLabel]>
+        ).find(([, lbl]) => lbl === existingMeta.methodLabel);
         setMethodChoice(found ? found[0] : 'paybox');
         setPaidTime(existingMeta.paidTime || getCurrentHHMM());
       } else {
@@ -60,26 +48,26 @@ export function QuickPaymentSheet({ order, onClose, onConfirm }: QuickPaymentShe
     }
   }, [order]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const commitPayment = async (finalAmount: number) => {
     if (!order) return;
     setSaving(true);
     try {
       const apiMethod: PaymentMethod = methodChoice === 'bit' ? 'paybox' : methodChoice;
-      const finalAmount =
-        payMode === 'full' ? order.total_amount : payMode === 'unpaid' ? 0 : Number(amount);
       if (finalAmount > 0) {
         saveOrderPaymentMeta(order.id, {
           methodLabel: CHOICE_TO_LABEL[methodChoice],
           paidTime: paidTime || getCurrentHHMM(),
         });
       }
-      await onConfirm(order.id, finalAmount, apiMethod);
+      await onConfirm(order.id, Math.max(0, finalAmount), apiMethod);
       onClose();
     } finally {
       setSaving(false);
     }
   };
+
+  const numPartial = Math.max(0, Number(partialAmount) || 0);
+  const isPartial = Boolean(order && numPartial > 0 && numPartial < order.total_amount);
 
   return (
     <BottomSheet
@@ -92,139 +80,104 @@ export function QuickPaymentSheet({ order, onClose, onConfirm }: QuickPaymentShe
       maxWidthClass="md:max-w-md"
     >
       {order && (
-        <form onSubmit={handleSubmit} className="space-y-4">
-          {/* בחירת סטטוס תשלום */}
+        <div className="space-y-4">
+          {/* אמצעי תשלום ושעה */}
           <div>
-            <label className="block text-xs font-bold text-slate-600 mb-2">סטטוס תשלום</label>
-            <div className="grid grid-cols-3 gap-1.5">
-              <button
-                type="button"
-                onClick={() => {
-                  setPayMode('full');
-                  setAmount(order.total_amount.toFixed(2));
-                }}
-                className={`py-2.5 px-2 rounded-xl border-2 text-xs font-extrabold transition-all ${
-                  payMode === 'full'
-                    ? 'border-emerald-600 bg-emerald-50 text-emerald-800'
-                    : 'border-[#E8D5BE] bg-[#FDFBF7] text-slate-600'
-                }`}
-              >
-                שולם מלא
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setPayMode('partial');
-                  setAmount(order.paid_amount > 0 ? order.paid_amount.toFixed(2) : '');
-                }}
-                className={`py-2.5 px-2 rounded-xl border-2 text-xs font-extrabold transition-all ${
-                  payMode === 'partial'
-                    ? 'border-amber-500 bg-amber-50 text-amber-900'
-                    : 'border-[#E8D5BE] bg-[#FDFBF7] text-slate-600'
-                }`}
-              >
-                שולם חלקית
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setPayMode('unpaid');
-                  setAmount('0');
-                }}
-                className={`py-2.5 px-2 rounded-xl border-2 text-xs font-extrabold transition-all ${
-                  payMode === 'unpaid'
-                    ? 'border-red-500 bg-red-50 text-red-800'
-                    : 'border-[#E8D5BE] bg-[#FDFBF7] text-slate-600'
-                }`}
-              >
-                לא שולם
-              </button>
+            <label className="block text-xs font-bold text-slate-600 mb-2">אמצעי תשלום</label>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              {(
+                [
+                  ['cash', 'מזומן', Banknote],
+                  ['bit', 'ביט', Wallet],
+                  ['paybox', 'פייבוקס', Smartphone],
+                  ['transfer', 'העברה בנקאית', Landmark],
+                ] as const
+              ).map(([pm, label, Icon]) => {
+                const active = methodChoice === pm;
+                return (
+                  <button
+                    key={pm}
+                    type="button"
+                    onClick={() => setMethodChoice(pm)}
+                    className={`min-h-[58px] px-2 rounded-2xl border-2 flex flex-col items-center justify-center gap-1 font-bold text-xs transition-all ${
+                      active
+                        ? 'border-[#C85A17] bg-[#FFF7ED] text-[#8A330B] shadow-sm'
+                        : 'border-[#E8D5BE] bg-[#FDFBF7] text-slate-600'
+                    }`}
+                  >
+                    <Icon className="w-4 h-4" />
+                    <span className="text-center leading-tight">{label}</span>
+                  </button>
+                );
+              })}
             </div>
           </div>
 
-          {payMode === 'partial' && (
-            <div>
-              <label className="block text-xs font-bold text-slate-600 mb-1.5">
-                סכום ששולם בפועל (₪) — נותר לגבייה:{' '}
-                <strong className="text-amber-800">
-                  {formatILS(Math.max(0, order.total_amount - (Number(amount) || 0)))}
-                </strong>
-              </label>
+          <div>
+            <label className="block text-xs font-bold text-slate-600 mb-1 flex items-center gap-1">
+              <Clock className="w-3.5 h-3.5 text-[#C85A17]" />
+              <span>שעת תשלום / העברה</span>
+            </label>
+            <input
+              type="time"
+              dir="ltr"
+              value={paidTime}
+              onChange={(e) => setPaidTime(e.target.value)}
+              className="w-full px-3.5 py-2 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] text-left tabular-nums font-bold text-sm"
+            />
+          </div>
+
+          {/* כפתור ראשי אחד: שולם הכל */}
+          <button
+            type="button"
+            disabled={saving}
+            onClick={() => commitPayment(order.total_amount)}
+            className="w-full min-h-[52px] rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-base flex items-center justify-center gap-2 shadow-sm"
+          >
+            <CheckCircle2 className="w-5 h-5" />
+            <span>{saving ? 'מעדכן...' : `שולם הכל (${formatILS(order.total_amount)})`}</span>
+          </button>
+
+          {/* שדה סכום חלקי — מסמן אוטומטית "שולם חלקית" */}
+          <div className="p-3.5 rounded-2xl bg-[#FAF6F0] border border-[#E8D5BE] space-y-2.5">
+            <label className="block text-xs font-extrabold text-slate-700">
+              או הזן סכום ששולם (₪) לתשלום חלקי / איפוס:
+            </label>
+            <div className="flex items-center gap-2">
               <input
                 type="number"
                 inputMode="decimal"
-                step="0.01"
+                step="0.5"
                 min="0"
-                required
                 dir="ltr"
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
+                value={partialAmount}
+                onChange={(e) => setPartialAmount(e.target.value)}
                 placeholder="0.00"
-                className="w-full px-4 py-3 rounded-2xl border border-[#E8D5BE] bg-[#FDFBF7] text-left tabular-nums font-extrabold text-xl"
+                className="flex-1 px-3.5 py-2.5 rounded-xl border border-[#E8D5BE] bg-white text-left tabular-nums font-extrabold text-base"
               />
+              <button
+                type="button"
+                disabled={saving}
+                onClick={() => commitPayment(numPartial)}
+                className={`px-4 py-2.5 rounded-xl font-extrabold text-xs text-white shrink-0 ${
+                  isPartial
+                    ? 'bg-amber-600 hover:bg-amber-700'
+                    : numPartial === 0
+                    ? 'bg-red-600 hover:bg-red-700'
+                    : 'bg-emerald-600 hover:bg-emerald-700'
+                }`}
+              >
+                {isPartial ? 'עדכן חלקי' : numPartial === 0 ? 'סמן לא שולם' : 'עדכן'}
+              </button>
             </div>
-          )}
-
-          {payMode !== 'unpaid' && (
-            <>
-              {/* אמצעי תשלום: מזומן | ביט | פייבוקס | העברה בנקאית */}
-              <div>
-                <label className="block text-xs font-bold text-slate-600 mb-2">אמצעי תשלום</label>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                  {(
-                    [
-                      ['cash', 'מזומן', Banknote],
-                      ['bit', 'ביט', Wallet],
-                      ['paybox', 'פייבוקס', Smartphone],
-                      ['transfer', 'העברה בנקאית', Landmark],
-                    ] as const
-                  ).map(([pm, label, Icon]) => {
-                    const active = methodChoice === pm;
-                    return (
-                      <button
-                        key={pm}
-                        type="button"
-                        onClick={() => setMethodChoice(pm)}
-                        className={`min-h-[60px] px-2 rounded-2xl border-2 flex flex-col items-center justify-center gap-1 font-bold text-xs transition-all ${
-                          active
-                            ? 'border-[#C85A17] bg-[#FFF7ED] text-[#8A330B] shadow-sm'
-                            : 'border-[#E8D5BE] bg-[#FDFBF7] text-slate-600'
-                        }`}
-                      >
-                        <Icon className="w-4 h-4" />
-                        <span className="text-center leading-tight">{label}</span>
-                      </button>
-                    );
-                  })}
-                </div>
+            {isPartial && (
+              <div className="p-2 rounded-xl bg-amber-100 border border-amber-300 text-amber-950 text-xs font-extrabold tabular-nums">
+                שולם חלקית: {formatILS(numPartial)} מתוך {formatILS(order.total_amount)} (נותר{' '}
+                {formatILS(Math.max(0, order.total_amount - numPartial))})
               </div>
-
-              {/* שעת התשלום / ההעברה (ברירת מחדל לשעה הנוכחית, ניתנת לעריכה ידנית) */}
-              <div>
-                <label className="block text-xs font-bold text-slate-600 mb-1.5 flex items-center gap-1">
-                  <Clock className="w-3.5 h-3.5 text-[#C85A17]" />
-                  <span>שעת תשלום / העברה (להצלבה ומעקב)</span>
-                </label>
-                <input
-                  type="time"
-                  dir="ltr"
-                  value={paidTime}
-                  onChange={(e) => setPaidTime(e.target.value)}
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-[#E8D5BE] bg-[#FDFBF7] text-left tabular-nums font-bold text-sm"
-                />
-              </div>
-            </>
-          )}
-
-          <button
-            type="submit"
-            disabled={saving}
-            className="w-full min-h-[50px] rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-sm flex items-center justify-center gap-2 shadow-sm"
-          >
-            <CheckCircle2 className="w-5 h-5" />
-            <span>{saving ? 'מעדכן...' : 'עדכן תשלום'}</span>
-          </button>
-        </form>
+            )}
+          </div>
+        </div>
       )}
     </BottomSheet>
   );

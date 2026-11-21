@@ -12,6 +12,7 @@ import {
 } from '../lib/format';
 import { getPaymentVisualState } from '../components/SupplierInvoiceSheet';
 import { useFriday } from '../context/FridayContext';
+import { useContactDrawer } from '../context/ContactDrawerContext';
 import { FridaySelector } from '../components/FridaySelector';
 import { OrderCard } from '../components/OrderCard';
 import { BottomSheet } from '../components/BottomSheet';
@@ -28,6 +29,7 @@ import type {
 
 export function CustomerOrdersPage() {
   const { fridayDate: globalFriday, refreshTick } = useFriday();
+  const { openContactById } = useContactDrawer();
   const [fridayDate, setFridayDate] = useState(globalFriday);
   const [statusFilter, setStatusFilter] = useState('');
   const [viewMode, setViewMode] = useState<'cards' | 'list'>('cards');
@@ -121,16 +123,35 @@ export function CustomerOrdersPage() {
   }, [users, recentOrdersHistory]);
 
   const sortedOrders = useMemo(() => {
-    const base =
+    let base =
       statusFilter === 'pending'
         ? orders.filter((o) => o.status === 'pending' || o.status === 'awaiting_approval')
         : orders;
+
+    const q = quickCustSearch.trim().toLowerCase();
+    if (q) {
+      const qDigits = q.replace(/\D/g, '');
+      const userById = new Map(users.map((u) => [u.id, u]));
+      base = base.filter((o) => {
+        const u = o.user_id ? userById.get(o.user_id) : undefined;
+        const phoneDigits = String(u?.phone || '').replace(/\D/g, '');
+        const itemsText = o.items.map((it) => it.product_name).join(' ').toLowerCase();
+        return (
+          o.recipient_name.toLowerCase().includes(q) ||
+          String(o.id).includes(q) ||
+          (o.notes || '').toLowerCase().includes(q) ||
+          itemsText.includes(q) ||
+          (qDigits.length >= 2 && phoneDigits.includes(qDigits))
+        );
+      });
+    }
+
     const copy = [...base];
     if (sortBy === 'amount_desc') copy.sort((a, b) => b.total_amount - a.total_amount);
     else if (sortBy === 'amount_asc') copy.sort((a, b) => a.total_amount - b.total_amount);
     else copy.sort((a, b) => b.id - a.id);
     return copy;
-  }, [orders, sortBy, statusFilter]);
+  }, [orders, sortBy, statusFilter, quickCustSearch, users]);
 
   const quickVisibleCustomers = useMemo(() => {
     const base = quickCustSearch.trim()
@@ -345,7 +366,7 @@ export function CustomerOrdersPage() {
               type="text"
               value={quickCustSearch}
               onChange={(e) => setQuickCustSearch(e.target.value)}
-              placeholder="חפש לקוח..."
+              placeholder="חיפוש חי: שם, טלפון, 4 ספרות או פריט..."
               className="w-full pr-8 pl-2 py-1.5 rounded-xl border border-[#E8D5BE] bg-white text-xs focus:border-[#C85A17] focus:outline-none"
             />
           </div>
@@ -520,7 +541,7 @@ export function CustomerOrdersPage() {
                             type="button"
                             onClick={(e) => {
                               e.stopPropagation();
-                              openCustomerLedger(o.user_id!);
+                              openContactById(o.user_id!);
                             }}
                             className="font-bold text-slate-900 hover:text-[#C85A17] hover:underline"
                           >

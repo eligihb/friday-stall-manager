@@ -17,9 +17,11 @@ import {
   ChevronLeft,
   Users,
   Edit3,
+  UserPlus,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useFriday } from '../context/FridayContext';
+import { useContactDrawer } from '../context/ContactDrawerContext';
 import { formatShortFriday, getFridaysRange, ROLE_LABELS } from '../lib/format';
 import { APP_BRAND_NAME, APP_VERSION } from '../lib/version';
 import { BottomSheet } from './BottomSheet';
@@ -75,6 +77,7 @@ interface LayoutProps {
 export function Layout({ activeTab, onSelectTab, children }: LayoutProps) {
   const { user, logout, updateUserName } = useAuth();
   const { fridayDate, setFridayDate } = useFriday();
+  const { openCreateContact } = useContactDrawer();
   const [moreOpen, setMoreOpen] = useState(false);
   const [quickOpen, setQuickOpen] = useState(false);
   const [editProfileOpen, setEditProfileOpen] = useState(false);
@@ -143,14 +146,24 @@ export function Layout({ activeTab, onSelectTab, children }: LayoutProps) {
           </div>
 
           {isAdmin && (
-            <button
-              type="button"
-              onClick={() => setQuickOpen(true)}
-              className="mt-4 w-full py-2.5 px-3.5 rounded-xl bg-gradient-to-l from-[#C85A17] to-[#D97706] hover:brightness-110 text-white font-bold text-xs shadow-md flex items-center justify-center gap-2 transition-all"
-            >
-              <Plus className="w-4 h-4" />
-              <span>+ הוסף הזמנה</span>
-            </button>
+            <div className="mt-4 space-y-2">
+              <button
+                type="button"
+                onClick={() => setQuickOpen(true)}
+                className="w-full py-2.5 px-3.5 rounded-xl bg-gradient-to-l from-[#C85A17] to-[#D97706] hover:brightness-110 text-white font-bold text-xs shadow-md flex items-center justify-center gap-2 transition-all"
+              >
+                <Plus className="w-4 h-4" />
+                <span>+ הוסף הזמנה</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => openCreateContact('customer')}
+                className="w-full py-2 px-3 rounded-xl bg-white/10 hover:bg-white/15 border border-white/15 text-amber-200 font-bold text-xs flex items-center justify-center gap-1.5 transition-colors"
+              >
+                <UserPlus className="w-3.5 h-3.5" />
+                <span>+ הוסף לקוח / ספק</span>
+              </button>
+            </div>
           )}
         </div>
 
@@ -260,6 +273,17 @@ export function Layout({ activeTab, onSelectTab, children }: LayoutProps) {
             </div>
 
             <div className="flex items-center gap-1.5 shrink-0">
+              {isAdmin && (
+                <button
+                  type="button"
+                  onClick={() => openCreateContact('customer')}
+                  className="w-9 h-9 rounded-xl bg-white/10 hover:bg-white/20 border border-white/15 text-amber-300 flex items-center justify-center shrink-0"
+                  title="הוסף לקוח / ספק"
+                  aria-label="הוסף לקוח / ספק"
+                >
+                  <UserPlus className="w-4 h-4" />
+                </button>
+              )}
               {isAdmin && (
                 <label className="inline-flex items-center gap-1 bg-white/10 border border-white/15 rounded-xl px-2 py-1.5 min-h-[40px] font-bold text-amber-200">
                   <Calendar className="w-3.5 h-3.5 text-amber-400 shrink-0" />

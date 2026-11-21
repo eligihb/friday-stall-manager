@@ -22,6 +22,7 @@ import { downloadCsv } from '../lib/csvExport';
 import { FridaySelector } from '../components/FridaySelector';
 import { BottomSheet } from '../components/BottomSheet';
 import { WasteTrackingSheet } from '../components/WasteTrackingSheet';
+import { useContactDrawer } from '../context/ContactDrawerContext';
 import type { FixedExpense, PaymentMethod, Transaction, WasteLogResponse } from '../types';
 
 const EXPENSE_PRESETS: Array<{ label: string; defaultMethod?: PaymentMethod }> = [
@@ -34,6 +35,7 @@ const EXPENSE_PRESETS: Array<{ label: string; defaultMethod?: PaymentMethod }> =
 ];
 
 export function FinancePage() {
+  const { openContactById } = useContactDrawer();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [fixedExpenses, setFixedExpenses] = useState<FixedExpense[]>([]);
   const [wasteSummary, setWasteSummary] = useState<{ units: number; cost: number }>({ units: 0, cost: 0 });
@@ -789,7 +791,19 @@ export function FinancePage() {
                         >
                           {PAYMENT_METHOD_LABELS[t.payment_method]}
                         </span>
-                        {t.user_name && <span>· {t.user_name}</span>}
+                        {t.user_name && (
+                          t.user_id ? (
+                            <button
+                              type="button"
+                              onClick={() => openContactById(t.user_id!)}
+                              className="text-[#C85A17] hover:underline font-bold"
+                            >
+                              · {t.user_name}
+                            </button>
+                          ) : (
+                            <span>· {t.user_name}</span>
+                          )
+                        )}
                       </div>
                       {t.notes && <div className="text-xs text-slate-400 mt-0.5">{t.notes}</div>}
                     </div>

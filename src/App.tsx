@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { FridayProvider } from './context/FridayContext';
+import { ContactDrawerProvider } from './context/ContactDrawerContext';
+import { ContactDrawer } from './components/ContactDrawer';
 import { PublicStorefront } from './pages/PublicStorefront';
 import { AuthScreen } from './components/AuthScreen';
 import { Layout, type AdminTab } from './components/Layout';
@@ -174,7 +176,10 @@ export default function App() {
   return (
     <AuthProvider>
       <FridayProvider>
-        <AppRouter />
+        <ContactDrawerProvider>
+          <AppRouter />
+          <ContactDrawer />
+        </ContactDrawerProvider>
       </FridayProvider>
     </AuthProvider>
   );

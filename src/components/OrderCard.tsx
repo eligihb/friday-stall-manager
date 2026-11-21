@@ -14,6 +14,7 @@ import {
 import { formatFridayLabel, formatILS, ORDER_STATUS_LABELS, ORDER_TYPE_LABELS } from '../lib/format';
 import { buildCustomerPortalUrl, buildWhatsAppShareUrl, formatOrderWhatsApp } from '../lib/whatsappFormat';
 import { getOrderPaymentMeta } from '../lib/paymentMeta';
+import { useContactDrawer } from '../context/ContactDrawerContext';
 import { getPaymentVisualState } from './SupplierInvoiceSheet';
 import type { BusinessSettings, Order, OrderStatus, OrderType } from '../types';
 
@@ -47,6 +48,7 @@ export function OrderCard({
   onDelete,
   onOpenLedger,
 }: OrderCardProps) {
+  const { openContactById } = useContactDrawer();
   const [copied, setCopied] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
   const [pendingStatus, setPendingStatus] = useState<OrderStatus | null>(null);
@@ -98,15 +100,15 @@ export function OrderCard({
         >
           <div className="min-w-0">
             <div className="flex items-center gap-1.5 flex-wrap">
-              {order.user_id && onOpenLedger ? (
+              {order.user_id ? (
                 <button
                   type="button"
                   onClick={(e) => {
                     e.stopPropagation();
-                    onOpenLedger(order.user_id!);
+                    openContactById(order.user_id!);
                   }}
                   className="font-bold text-base text-slate-900 hover:text-[#C85A17] hover:underline truncate text-right"
-                  title="פתח כרטיס לקוח/ספק"
+                  title="פתח וערוך כרטיס לקוח/ספק"
                 >
                   {order.recipient_name}
                 </button>
@@ -147,7 +149,7 @@ export function OrderCard({
                 </button>
                 {payState.status === 'partial' && (
                   <span className="text-[10px] font-extrabold px-1.5 py-0.5 rounded bg-amber-100 text-amber-950">
-                    שולם {formatILS(order.paid_amount)} · נותר {formatILS(unpaid)}
+                    שולם חלקית: {formatILS(order.paid_amount)} מתוך {formatILS(order.total_amount)}
                   </span>
                 )}
                 {order.paid_amount > 0 && paymentMeta && (

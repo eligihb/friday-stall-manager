@@ -37,8 +37,18 @@ interface StorefrontData {
   products: StorefrontProduct[];
 }
 
+interface MenuCartEntry {
+  key: string;
+  productId: number;
+  label: string;
+  quantity: number;
+  unitsPerQty: number;
+  lineTotal: number;
+  regularTotal: number;
+}
+
 const CUSTOMER_PROFILE_KEY = 'ht_public_customer_profile_v1';
-const FLAVOR_OPTIONS = ['רגיל', 'שום', 'שומשום', 'זעתר'];
+const FLAVOR_OPTIONS = ['זעתר', 'שום', 'שומשום', 'רגיל'];
 
 const LIVE_STEPS = [
   '1. ממתין לאישור',
@@ -47,68 +57,12 @@ const LIVE_STEPS = [
   '4. נמסר',
 ];
 
-function isSalufOrLahoh(name: string): boolean {
-  return name.includes('סלוף') || name.includes('סאלוף') || name.includes('לחוח');
-}
-
-function supportsFlavor(name: string): boolean {
-  return name.includes('פרנה גדולה') || name.includes('פיתה מלבנית');
-}
-
-function calcLinePrice(
-  product: StorefrontProduct,
-  qty: number,
-  preorderOpen: boolean
-): { unitPrice: number; lineTotal: number; appliedPreorder: boolean } {
-  if (qty <= 0) {
-    const base = preorderOpen && !isSalufOrLahoh(product.name) ? product.preorder_price : product.customer_price;
-    return { unitPrice: base, lineTotal: 0, appliedPreorder: false };
-  }
-
-  // חוק סלוף ולחוח: מ-5 יחידות ומעלה -> מחיר הזמנה מוקדמת (בחלון הזמן); מתחת ל-5 -> מחיר דוכן רגיל
-  if (isSalufOrLahoh(product.name)) {
-    const qualifies = preorderOpen && qty >= 5;
-    const unit = qualifies ? product.preorder_price : product.customer_price;
-    return {
-      unitPrice: unit,
-      lineTotal: Math.round(unit * qty * 100) / 100,
-      appliedPreorder: qualifies,
-    };
-  }
-
-  // מבצע כמות פיתות זעתר / שום / שומשום / מלבנית: 5 ₪ יח׳, 12 ₪ לשלישייה, 20 ₪ לשישייה
-  if (
-    product.name.includes('פיתה מלבנית') ||
-    (product.name.includes('פיתה') &&
-      (product.name.includes('זעתר') || product.name.includes('שום') || product.name.includes('שומשום')))
-  ) {
-    const packs6 = Math.floor(qty / 6);
-    const rem6 = qty % 6;
-    const packs3 = Math.floor(rem6 / 3);
-    const singles = rem6 % 3;
-    const lineTotal = packs6 * 20 + packs3 * 12 + singles * 5;
-    return {
-      unitPrice: Math.round((lineTotal / qty) * 100) / 100,
-      lineTotal,
-      appliedPreorder: false,
-    };
-  }
-
-  // מבצע כמות ג'חנון: יחידה 9 ₪, 5 ומעלה 8 ₪ ליחידה
-  if (product.name.includes("ג'חנון") || product.name.includes('גחנון')) {
-    const unit = qty >= 5 ? 8 : 9;
-    return {
-      unitPrice: unit,
-      lineTotal: unit * qty,
-      appliedPreorder: qty >= 5,
-    };
-  }
-
-  const unit = preorderOpen ? product.preorder_price : product.customer_price;
+function calcTrioPackPrice(packs: number): { total: number; regular: number } {
+  const pairs = Math.floor(packs / 2);
+  const rem = packs % 2;
   return {
-    unitPrice: unit,
-    lineTotal: Math.round(unit * qty * 100) / 100,
-    appliedPreorder: preorderOpen && product.preorder_price < product.customer_price,
+    total: pairs * 20 + rem * 12,
+    regular: packs * 12,
   };
 }
 
@@ -125,8 +79,10 @@ export function DigitalMenuPage() {
     [fridayDate, storefrontCfg.customerPriceMode]
   );
 
-  const [cart, setCart] = useState<Record<number, number>>({});
-  const [flavors, setFlavors] = useState<Record<number, string>>({});
+  // כמויות לפי מפתח שורה (מארז / יחידה)
+  const [qtyMap, setQtyMap] = useState<Record<string, number>>({});
+  const [pitaFlavor, setPitaFlavor] = useState<string>('זעתר');
+  const [frenaFlavor, setFrenaFlavor] = useState<string>('רגיל');
   const [checkoutOpen, setCheckoutOpen] = useState(false);
 
   const [customerName, setCustomerName] = useState(() => {
@@ -169,7 +125,6 @@ export function DigitalMenuPage() {
     };
   }, []);
 
-  // הצגת מוצרים פעילים ושאינם מוסתרים מלקוחות בלבד
   const visibleProducts = useMemo(
     () =>
       (data?.products || []).filter(
@@ -178,44 +133,274 @@ export function DigitalMenuPage() {
     [data, storefrontCfg]
   );
 
-  const cartLines = useMemo(
+  // מיפוי מוצרי מפתח מהקטלוג
+  const findProd = (matcher: (name: string) => boolean) =>
+    visibleProducts.find((p) => matcher(p.name)) || null;
+
+  const salufProd = useMemo(
+    () => findProd((n) => n.includes('סאלוף') || n.includes('סלוף')),
+    [visibleProducts]
+  );
+  const lahohProd = useMemo(() => findProd((n) => n.includes('לחוח')), [visibleProducts]);
+  const jachnunProd = useMemo(
+    () => findProd((n) => n.includes("ג'חנון") || n.includes('גחנון')),
+    [visibleProducts]
+  );
+  const zalabiaProd = useMemo(() => findProd((n) => n.includes('זלביה')), [visibleProducts]);
+  const pitaPackProd = useMemo(
     () =>
-      visibleProducts
-        .filter((p) => (cart[p.id] || 0) > 0)
-        .map((p) => {
-          const qty = cart[p.id];
-          const calc = calcLinePrice(p, qty, preorderOpen);
-          const regularTotal = Math.round(p.customer_price * qty * 100) / 100;
-          const flavor = supportsFlavor(p.name) ? flavors[p.id] || 'רגיל' : undefined;
-          return {
-            product: p,
-            quantity: qty,
-            flavor,
-            unit_price: calc.unitPrice,
-            line_total: calc.lineTotal,
-            regular_total: regularTotal,
-          };
-        }),
-    [visibleProducts, cart, flavors, preorderOpen]
+      findProd(
+        (n) =>
+          n.includes('מארז פיתה זעתר') ||
+          n.includes('פיתה מלבנית') ||
+          n.includes('מארז לחם שום') ||
+          n.includes('פיתה זעתר')
+      ),
+    [visibleProducts]
+  );
+  const hilbeSmallProd = useMemo(
+    () => findProd((n) => n.includes('חילבה') && (n.includes('250') || n.includes('קטנ') || n.includes('קטן'))),
+    [visibleProducts]
+  );
+  const hilbeLargeProd = useMemo(
+    () => findProd((n) => n.includes('חילבה') && (n.includes('500') || n.includes('גדול'))),
+    [visibleProducts]
   );
 
-  const totalItems = useMemo(() => cartLines.reduce((s, l) => s + l.quantity, 0), [cartLines]);
+  // מוצרים נוספים (פרנות, קובנה, סחוג, כובנית וכו') שלא הוצגו בחלקים הייעודיים
+  const otherProducts = useMemo(() => {
+    const usedIds = new Set(
+      [
+        salufProd?.id,
+        lahohProd?.id,
+        jachnunProd?.id,
+        zalabiaProd?.id,
+        pitaPackProd?.id,
+        hilbeSmallProd?.id,
+        hilbeLargeProd?.id,
+      ].filter(Boolean)
+    );
+    return visibleProducts.filter((p) => {
+      if (usedIds.has(p.id)) return false;
+      // הסתרת כפילויות מארזי פיתות שכבר מרוכזים בשורת הפיתות עם בחירת טעם
+      if (
+        p.name.includes('מארז פיתה שומשום') ||
+        p.name.includes('מארז לחם שום') ||
+        p.name.includes('מארז פיתה זעתר')
+      ) {
+        return false;
+      }
+      return true;
+    });
+  }, [
+    visibleProducts,
+    salufProd,
+    lahohProd,
+    jachnunProd,
+    zalabiaProd,
+    pitaPackProd,
+    hilbeSmallProd,
+    hilbeLargeProd,
+  ]);
+
+  const stepKey = (key: string, delta: number) => {
+    setQtyMap((prev) => ({ ...prev, [key]: Math.max(0, (prev[key] || 0) + delta) }));
+  };
+
+  // חישוב סל מלא + הנחות אוטומטיות וחיסכון
+  const cartEntries = useMemo<MenuCartEntry[]>(() => {
+    const entries: MenuCartEntry[] = [];
+    const add = (e: MenuCartEntry) => {
+      if (e.quantity > 0) entries.push(e);
+    };
+
+    // 1. סאלוף מארז 5 + בודד
+    if (salufProd) {
+      const q5 = qtyMap['saluf_5'] || 0;
+      const packPrice = preorderOpen ? 20 : 25;
+      add({
+        key: 'saluf_5',
+        productId: salufProd.id,
+        label: 'סאלוף — מארז חמישייה (5 יח׳)',
+        quantity: q5,
+        unitsPerQty: 5,
+        lineTotal: q5 * packPrice,
+        regularTotal: q5 * 25,
+      });
+      const q1 = qtyMap['saluf_1'] || 0;
+      add({
+        key: 'saluf_1',
+        productId: salufProd.id,
+        label: 'סאלוף (יחידה)',
+        quantity: q1,
+        unitsPerQty: 1,
+        lineTotal: q1 * 5,
+        regularTotal: q1 * 5,
+      });
+    }
+
+    // 2. לחוח מארז 5 + בודד
+    if (lahohProd) {
+      const q5 = qtyMap['lahoh_5'] || 0;
+      const packPrice = preorderOpen ? 20 : 25;
+      add({
+        key: 'lahoh_5',
+        productId: lahohProd.id,
+        label: 'לחוח — מארז חמישייה (5 יח׳)',
+        quantity: q5,
+        unitsPerQty: 5,
+        lineTotal: q5 * packPrice,
+        regularTotal: q5 * 25,
+      });
+      const q1 = qtyMap['lahoh_1'] || 0;
+      add({
+        key: 'lahoh_1',
+        productId: lahohProd.id,
+        label: 'לחוח (יחידה)',
+        quantity: q1,
+        unitsPerQty: 1,
+        lineTotal: q1 * 5,
+        regularTotal: q1 * 5,
+      });
+    }
+
+    // 3. ג'חנון מגש 5 + יחידה (הנחת מוקדמת חלה על שניהם!)
+    if (jachnunProd) {
+      const q5 = qtyMap['jachnun_5'] || 0;
+      const trayPrice = preorderOpen ? 40 : 45;
+      add({
+        key: 'jachnun_5',
+        productId: jachnunProd.id,
+        label: "מגש ג'חנון (5 יח׳)",
+        quantity: q5,
+        unitsPerQty: 5,
+        lineTotal: q5 * trayPrice,
+        regularTotal: q5 * 45,
+      });
+      const q1 = qtyMap['jachnun_1'] || 0;
+      const unitPrice = preorderOpen ? 8 : 9;
+      add({
+        key: 'jachnun_1',
+        productId: jachnunProd.id,
+        label: "ג'חנון (יחידה)",
+        quantity: q1,
+        unitsPerQty: 1,
+        lineTotal: q1 * unitPrice,
+        regularTotal: q1 * 9,
+      });
+    }
+
+    // 4. זלביה — רק במארז שלישייה (12 ₪ | 2 ב-20 ₪)
+    if (zalabiaProd) {
+      const q = qtyMap['zalabia_3'] || 0;
+      const calc = calcTrioPackPrice(q);
+      add({
+        key: 'zalabia_3',
+        productId: zalabiaProd.id,
+        label: 'זלביה — מארז שלישייה (3 יח׳)',
+        quantity: q,
+        unitsPerQty: 1,
+        lineTotal: calc.total,
+        regularTotal: calc.regular,
+      });
+    }
+
+    // 5. פיתות / לחם שום, זעתר, שומשום — מארז שלישייה (12 ₪ | 2 ב-20 ₪) + יחידה (5 ₪)
+    if (pitaPackProd) {
+      const q3 = qtyMap['pita_3'] || 0;
+      const calc = calcTrioPackPrice(q3);
+      add({
+        key: 'pita_3',
+        productId: pitaPackProd.id,
+        label: `פיתות ${pitaFlavor} — מארז שלישייה (3 יח׳)`,
+        quantity: q3,
+        unitsPerQty: 1,
+        lineTotal: calc.total,
+        regularTotal: calc.regular,
+      });
+      const q1 = qtyMap['pita_1'] || 0;
+      add({
+        key: 'pita_1',
+        productId: pitaPackProd.id,
+        label: `פיתה ${pitaFlavor} (יחידה)`,
+        quantity: q1,
+        unitsPerQty: 1,
+        lineTotal: q1 * 5,
+        regularTotal: q1 * 5,
+      });
+    }
+
+    // 6. חילבה קטן (12 ₪) וגדול (20 ₪)
+    if (hilbeSmallProd) {
+      const q = qtyMap['hilbe_s'] || 0;
+      add({
+        key: 'hilbe_s',
+        productId: hilbeSmallProd.id,
+        label: "חילבה קטן (250 גר')",
+        quantity: q,
+        unitsPerQty: 1,
+        lineTotal: q * 12,
+        regularTotal: q * 12,
+      });
+    }
+    if (hilbeLargeProd) {
+      const q = qtyMap['hilbe_l'] || 0;
+      add({
+        key: 'hilbe_l',
+        productId: hilbeLargeProd.id,
+        label: "חילבה גדול (500 גר')",
+        quantity: q,
+        unitsPerQty: 1,
+        lineTotal: q * 20,
+        regularTotal: q * 20,
+      });
+    }
+
+    // 7. שאר המוצרים (פרנות, קובנה וכו' — מחיר רגיל מהמחירון, ללא הנחת מוקדמת)
+    for (const p of otherProducts) {
+      const k = `other_${p.id}`;
+      const q = qtyMap[k] || 0;
+      const label = p.name.includes('פרנה גדולה') ? `${p.name} (${frenaFlavor})` : p.name;
+      add({
+        key: k,
+        productId: p.id,
+        label,
+        quantity: q,
+        unitsPerQty: 1,
+        lineTotal: Math.round(q * p.customer_price * 100) / 100,
+        regularTotal: Math.round(q * p.customer_price * 100) / 100,
+      });
+    }
+
+    return entries;
+  }, [
+    qtyMap,
+    preorderOpen,
+    salufProd,
+    lahohProd,
+    jachnunProd,
+    zalabiaProd,
+    pitaPackProd,
+    hilbeSmallProd,
+    hilbeLargeProd,
+    otherProducts,
+    pitaFlavor,
+    frenaFlavor,
+  ]);
+
+  const totalCount = useMemo(() => cartEntries.reduce((s, e) => s + e.quantity, 0), [cartEntries]);
   const totalAmount = useMemo(
-    () => Math.round(cartLines.reduce((s, l) => s + l.line_total, 0) * 100) / 100,
-    [cartLines]
+    () => Math.round(cartEntries.reduce((s, e) => s + e.lineTotal, 0) * 100) / 100,
+    [cartEntries]
   );
   const totalSavings = useMemo(() => {
-    const regSum = cartLines.reduce((s, l) => s + l.regular_total, 0);
-    return Math.max(0, Math.round((regSum - totalAmount) * 100) / 100);
-  }, [cartLines, totalAmount]);
-
-  const stepQty = (pid: number, delta: number) => {
-    setCart((prev) => ({ ...prev, [pid]: Math.max(0, (prev[pid] || 0) + delta) }));
-  };
+    const reg = cartEntries.reduce((s, e) => s + e.regularTotal, 0);
+    return Math.max(0, Math.round((reg - totalAmount) * 100) / 100);
+  }, [cartEntries, totalAmount]);
 
   const handleSendOrder = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (cartLines.length === 0) return;
+    if (cartEntries.length === 0) return;
     setSubmitting(true);
     setError('');
     try {
@@ -228,10 +413,17 @@ export function DigitalMenuPage() {
         // ignore
       }
 
-      const flavorNotes = cartLines
-        .filter((l) => l.flavor)
-        .map((l) => `${l.product.name}: ${l.flavor}`);
-      const combinedNotes = [notes.trim(), ...flavorNotes].filter(Boolean).join(' | ');
+      // איחוד כמויות לפי product_id לשמירה בשרת
+      const mergedItems = new Map<number, number>();
+      for (const entry of cartEntries) {
+        mergedItems.set(
+          entry.productId,
+          (mergedItems.get(entry.productId) || 0) + entry.quantity * entry.unitsPerQty
+        );
+      }
+
+      const breakdownNote = cartEntries.map((e) => `${e.quantity}× ${e.label}`).join(' | ');
+      const combinedNotes = [notes.trim(), breakdownNote].filter(Boolean).join(' · ');
 
       const res = await apiFetch<{ id?: number; order?: { id: number } }>('/api/public/orders', {
         method: 'POST',
@@ -240,7 +432,10 @@ export function DigitalMenuPage() {
           recipient_name: customerName.trim(),
           phone: customerPhone.trim(),
           notes: combinedNotes,
-          items: cartLines.map((l) => ({ product_id: l.product.id, quantity: l.quantity })),
+          items: Array.from(mergedItems.entries()).map(([product_id, quantity]) => ({
+            product_id,
+            quantity,
+          })),
         }),
       });
       const orderId = res.order?.id ?? res.id ?? Date.now();
@@ -256,17 +451,17 @@ export function DigitalMenuPage() {
         phone: customerPhone.trim(),
         friday_date: fridayDate,
         pricing_mode: preorderOpen ? 'preorder' : 'stall',
-        items: cartLines.map((l) => ({
-          product_name: l.flavor ? `${l.product.name} (${l.flavor})` : l.product.name,
-          quantity: l.quantity,
-          unit_price: l.unit_price,
+        items: cartEntries.map((e) => ({
+          product_name: e.label,
+          quantity: e.quantity,
+          unit_price: Math.round((e.lineTotal / e.quantity) * 100) / 100,
         })),
         total_amount: totalAmount,
-        notes: combinedNotes,
+        notes: notes.trim(),
       });
       const waUrl = buildWhatsAppShareUrl(waText, targetPhone);
       setSubmitted({ orderId, waUrl, total: totalAmount });
-      setCart({});
+      setQtyMap({});
       setNotes('');
       setCheckoutOpen(false);
       window.open(waUrl, '_blank', 'noopener,noreferrer');
@@ -277,11 +472,43 @@ export function DigitalMenuPage() {
     }
   };
 
+  const renderStepper = (key: string, disabled = false) => {
+    const q = qtyMap[key] || 0;
+    if (disabled) {
+      return <span className="text-[11px] font-extrabold text-red-600">אזל</span>;
+    }
+    return (
+      <div className="flex items-center gap-1.5 shrink-0">
+        {q > 0 && (
+          <>
+            <button
+              type="button"
+              onClick={() => stepKey(key, -1)}
+              className="w-9 h-9 rounded-xl bg-white border border-[#E8D5BE] flex items-center justify-center active:scale-95"
+              aria-label="הפחת"
+            >
+              <Minus className="w-4 h-4" />
+            </button>
+            <span className="w-6 text-center font-extrabold text-sm tabular-nums">{q}</span>
+          </>
+        )}
+        <button
+          type="button"
+          onClick={() => stepKey(key, 1)}
+          className="w-9 h-9 rounded-xl bg-[#C85A17] hover:bg-[#A9440F] text-white flex items-center justify-center shadow-sm active:scale-95"
+          aria-label="הוסף"
+        >
+          <Plus className="w-4 h-4" />
+        </button>
+      </div>
+    );
+  };
+
   return (
     <div className="min-h-screen bg-[#FAF5EE] text-[#1E242B] pb-28">
-      {/* כותרת קצרה, נקייה ומזמינה */}
+      {/* כותרת לוח מאפייה קומפקטית וברורה */}
       <header className="px-4 pt-[max(1rem,env(safe-area-inset-top))] pb-4 bg-gradient-to-b from-[#2B1B12] to-[#4A2816] text-white shadow-md">
-        <div className="max-w-lg mx-auto space-y-2.5 text-center">
+        <div className="max-w-lg mx-auto space-y-2 text-center">
           <div className="flex items-center justify-center gap-2">
             <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-[#E59838] to-[#C85A17] flex items-center justify-center shadow">
               <Flame className="w-5 h-5 text-white" />
@@ -291,7 +518,7 @@ export function DigitalMenuPage() {
             </h1>
           </div>
 
-          <div className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-full bg-amber-400/20 border border-amber-300/40 text-xs font-bold text-amber-100">
+          <div className="inline-flex items-center justify-center gap-1.5 px-3 py-1 rounded-full bg-amber-400/20 border border-amber-300/40 text-xs font-bold text-amber-100">
             <Sparkles className="w-3.5 h-3.5 text-amber-300 shrink-0" />
             <span>
               {preorderOpen
@@ -302,7 +529,7 @@ export function DigitalMenuPage() {
         </div>
       </header>
 
-      <main className="max-w-lg mx-auto px-3.5 pt-3.5 space-y-3">
+      <main className="max-w-lg mx-auto px-3.5 pt-3.5 space-y-4">
         {/* מעקב שלבים חי לאחר שליחה */}
         {submitted && (
           <section className="bg-white rounded-2xl border-2 border-emerald-400 shadow-soft p-4 space-y-3">
@@ -341,134 +568,285 @@ export function DigitalMenuPage() {
           </div>
         )}
 
-        {/* רשימת מוצרים נקייה, מרווחת וקלה לסריקה */}
         {loading ? (
           <div className="bg-white rounded-2xl p-8 text-center text-sm text-slate-400 border border-[#E8D5BE]">
-            טוען תפריט...
+            טוען את לוח המאפייה...
           </div>
         ) : (
-          <div className="space-y-2.5">
-            {visibleProducts.map((p) => {
-              const inStock = isProductInStock(p.id, stockMap);
-              const qty = cart[p.id] || 0;
-              const salufLahoh = isSalufOrLahoh(p.name);
-              const hasFlavors = supportsFlavor(p.name);
-              const calc = calcLinePrice(p, qty > 0 ? qty : 1, preorderOpen);
-              const displayPrice =
-                salufLahoh && qty > 0 && qty < 5
-                  ? p.customer_price
-                  : salufLahoh && preorderOpen
-                  ? p.preorder_price
-                  : calc.unitPrice;
-              const showStrikeOriginal = p.customer_price > displayPrice;
+          <>
+            {/* חלק עליון: סאלוף ולחוח — מארז חמישייה (20 ₪ במקום 25 ₪) + יחידות (5 ₪) */}
+            {(salufProd || lahohProd) && (
+              <section className="bg-white rounded-3xl border border-[#DFC3A0] shadow-soft overflow-hidden">
+                <div className="px-4 py-2.5 bg-[#4A2816] text-amber-100 font-serif font-bold text-base">
+                  🫓 מאפים במארזים ויחידות (סאלוף / לחוח)
+                </div>
+                <div className="divide-y divide-[#F3E9DC]">
+                  {salufProd && (() => {
+                    const inStock = isProductInStock(salufProd.id, stockMap);
+                    return (
+                      <div className="p-3.5 space-y-2.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <div>
+                            <div className="font-extrabold text-sm text-slate-900">
+                              סאלוף — מארז חמישייה (5 יח&apos;)
+                            </div>
+                            <div className="flex items-center gap-2 tabular-nums">
+                              <span className="font-extrabold text-base text-[#C85A17]">
+                                {preorderOpen ? '₪20.00' : '₪25.00'}
+                              </span>
+                              {preorderOpen && (
+                                <span className="text-xs font-bold text-slate-400 line-through decoration-red-600 decoration-2">
+                                  ₪25.00
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          {renderStepper('saluf_5', !inStock)}
+                        </div>
+                        <div className="flex items-center justify-between gap-2 pt-2 border-t border-dashed border-[#F3E9DC]">
+                          <div>
+                            <div className="font-bold text-xs text-slate-700">סאלוף — יחידה בודדת</div>
+                            <div className="font-extrabold text-sm text-slate-800 tabular-nums">₪5.00</div>
+                          </div>
+                          {renderStepper('saluf_1', !inStock)}
+                        </div>
+                      </div>
+                    );
+                  })()}
 
+                  {lahohProd && (() => {
+                    const inStock = isProductInStock(lahohProd.id, stockMap);
+                    return (
+                      <div className="p-3.5 space-y-2.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <div>
+                            <div className="font-extrabold text-sm text-slate-900">
+                              לחוח — מארז חמישייה (5 יח&apos;)
+                            </div>
+                            <div className="flex items-center gap-2 tabular-nums">
+                              <span className="font-extrabold text-base text-[#C85A17]">
+                                {preorderOpen ? '₪20.00' : '₪25.00'}
+                              </span>
+                              {preorderOpen && (
+                                <span className="text-xs font-bold text-slate-400 line-through decoration-red-600 decoration-2">
+                                  ₪25.00
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          {renderStepper('lahoh_5', !inStock)}
+                        </div>
+                        <div className="flex items-center justify-between gap-2 pt-2 border-t border-dashed border-[#F3E9DC]">
+                          <div>
+                            <div className="font-bold text-xs text-slate-700">לחוח — יחידה בודדת</div>
+                            <div className="font-extrabold text-sm text-slate-800 tabular-nums">₪5.00</div>
+                          </div>
+                          {renderStepper('lahoh_1', !inStock)}
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
+              </section>
+            )}
+
+            {/* חלק מרכזי: ג'חנון ביתי ב-2 שורות נפרדות וברורות */}
+            {jachnunProd && (() => {
+              const inStock = isProductInStock(jachnunProd.id, stockMap);
               return (
-                <div
-                  key={p.id}
-                  className={`rounded-2xl p-3.5 border transition-all space-y-2 ${
-                    !inStock
-                      ? 'bg-slate-50 border-slate-200 opacity-65'
-                      : qty > 0
-                      ? 'bg-[#FFF7ED] border-[#C85A17] shadow-sm'
-                      : 'bg-white border-[#E8D5BE]'
-                  }`}
-                >
-                  <div className="flex items-center justify-between gap-2.5">
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        <span className="font-extrabold text-base text-slate-900">{p.name}</span>
-                        <span
-                          className={`px-1.5 py-0.5 rounded-full text-[10px] font-extrabold ${
-                            inStock ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-700'
-                          }`}
-                        >
-                          {inStock ? 'במלאי' : 'אזל מהמלאי'}
-                        </span>
-                      </div>
-
-                      <div className="flex items-center gap-2 mt-0.5 flex-wrap tabular-nums">
-                        <span className="text-base font-extrabold text-[#C85A17]">
-                          {formatILS(displayPrice)}
-                        </span>
-                        {showStrikeOriginal && (
-                          <span className="text-xs font-bold text-slate-400 line-through decoration-red-600 decoration-2">
-                            {formatILS(p.customer_price)}
+                <section className="bg-white rounded-3xl border border-[#DFC3A0] shadow-soft overflow-hidden">
+                  <div className="px-4 py-2.5 bg-[#4A2816] text-amber-100 font-serif font-bold text-base">
+                    🍯 ג&apos;חנון ביתי
+                  </div>
+                  <div className="divide-y divide-[#F3E9DC]">
+                    <div className="p-3.5 flex items-center justify-between gap-2">
+                      <div>
+                        <div className="font-extrabold text-sm text-slate-900">מגש ג&apos;חנון (5 יח&apos;)</div>
+                        <div className="flex items-center gap-2 tabular-nums">
+                          <span className="font-extrabold text-base text-[#C85A17]">
+                            {preorderOpen ? '₪40.00' : '₪45.00'}
                           </span>
-                        )}
-                        {salufLahoh && preorderOpen && qty < 5 && (
-                          <span className="text-[10px] font-bold text-slate-500">
-                            (מ-5 יח&apos;)
-                          </span>
-                        )}
+                          {preorderOpen && (
+                            <span className="text-xs font-bold text-slate-400 line-through decoration-red-600 decoration-2">
+                              ₪45.00
+                            </span>
+                          )}
+                        </div>
                       </div>
+                      {renderStepper('jachnun_5', !inStock)}
                     </div>
 
-                    {/* כפתורי -/+ גדולים ונוחים למגע */}
-                    {inStock ? (
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        {qty > 0 && (
-                          <>
-                            <button
-                              type="button"
-                              onClick={() => stepQty(p.id, -1)}
-                              className="w-10 h-10 rounded-xl bg-white border border-[#E8D5BE] flex items-center justify-center active:scale-95"
-                              aria-label="הפחת"
-                            >
-                              <Minus className="w-4 h-4" />
-                            </button>
-                            <span className="w-6 text-center font-extrabold text-sm tabular-nums">{qty}</span>
-                          </>
-                        )}
-                        <button
-                          type="button"
-                          onClick={() => stepQty(p.id, 1)}
-                          className="w-10 h-10 rounded-xl bg-[#C85A17] hover:bg-[#A9440F] text-white flex items-center justify-center shadow-sm active:scale-95"
-                          aria-label="הוסף"
-                        >
-                          <Plus className="w-4 h-4" />
-                        </button>
+                    <div className="p-3.5 flex items-center justify-between gap-2">
+                      <div>
+                        <div className="font-extrabold text-sm text-slate-900">ג&apos;חנון (יחידה)</div>
+                        <div className="flex items-center gap-2 tabular-nums">
+                          <span className="font-extrabold text-base text-[#C85A17]">
+                            {preorderOpen ? '₪8.00' : '₪9.00'}
+                          </span>
+                          {preorderOpen && (
+                            <span className="text-xs font-bold text-slate-400 line-through decoration-red-600 decoration-2">
+                              ₪9.00
+                            </span>
+                          )}
+                        </div>
                       </div>
-                    ) : (
-                      <span className="text-xs font-bold text-red-600 shrink-0">לא זמין</span>
-                    )}
+                      {renderStepper('jachnun_1', !inStock)}
+                    </div>
                   </div>
+                </section>
+              );
+            })()}
 
-                  {/* שורה תחתונה קומפקטית: חבילת 5 יח' לסלוף/לחוח או בחירת טעם */}
-                  {inStock && (salufLahoh || hasFlavors) && (
-                    <div className="flex flex-wrap items-center gap-1.5 pt-1.5 border-t border-[#F3E9DC]">
-                      {salufLahoh && (
-                        <button
-                          type="button"
-                          onClick={() => stepQty(p.id, 5)}
-                          className="px-2.5 py-1 rounded-xl bg-[#FFF7ED] hover:bg-[#FFEDD5] border border-[#C85A17]/40 text-[#8A330B] text-xs font-extrabold"
-                        >
-                          + חבילת 5 יח&apos;
-                        </button>
-                      )}
-                      {hasFlavors &&
-                        FLAVOR_OPTIONS.map((fl) => {
-                          const active = (flavors[p.id] || 'רגיל') === fl;
-                          return (
+            {/* חלק תחתון: טבלת פריטים מיוחדים ומארזים */}
+            <section className="bg-white rounded-3xl border border-[#DFC3A0] shadow-soft overflow-hidden">
+              <div className="px-4 py-2.5 bg-[#4A2816] text-amber-100 font-serif font-bold text-base">
+                ✨ פריטים מיוחדים ומארזים
+              </div>
+              <div className="divide-y divide-[#F3E9DC]">
+                {/* זלביה — רק במארז שלישייה */}
+                {zalabiaProd && (
+                  <div className="p-3.5 flex items-center justify-between gap-2">
+                    <div>
+                      <div className="font-extrabold text-sm text-slate-900">
+                        זלביה — מארז שלישייה (3 יח&apos;)
+                      </div>
+                      <div className="flex items-center gap-2 mt-0.5 flex-wrap tabular-nums">
+                        <span className="font-extrabold text-base text-[#C85A17]">₪12.00</span>
+                        <span className="text-[11px] font-extrabold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full">
+                          מבצע: 2 מארזים ב-20 ₪
+                        </span>
+                      </div>
+                    </div>
+                    {renderStepper('zalabia_3', !isProductInStock(zalabiaProd.id, stockMap))}
+                  </div>
+                )}
+
+                {/* פיתות / לחם שום, זעתר, שומשום (בחירת טעם + מארז שלישייה + יחידה) */}
+                {pitaPackProd && (() => {
+                  const inStock = isProductInStock(pitaPackProd.id, stockMap);
+                  return (
+                    <div className="p-3.5 space-y-2.5">
+                      <div className="flex items-center justify-between gap-2 flex-wrap">
+                        <span className="font-extrabold text-sm text-slate-900">
+                          פיתות / לחם (בחר טעם):
+                        </span>
+                        <div className="flex items-center gap-1">
+                          {FLAVOR_OPTIONS.map((fl) => (
                             <button
                               key={fl}
                               type="button"
-                              onClick={() => setFlavors((prev) => ({ ...prev, [p.id]: fl }))}
-                              className={`px-2 py-1 rounded-lg text-[11px] font-bold border ${
-                                active
+                              onClick={() => setPitaFlavor(fl)}
+                              className={`px-2 py-0.5 rounded-lg text-[11px] font-bold border ${
+                                pitaFlavor === fl
                                   ? 'bg-[#1E242B] text-white border-[#1E242B]'
                                   : 'bg-[#FAF6F0] text-slate-600 border-[#E8D5BE]'
                               }`}
                             >
                               {fl}
                             </button>
-                          );
-                        })}
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between gap-2">
+                        <div>
+                          <div className="font-bold text-xs text-slate-800">
+                            מארז שלישייה ({pitaFlavor}, 3 יח&apos;)
+                          </div>
+                          <div className="flex items-center gap-2 mt-0.5 flex-wrap tabular-nums">
+                            <span className="font-extrabold text-base text-[#C85A17]">₪12.00</span>
+                            <span className="text-[11px] font-extrabold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full">
+                              מבצע: 2 מארזים ב-20 ₪
+                            </span>
+                          </div>
+                        </div>
+                        {renderStepper('pita_3', !inStock)}
+                      </div>
+
+                      <div className="flex items-center justify-between gap-2 pt-2 border-t border-dashed border-[#F3E9DC]">
+                        <div>
+                          <div className="font-bold text-xs text-slate-700">
+                            יחידה בודדת ({pitaFlavor})
+                          </div>
+                          <div className="font-extrabold text-sm text-slate-800 tabular-nums">₪5.00</div>
+                        </div>
+                        {renderStepper('pita_1', !inStock)}
+                      </div>
                     </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
+                  );
+                })()}
+
+                {/* חילבה קטן 250 גר' */}
+                {hilbeSmallProd && (
+                  <div className="p-3.5 flex items-center justify-between gap-2">
+                    <div>
+                      <div className="font-extrabold text-sm text-slate-900">חילבה קטן (250 גר&apos;)</div>
+                      <div className="font-extrabold text-base text-[#C85A17] tabular-nums">₪12.00</div>
+                    </div>
+                    {renderStepper('hilbe_s', !isProductInStock(hilbeSmallProd.id, stockMap))}
+                  </div>
+                )}
+
+                {/* חילבה גדול 500 גר' */}
+                {hilbeLargeProd && (
+                  <div className="p-3.5 flex items-center justify-between gap-2">
+                    <div>
+                      <div className="font-extrabold text-sm text-slate-900">חילבה גדול (500 גר&apos;)</div>
+                      <div className="font-extrabold text-base text-[#C85A17] tabular-nums">₪20.00</div>
+                    </div>
+                    {renderStepper('hilbe_l', !isProductInStock(hilbeLargeProd.id, stockMap))}
+                  </div>
+                )}
+
+                {/* שאר המוצרים (פרנות, קובנה, סחוג וכו') */}
+                {otherProducts.map((p) => {
+                  const inStock = isProductInStock(p.id, stockMap);
+                  const isBigFrena = p.name.includes('פרנה גדולה');
+                  return (
+                    <div key={p.id} className="p-3.5 space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <div>
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-extrabold text-sm text-slate-900">{p.name}</span>
+                            <span
+                              className={`px-1.5 py-0.5 rounded-full text-[10px] font-extrabold ${
+                                inStock ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-700'
+                              }`}
+                            >
+                              {inStock ? 'במלאי' : 'אזל'}
+                            </span>
+                          </div>
+                          <div className="font-extrabold text-base text-[#C85A17] tabular-nums">
+                            {formatILS(p.customer_price)}
+                          </div>
+                        </div>
+                        {renderStepper(`other_${p.id}`, !inStock)}
+                      </div>
+
+                      {isBigFrena && inStock && (
+                        <div className="flex items-center gap-1 pt-1">
+                          {FLAVOR_OPTIONS.map((fl) => (
+                            <button
+                              key={fl}
+                              type="button"
+                              onClick={() => setFrenaFlavor(fl)}
+                              className={`px-2 py-0.5 rounded-lg text-[11px] font-bold border ${
+                                frenaFlavor === fl
+                                  ? 'bg-[#1E242B] text-white border-[#1E242B]'
+                                  : 'bg-[#FAF6F0] text-slate-600 border-[#E8D5BE]'
+                              }`}
+                            >
+                              {fl}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          </>
         )}
       </main>
 
@@ -478,7 +856,7 @@ export function DigitalMenuPage() {
           <div className="tabular-nums">
             <div className="flex items-center gap-2">
               <span className="text-[11px] font-bold text-slate-500">
-                {totalItems > 0 ? `${totalItems} פריטים בסל` : 'בחר מוצרים מהתפריט'}
+                {totalCount > 0 ? `${totalCount} פריטים בסל` : 'בחר מהמחירון'}
               </span>
               {totalSavings > 0 && (
                 <span className="text-[11px] font-extrabold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">
@@ -490,7 +868,7 @@ export function DigitalMenuPage() {
           </div>
           <button
             type="button"
-            disabled={totalItems === 0}
+            disabled={totalCount === 0}
             onClick={() => setCheckoutOpen(true)}
             className="px-5 py-3 rounded-2xl bg-[#25D366] hover:bg-[#1EB958] disabled:opacity-45 text-white font-extrabold text-sm flex items-center gap-2 shadow-md active:scale-[0.98]"
           >
@@ -510,21 +888,18 @@ export function DigitalMenuPage() {
       >
         <form onSubmit={handleSendOrder} className="space-y-3.5">
           <div className="divide-y divide-[#F3E9DC] border border-[#E8D5BE] rounded-2xl overflow-hidden">
-            {cartLines.map((l) => (
-              <div key={l.product.id} className="p-2.5 flex items-center justify-between text-xs bg-[#FAF6F0]">
+            {cartEntries.map((e) => (
+              <div key={e.key} className="p-2.5 flex items-center justify-between text-xs bg-[#FAF6F0]">
                 <span className="font-bold text-slate-800">
-                  {l.quantity}× {l.product.name}
-                  {l.flavor ? ` (${l.flavor})` : ''}
+                  {e.quantity}× {e.label}
                 </span>
                 <div className="flex items-center gap-1.5 tabular-nums">
-                  {l.regular_total > l.line_total && (
+                  {e.regularTotal > e.lineTotal && (
                     <span className="text-[11px] text-slate-400 line-through decoration-red-600 decoration-2">
-                      {formatILS(l.regular_total)}
+                      {formatILS(e.regularTotal)}
                     </span>
                   )}
-                  <span className="font-extrabold text-[#8A330B]">
-                    {formatILS(l.line_total)}
-                  </span>
+                  <span className="font-extrabold text-[#8A330B]">{formatILS(e.lineTotal)}</span>
                 </div>
               </div>
             ))}
