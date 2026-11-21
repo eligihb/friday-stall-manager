@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { CheckCircle2, AlertTriangle } from 'lucide-react';
 import { apiFetch } from '../lib/api';
 import { formatILS } from '../lib/format';
@@ -10,57 +10,26 @@ interface QuickApproveViewProps {
 }
 
 export function QuickApproveView({ orderId, encodedData }: QuickApproveViewProps) {
-  const [status, setStatus] = useState<'loading' | 'done' | 'error'>('loading');
-  const [errMsg, setErrMsg] = useState('');
+  const [status, setStatus] = useState<'loading' | 'approved' | 'error'>('loading');
+  const [errMsg, setErrMsg] = useState<string | null>(null);
   const [summaryText, setSummaryText] = useState('');
 
-  useEffect(() => {
-    let active = true;
-    const run = async () => {
-      try {
-        // 1. ניסיון אישור ישיר אם ההזמנה כבר קיימת במאגר המקומי/שרת
-        await apiFetch(`/api/orders/${orderId}`, {
-          method: 'PATCH',
-          body: JSON.stringify({ status: 'received' }),
-        });
-        if (!active) return;
-        setStatus('done');
-      } catch (firstErr) {
-        // 2. Fallback חוצה-מכשירים: פענוח וייבוא ההזמנה מפרמטר הקישור (?d=...)
-        const decoded = decodeOrderLinkPayload(encodedData);
-        if (decoded) {
-          try {
-            await apiFetch('/api/public/import-order', {
-              method: 'POST',
-              body: JSON.stringify({
-                id: decoded.id || orderId,
-                recipient_name: decoded.n,
-                phone: decoded.p,
-                friday_date: decoded.f,
-                total_amount: decoded.t,
-                notes: decoded.nt || '',
-                items: decoded.i,
-                status: 'received',
-              }),
-            });
-            if (!active) return;
-            setSummaryText(`${decoded.n} · ${formatILS(decoded.t)}`);
-            setStatus('done');
-          } catch (importErr) {
-            if (!active) return;
-            setErrMsg(importErr instanceof Error ? importErr.message : 'שגיאה בייבוא ואישור ההזמנה');
-            setStatus('error');
-            return;
-          }
-        } else {
-          if (!active) return;
-          setErrMsg(firstErr instanceof Error ? firstErr.message : 'ההזמנה לא נמצאה');
-          setStatus('error');
-          return;
-        }
-      }
+  // נעילה חד-פעמית (One-time Execution Guard) למניעת דריסה ברינדורים חוזרים / StrictMode
+  const startedKeyRef = useRef<string | null>(null);
+  const approvedRef = useRef<boolean>(false);
 
-      // ניסיון סגירה אוטומטית של החלונית אם הדפדפן מאפשר
+  useEffect(() => {
+    const runKey = `${orderId}::${encodedData || ''}`;
+    if (approvedRef.current || startedKeyRef.current === runKey) {
+      return;
+    }
+    startedKeyRef.current = runKey;
+
+    const markApproved = (summary?: string) => {
+      approvedRef.current = true;
+      setErrMsg(null);
+      if (summary) setSummaryText(summary);
+      setStatus('approved');
       setTimeout(() => {
         try {
           window.close();
@@ -69,10 +38,48 @@ export function QuickApproveView({ orderId, encodedData }: QuickApproveViewProps
         }
       }, 2000);
     };
-    run();
-    return () => {
-      active = false;
+
+    const run = async () => {
+      const decoded = decodeOrderLinkPayload(encodedData);
+
+      // אם יש פרמטר מקודד ?d= — מייבא/מעדכן idempotent סינכרונית ב-localStorage ומאשר מיד
+      if (decoded) {
+        try {
+          await apiFetch('/api/public/import-order', {
+            method: 'POST',
+            body: JSON.stringify({
+              id: decoded.id || orderId,
+              recipient_name: decoded.n,
+              phone: decoded.p,
+              friday_date: decoded.f,
+              total_amount: decoded.t,
+              notes: decoded.nt || '',
+              items: decoded.i,
+              status: 'received',
+            }),
+          });
+          markApproved(`${decoded.n} · ${formatILS(decoded.t)}`);
+          return;
+        } catch {
+          // ננסה fallback ישיר ל-PATCH אם import-order לא זמין בשרת חיצוני
+        }
+      }
+
+      try {
+        await apiFetch(`/api/orders/${orderId}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ status: 'received' }),
+        });
+        markApproved(decoded ? `${decoded.n} · ${formatILS(decoded.t)}` : undefined);
+      } catch (err) {
+        // לעולם לא לדרוס מצב הצלחה שכבר ננעל
+        if (approvedRef.current) return;
+        setErrMsg(err instanceof Error ? err.message : 'ההזמנה לא נמצאה');
+        setStatus('error');
+      }
     };
+
+    run();
   }, [orderId, encodedData]);
 
   return (
@@ -83,7 +90,7 @@ export function QuickApproveView({ orderId, encodedData }: QuickApproveViewProps
             <div className="w-10 h-10 border-4 border-[#C85A17] border-t-transparent rounded-full animate-spin mx-auto" />
             <div className="font-bold text-slate-700">מאשר הזמנה #{orderId}...</div>
           </>
-        ) : status === 'done' ? (
+        ) : status === 'approved' ? (
           <>
             <div className="w-14 h-14 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto">
               <CheckCircle2 className="w-8 h-8" />
@@ -104,7 +111,7 @@ export function QuickApproveView({ orderId, encodedData }: QuickApproveViewProps
               <AlertTriangle className="w-8 h-8" />
             </div>
             <h1 className="font-serif text-xl font-extrabold text-red-800">שגיאה באישור</h1>
-            <p className="text-xs text-slate-600">{errMsg}</p>
+            <p className="text-xs text-slate-600">{errMsg || 'ההזמנה לא נמצאה'}</p>
           </>
         )}
       </div>
