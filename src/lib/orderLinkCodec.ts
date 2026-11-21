@@ -68,3 +68,50 @@ export function decodeOrderLinkPayload(encoded: string | null | undefined): Comp
     return null;
   }
 }
+
+export interface ImportedOrderBackupRecord {
+  payload: CompactOrderLinkPayload;
+  status: 'received' | 'awaiting_approval';
+  savedAt: number;
+}
+
+const IMPORTED_BACKUP_KEY = 'fsm_imported_orders_backup_v1';
+
+export function loadImportedOrdersBackup(): ImportedOrderBackupRecord[] {
+  try {
+    const raw = localStorage.getItem(IMPORTED_BACKUP_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+export function persistImportedOrderBackup(
+  payload: CompactOrderLinkPayload,
+  status: 'received' | 'awaiting_approval'
+): void {
+  try {
+    const existing = loadImportedOrdersBackup();
+    const idx = existing.findIndex(
+      (r) =>
+        (payload.id > 0 && r.payload.id === payload.id) ||
+        (r.payload.n === payload.n &&
+          r.payload.p === payload.p &&
+          r.payload.f === payload.f &&
+          Math.abs(r.payload.t - payload.t) < 0.01)
+    );
+    const rec: ImportedOrderBackupRecord = { payload, status, savedAt: Date.now() };
+    if (idx >= 0) {
+      // לא לשנמך סטטוס שכבר אושר (received)
+      if (existing[idx].status === 'received') rec.status = 'received';
+      existing[idx] = rec;
+    } else {
+      existing.push(rec);
+    }
+    localStorage.setItem(IMPORTED_BACKUP_KEY, JSON.stringify(existing));
+  } catch {
+    // ignore
+  }
+}

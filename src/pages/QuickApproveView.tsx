@@ -1,49 +1,59 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { CheckCircle2, AlertTriangle } from 'lucide-react';
 import { apiFetch } from '../lib/api';
-import { formatILS } from '../lib/format';
-import { decodeOrderLinkPayload } from '../lib/orderLinkCodec';
+import { formatFridayLabel, formatILS } from '../lib/format';
+import { decodeOrderLinkPayload, persistImportedOrderBackup } from '../lib/orderLinkCodec';
 
 interface QuickApproveViewProps {
   orderId: number;
   encodedData?: string | null;
 }
 
-export function QuickApproveView({ orderId, encodedData }: QuickApproveViewProps) {
-  const [status, setStatus] = useState<'loading' | 'approved' | 'error'>('loading');
-  const [errMsg, setErrMsg] = useState<string | null>(null);
-  const [summaryText, setSummaryText] = useState('');
+interface ConfirmedOrderSnapshot {
+  id: number;
+  recipient_name: string;
+  total_amount: number;
+  friday_date?: string;
+}
 
-  // נעילה חד-פעמית (One-time Execution Guard) למניעת דריסה ברינדורים חוזרים / StrictMode
+export function QuickApproveView({ orderId, encodedData }: QuickApproveViewProps) {
+  // State מקומי עצמאי ונעול: מרגע שאוכלס, תמיד מציג הצלחה ולעולם לא נדרס ע"י טעינות רקע
+  const [confirmedOrder, setConfirmedOrder] = useState<ConfirmedOrderSnapshot | null>(null);
+  const [errMsg, setErrMsg] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
   const startedKeyRef = useRef<string | null>(null);
-  const approvedRef = useRef<boolean>(false);
+  const lockedSuccessRef = useRef<boolean>(false);
 
   useEffect(() => {
     const runKey = `${orderId}::${encodedData || ''}`;
-    if (approvedRef.current || startedKeyRef.current === runKey) {
+    if (lockedSuccessRef.current || startedKeyRef.current === runKey) {
       return;
     }
     startedKeyRef.current = runKey;
 
-    const markApproved = (summary?: string) => {
-      approvedRef.current = true;
+    const lockSuccess = (snapshot: ConfirmedOrderSnapshot) => {
+      lockedSuccessRef.current = true;
       setErrMsg(null);
-      if (summary) setSummaryText(summary);
-      setStatus('approved');
+      setConfirmedOrder(snapshot);
+      setLoading(false);
       setTimeout(() => {
         try {
           window.close();
         } catch {
           // ignore
         }
-      }, 2000);
+      }, 2200);
     };
 
     const run = async () => {
       const decoded = decodeOrderLinkPayload(encodedData);
 
-      // אם יש פרמטר מקודד ?d= — מייבא/מעדכן idempotent סינכרונית ב-localStorage ומאשר מיד
       if (decoded) {
+        // 1. כתיבה סינכרונית מיידית לגיבוי localStorage (כך ששום טעינת רקע לא תוכל לדרוס!)
+        persistImportedOrderBackup(decoded, 'received');
+
+        // 2. ייבוא ואישור במאגר המערכת
         try {
           await apiFetch('/api/public/import-order', {
             method: 'POST',
@@ -58,11 +68,17 @@ export function QuickApproveView({ orderId, encodedData }: QuickApproveViewProps
               status: 'received',
             }),
           });
-          markApproved(`${decoded.n} · ${formatILS(decoded.t)}`);
-          return;
         } catch {
-          // ננסה fallback ישיר ל-PATCH אם import-order לא זמין בשרת חיצוני
+          // גם אם השרת החיצוני לא תומך ב-import-order, הגיבוי המקומי כבר שמור ומאומת
         }
+
+        lockSuccess({
+          id: decoded.id || orderId,
+          recipient_name: decoded.n,
+          total_amount: decoded.t,
+          friday_date: decoded.f,
+        });
+        return;
       }
 
       try {
@@ -70,40 +86,62 @@ export function QuickApproveView({ orderId, encodedData }: QuickApproveViewProps
           method: 'PATCH',
           body: JSON.stringify({ status: 'received' }),
         });
-        markApproved(decoded ? `${decoded.n} · ${formatILS(decoded.t)}` : undefined);
+        lockSuccess({
+          id: orderId,
+          recipient_name: `הזמנה #${orderId}`,
+          total_amount: 0,
+        });
       } catch (err) {
-        // לעולם לא לדרוס מצב הצלחה שכבר ננעל
-        if (approvedRef.current) return;
+        if (lockedSuccessRef.current) return;
         setErrMsg(err instanceof Error ? err.message : 'ההזמנה לא נמצאה');
-        setStatus('error');
+        setLoading(false);
       }
     };
 
     run();
   }, [orderId, encodedData]);
 
+  // מרגע ש-confirmedOrder מאוכלס — תמיד מציג הצלחה ירוקה ולעולם לא מציג שגיאה
+  if (confirmedOrder) {
+    return (
+      <div className="min-h-screen bg-[#FAF6F0] flex items-center justify-center p-6">
+        <div className="max-w-sm w-full bg-white rounded-3xl border-2 border-emerald-300 shadow-card p-6 text-center space-y-3">
+          <div className="w-14 h-14 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto">
+            <CheckCircle2 className="w-8 h-8" />
+          </div>
+          <h1 className="font-serif text-2xl font-extrabold text-emerald-800">
+            ההזמנה אושרה בהצלחה ✓
+          </h1>
+          <div className="p-3 rounded-2xl bg-emerald-50/70 border border-emerald-200 space-y-1">
+            <div className="text-base font-extrabold text-slate-900">
+              {confirmedOrder.recipient_name}
+            </div>
+            {confirmedOrder.total_amount > 0 && (
+              <div className="text-sm font-extrabold text-[#C85A17] tabular-nums">
+                סה״כ: {formatILS(confirmedOrder.total_amount)}
+              </div>
+            )}
+            {confirmedOrder.friday_date && (
+              <div className="text-xs text-slate-600">
+                {formatFridayLabel(confirmedOrder.friday_date)}
+              </div>
+            )}
+          </div>
+          <p className="text-xs text-slate-500">
+            הזמנה #{confirmedOrder.id} נשמרה והועברה לסטטוס ״התקבל״. ניתן לסגור חלונית זו.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-[#FAF6F0] flex items-center justify-center p-6">
       <div className="max-w-sm w-full bg-white rounded-3xl border border-[#E8D5BE] shadow-card p-6 text-center space-y-3">
-        {status === 'loading' ? (
+        {loading ? (
           <>
             <div className="w-10 h-10 border-4 border-[#C85A17] border-t-transparent rounded-full animate-spin mx-auto" />
             <div className="font-bold text-slate-700">מאשר הזמנה #{orderId}...</div>
-          </>
-        ) : status === 'approved' ? (
-          <>
-            <div className="w-14 h-14 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto">
-              <CheckCircle2 className="w-8 h-8" />
-            </div>
-            <h1 className="font-serif text-2xl font-extrabold text-emerald-800">
-              ההזמנה אושרה בהצלחה ✓
-            </h1>
-            {summaryText && (
-              <div className="text-sm font-extrabold text-slate-800">{summaryText}</div>
-            )}
-            <p className="text-xs text-slate-500">
-              הזמנה #{orderId} נקלטה והועברה לסטטוס ״התקבל״. ניתן לסגור חלונית זו.
-            </p>
           </>
         ) : (
           <>

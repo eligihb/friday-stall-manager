@@ -23,7 +23,7 @@ import { DigitalMenuPage } from './pages/DigitalMenuPage';
 import { FlyerPage } from './pages/FlyerPage';
 import { APP_BRAND_NAME } from './lib/version';
 import { apiFetch } from './lib/api';
-import { decodeOrderLinkPayload } from './lib/orderLinkCodec';
+import { decodeOrderLinkPayload, persistImportedOrderBackup } from './lib/orderLinkCodec';
 
 const VALID_TABS: AdminTab[] = [
   'dashboard',
@@ -164,6 +164,7 @@ function AppRouter() {
     if (specialRoute.directOrderId !== null && specialRoute.encodedOrderData) {
       const decoded = decodeOrderLinkPayload(specialRoute.encodedOrderData);
       if (decoded) {
+        persistImportedOrderBackup(decoded, 'awaiting_approval');
         apiFetch('/api/public/import-order', {
           method: 'POST',
           body: JSON.stringify({

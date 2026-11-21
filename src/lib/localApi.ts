@@ -14,6 +14,7 @@ import type {
 } from '../types';
 import { getNextFridayISO } from './format';
 import { getFridayPricingStatus } from './pricingCutoff';
+import { loadImportedOrdersBackup } from './orderLinkCodec';
 
 const STORAGE_KEY = 'ht_static_db_v1';
 const SESSION_KEY = 'ht_static_session_uid';
@@ -199,8 +200,104 @@ function safeRemoveItem(key: string): void {
   }
 }
 
+function mergeImportedBackupIntoDb(db: LocalDb): boolean {
+  const backups = loadImportedOrdersBackup();
+  if (!backups.length) return false;
+  let mutated = false;
+  const normTail = (p: string) => {
+    const d = String(p || '').replace(/\D/g, '');
+    return d.length >= 9 ? d.slice(-9) : d;
+  };
+  const pMap = new Map(db.products.map((p) => [p.id, p]));
+
+  for (const rec of backups) {
+    const pl = rec.payload;
+    const phoneTail = normTail(pl.p);
+    let cust =
+      (phoneTail.length >= 7
+        ? db.users.find((u) => u.role !== 'admin' && normTail(u.phone || '') === phoneTail)
+        : null) ||
+      db.users.find((u) => u.role !== 'admin' && u.name.trim().toLowerCase() === pl.n.trim().toLowerCase()) ||
+      null;
+
+    if (!cust) {
+      const uid = db.nextIds.users++;
+      cust = {
+        id: uid,
+        name: pl.n || 'לקוח',
+        phone: pl.p || '',
+        email: `customer${uid}@teimani.local`,
+        password: '',
+        role: 'customer',
+        balance: 0,
+        notes: 'יובא אוטומטית מקישור הזמנה בוואטסאפ',
+        created_at: new Date().toISOString().slice(0, 10),
+      };
+      db.users.push(cust);
+      mutated = true;
+    }
+
+    const existing =
+      (pl.id ? db.orders.find((o) => o.id === pl.id) : null) ||
+      db.orders.find(
+        (o) =>
+          o.user_id === cust!.id &&
+          o.friday_date === pl.f &&
+          Math.abs(o.total_amount - pl.t) < 0.01
+      ) ||
+      null;
+
+    if (existing) {
+      if (rec.status === 'received' && (existing.status === 'awaiting_approval' || existing.status === 'pending')) {
+        existing.status = 'received';
+        mutated = true;
+      }
+      continue;
+    }
+
+    const orderId = pl.id && !db.orders.some((o) => o.id === pl.id) ? pl.id : db.nextIds.orders++;
+    if (orderId >= db.nextIds.orders) db.nextIds.orders = orderId + 1;
+
+    for (const it of pl.i || []) {
+      const prod = pMap.get(Number(it.pid)) || db.products[0];
+      if (!prod) continue;
+      db.order_items.push({
+        id: db.nextIds.order_items++,
+        order_id: orderId,
+        product_id: prod.id,
+        quantity: Math.max(1, Number(it.q) || 1),
+        unit_price_snapshot: Math.max(0, Number(it.u) || prod.customer_price),
+        cost_price_snapshot: prod.cost_price,
+      });
+    }
+
+    const combinedNotes = [pl.p ? `טלפון: ${pl.p}` : '', pl.nt || ''].filter(Boolean).join(' | ');
+    db.orders.push({
+      id: orderId,
+      user_id: cust.id,
+      recipient_name: cust.name || pl.n || 'לקוח',
+      friday_date: pl.f || getNextFridayISO(),
+      order_type: 'customer',
+      delivery_fee: 0,
+      credit_discount: 0,
+      total_amount: round2(pl.t),
+      paid_amount: 0,
+      status: rec.status,
+      notes: combinedNotes,
+      created_at: new Date().toISOString().slice(0, 10),
+    });
+    mutated = true;
+  }
+  return mutated;
+}
+
 function loadDb(): LocalDb {
-  if (memoryDbFallback) return memoryDbFallback;
+  if (memoryDbFallback) {
+    if (mergeImportedBackupIntoDb(memoryDbFallback)) {
+      saveDb(memoryDbFallback);
+    }
+    return memoryDbFallback;
+  }
   try {
     const raw = safeGetItem(STORAGE_KEY);
     if (raw) {
@@ -211,13 +308,8 @@ function loadDb(): LocalDb {
           u.name = 'אליאב מנהל';
           mutated = true;
         }
-        if (u.phone === '0542452100') {
-          u.phone = '0542452100';
-          mutated = true;
-        }
       }
-      if (parsed.settings && parsed.settings.admin_whatsapp_phone === '0542452100') {
-        parsed.settings.admin_whatsapp_phone = '0542452100';
+      if (mergeImportedBackupIntoDb(parsed)) {
         mutated = true;
       }
       memoryDbFallback = parsed;
@@ -226,6 +318,7 @@ function loadDb(): LocalDb {
     }
   } catch {}
   const fresh = createInitialDb();
+  mergeImportedBackupIntoDb(fresh);
   saveDb(fresh);
   return fresh;
 }
