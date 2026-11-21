@@ -454,10 +454,54 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
     } as T;
   }
 
+  if (path === '/api/public/customer-history' && method === 'GET') {
+    const cid = Number(q.get('customer_id') || 0);
+    const phoneParam = String(q.get('phone') || '').replace(/\D/g, '');
+    const normTail = (p: string) => {
+      const d = p.replace(/\D/g, '');
+      return d.length >= 9 ? d.slice(-9) : d;
+    };
+    const targetTail = normTail(phoneParam);
+
+    let found = cid ? db.users.find((u) => u.id === cid) || null : null;
+    if (!found && targetTail.length >= 7) {
+      found = db.users.find((u) => u.role !== 'admin' && normTail(u.phone || '') === targetTail) || null;
+    }
+    if (!found) {
+      return { customer: null, orders: [] } as T;
+    }
+
+    const pMap = new Map(db.products.map((p) => [p.id, p]));
+    const custOrders = db.orders
+      .filter((o) => o.user_id === found!.id)
+      .sort((a, b) => b.id - a.id)
+      .slice(0, 10)
+      .map((o) => ({
+        ...o,
+        items: db.order_items
+          .filter((it) => it.order_id === o.id)
+          .map((it) => ({
+            ...it,
+            product_name: pMap.get(it.product_id)?.name || `#${it.product_id}`,
+          })),
+      }));
+
+    return {
+      customer: {
+        id: found.id,
+        name: found.name,
+        phone: found.phone,
+        balance: found.balance,
+      },
+      orders: custOrders,
+    } as T;
+  }
+
   if (path === '/api/public/orders' && method === 'POST') {
     const friday_date = String(body.friday_date || getNextFridayISO()).slice(0, 10);
     const recipient_name = String(body.recipient_name || '').trim();
     const phone = String(body.phone || '').trim();
+    const incomingUserId = Number(body.user_id || body.customer_id || 0);
     const notesRaw = String(body.notes || '').trim();
     const rawItems = (Array.isArray(body.items) ? body.items : []) as Array<{
       product_id: number;
@@ -466,6 +510,36 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
     const validItems = rawItems.filter((i) => i.product_id && i.quantity > 0);
     if (!recipient_name || !phone) throwErr('יש להזין שם מלא ומספר טלפון', 400);
     if (!validItems.length) throwErr('יש לבחור לפחות מוצר אחד להזמנה', 400);
+
+    // מניעת כפילויות לפי מספר טלפון מנורמל (9 ספרות אחרונות) או user_id קיים
+    const normTail = (p: string) => {
+      const d = p.replace(/\D/g, '');
+      return d.length >= 9 ? d.slice(-9) : d;
+    };
+    const phoneTail = normTail(phone);
+
+    let matchedCustomer =
+      (incomingUserId ? db.users.find((u) => u.id === incomingUserId && u.role !== 'admin') : null) ||
+      (phoneTail.length >= 7
+        ? db.users.find((u) => u.role !== 'admin' && normTail(u.phone || '') === phoneTail)
+        : null) ||
+      null;
+
+    if (!matchedCustomer) {
+      const newUid = db.nextIds.users++;
+      matchedCustomer = {
+        id: newUid,
+        name: recipient_name,
+        phone,
+        email: `customer${newUid}@teimani.local`,
+        password: '',
+        role: 'customer',
+        balance: 0,
+        notes: 'נרשם אוטומטית מתפריט הלקוחות',
+        created_at: new Date().toISOString().slice(0, 10),
+      };
+      db.users.push(matchedCustomer);
+    }
 
     const pMap = new Map(db.products.map((p) => [p.id, p]));
     const pricing = getFridayPricingStatus(friday_date);
@@ -503,8 +577,8 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
     const combinedNotes = [`טלפון: ${phone}`, notesRaw].filter(Boolean).join(' | ');
     db.orders.push({
       id: orderId,
-      user_id: null,
-      recipient_name,
+      user_id: matchedCustomer.id,
+      recipient_name: matchedCustomer.name || recipient_name,
       friday_date,
       order_type: 'customer',
       delivery_fee: 0,
@@ -519,8 +593,10 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
 
     return {
       id: orderId,
+      customer_id: matchedCustomer.id,
+      user_id: matchedCustomer.id,
       friday_date,
-      recipient_name,
+      recipient_name: matchedCustomer.name || recipient_name,
       phone,
       pricing_mode: pricing.mode,
       total_amount,

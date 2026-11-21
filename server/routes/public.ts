@@ -127,10 +127,34 @@ router.post('/orders', async (req, res) => {
     total_amount = round2(total_amount);
     const combinedNotes = [`טלפון: ${phone}`, notesRaw].filter(Boolean).join(' | ');
 
+    // מניעת כפילויות לפי מספר טלפון קיים
+    const phoneDigits = phone.replace(/\D/g, '');
+    const phoneTail = phoneDigits.length >= 9 ? phoneDigits.slice(-9) : phoneDigits;
+    let matchedUserId: number | null = null;
+    if (phoneTail.length >= 7) {
+      const existingUsers = await db.query<{ id: number; phone: string }>(
+        "SELECT id, phone FROM users WHERE role != 'admin'"
+      );
+      const found = existingUsers.find((u) => {
+        const d = String(u.phone || '').replace(/\D/g, '');
+        return (d.length >= 9 ? d.slice(-9) : d) === phoneTail;
+      });
+      if (found) {
+        matchedUserId = Number(found.id);
+      } else {
+        const createdUser = await db.run(
+          `INSERT INTO users (name, phone, email, password_hash, role, balance, notes)
+           VALUES (?, ?, ?, '', 'customer', 0, 'נרשם אוטומטית מתפריט הלקוחות')`,
+          [recipient_name, phone, `cust_${Date.now()}@teimani.local`]
+        );
+        matchedUserId = createdUser.lastInsertId ?? null;
+      }
+    }
+
     const inserted = await db.run(
       `INSERT INTO orders (user_id, recipient_name, friday_date, order_type, delivery_fee, credit_discount, total_amount, paid_amount, status, notes)
-       VALUES (NULL, ?, ?, 'customer', 0, 0, ?, 0, 'awaiting_approval', ?)`,
-      [recipient_name, friday_date, total_amount, combinedNotes]
+       VALUES (?, ?, ?, 'customer', 0, 0, ?, 0, 'awaiting_approval', ?)`,
+      [matchedUserId, recipient_name, friday_date, total_amount, combinedNotes]
     );
     const orderId = inserted.lastInsertId!;
 
@@ -146,6 +170,8 @@ router.post('/orders', async (req, res) => {
 
     res.status(201).json({
       id: orderId,
+      customer_id: matchedUserId,
+      user_id: matchedUserId,
       friday_date,
       recipient_name,
       phone,

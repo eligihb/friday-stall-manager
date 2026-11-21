@@ -8,9 +8,14 @@ import {
   CheckCircle2,
   ExternalLink,
   AlertCircle,
+  UserCheck,
+  History,
+  Wallet,
+  LogOut,
 } from 'lucide-react';
 import { apiFetch } from '../lib/api';
-import { formatFridayLabel, formatILS, getNextFridayISO } from '../lib/format';
+import { formatFridayLabel, formatILS, getNextFridayISO, ORDER_STATUS_LABELS } from '../lib/format';
+import type { Order, OrderStatus } from '../types';
 import { isProductInStock, loadStockMap } from '../lib/stockState';
 import {
   DEFAULT_ADMIN_WHATSAPP,
@@ -66,6 +71,35 @@ function calcTrioPackPrice(packs: number): { total: number; regular: number } {
   };
 }
 
+interface SavedCustomerProfile {
+  customerId?: number | null;
+  name: string;
+  phone: string;
+}
+
+function loadSavedProfile(): SavedCustomerProfile | null {
+  try {
+    const raw = localStorage.getItem(CUSTOMER_PROFILE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<SavedCustomerProfile>;
+    if (!parsed.name && !parsed.phone) return null;
+    return {
+      customerId: parsed.customerId ?? null,
+      name: String(parsed.name || ''),
+      phone: String(parsed.phone || ''),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function getOrderStepNum(status: OrderStatus): number {
+  if (status === 'awaiting_approval' || status === 'pending') return 1;
+  if (status === 'received') return 2;
+  if (status === 'ready') return 3;
+  return 4;
+}
+
 export function DigitalMenuPage() {
   const [data, setData] = useState<StorefrontData | null>(null);
   const [stockMap] = useState(() => loadStockMap());
@@ -85,20 +119,16 @@ export function DigitalMenuPage() {
   const [frenaFlavor, setFrenaFlavor] = useState<string>('רגיל');
   const [checkoutOpen, setCheckoutOpen] = useState(false);
 
-  const [customerName, setCustomerName] = useState(() => {
-    try {
-      return String(JSON.parse(localStorage.getItem(CUSTOMER_PROFILE_KEY) || '{}').name || '');
-    } catch {
-      return '';
-    }
-  });
-  const [customerPhone, setCustomerPhone] = useState(() => {
-    try {
-      return String(JSON.parse(localStorage.getItem(CUSTOMER_PROFILE_KEY) || '{}').phone || '');
-    } catch {
-      return '';
-    }
-  });
+  // זיהוי אוטומטי של לקוח חוזר ללא סיסמה (localStorage)
+  const [savedProfile, setSavedProfile] = useState<SavedCustomerProfile | null>(() => loadSavedProfile());
+  const [customerName, setCustomerName] = useState(() => loadSavedProfile()?.name || '');
+  const [customerPhone, setCustomerPhone] = useState(() => loadSavedProfile()?.phone || '');
+  const [customerHistory, setCustomerHistory] = useState<{
+    balance: number;
+    orders: Order[];
+  } | null>(null);
+  const [showPastOrders, setShowPastOrders] = useState(false);
+
   const [notes, setNotes] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState<{
@@ -106,6 +136,50 @@ export function DigitalMenuPage() {
     waUrl: string;
     total: number;
   } | null>(null);
+
+  const fetchCustomerHistory = async (profile: SavedCustomerProfile | null) => {
+    if (!profile || (!profile.customerId && !profile.phone)) {
+      setCustomerHistory(null);
+      return;
+    }
+    try {
+      const qs = new URLSearchParams();
+      if (profile.customerId) qs.set('customer_id', String(profile.customerId));
+      if (profile.phone) qs.set('phone', profile.phone);
+      const res = await apiFetch<{
+        customer: { id: number; name: string; phone: string; balance: number } | null;
+        orders: Order[];
+      }>(`/api/public/customer-history?${qs.toString()}`);
+      if (res.customer) {
+        setCustomerHistory({ balance: res.customer.balance, orders: res.orders || [] });
+        if (!profile.customerId && res.customer.id) {
+          const updated = { ...profile, customerId: res.customer.id };
+          setSavedProfile(updated);
+          try {
+            localStorage.setItem(CUSTOMER_PROFILE_KEY, JSON.stringify(updated));
+          } catch {}
+        }
+      }
+    } catch {
+      // ignore
+    }
+  };
+
+  useEffect(() => {
+    fetchCustomerHistory(savedProfile);
+  }, [savedProfile?.customerId, savedProfile?.phone]);
+
+  const handleSwitchUser = () => {
+    try {
+      localStorage.removeItem(CUSTOMER_PROFILE_KEY);
+    } catch {
+      // ignore
+    }
+    setSavedProfile(null);
+    setCustomerName('');
+    setCustomerPhone('');
+    setCustomerHistory(null);
+  };
 
   useEffect(() => {
     let active = true;
@@ -404,16 +478,6 @@ export function DigitalMenuPage() {
     setSubmitting(true);
     setError('');
     try {
-      try {
-        localStorage.setItem(
-          CUSTOMER_PROFILE_KEY,
-          JSON.stringify({ name: customerName.trim(), phone: customerPhone.trim() })
-        );
-      } catch {
-        // ignore
-      }
-
-      // איחוד כמויות לפי product_id לשמירה בשרת
       const mergedItems = new Map<number, number>();
       for (const entry of cartEntries) {
         mergedItems.set(
@@ -421,24 +485,40 @@ export function DigitalMenuPage() {
           (mergedItems.get(entry.productId) || 0) + entry.quantity * entry.unitsPerQty
         );
       }
-
       const breakdownNote = cartEntries.map((e) => `${e.quantity}× ${e.label}`).join(' | ');
       const combinedNotes = [notes.trim(), breakdownNote].filter(Boolean).join(' · ');
 
-      const res = await apiFetch<{ id?: number; order?: { id: number } }>('/api/public/orders', {
-        method: 'POST',
-        body: JSON.stringify({
-          friday_date: fridayDate,
-          recipient_name: customerName.trim(),
-          phone: customerPhone.trim(),
-          notes: combinedNotes,
-          items: Array.from(mergedItems.entries()).map(([product_id, quantity]) => ({
-            product_id,
-            quantity,
-          })),
-        }),
-      });
+      const res = await apiFetch<{ id?: number; customer_id?: number; user_id?: number; order?: { id: number } }>(
+        '/api/public/orders',
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            friday_date: fridayDate,
+            customer_id: savedProfile?.customerId || undefined,
+            recipient_name: customerName.trim(),
+            phone: customerPhone.trim(),
+            notes: combinedNotes,
+            items: Array.from(mergedItems.entries()).map(([product_id, quantity]) => ({
+              product_id,
+              quantity,
+            })),
+          }),
+        }
+      );
       const orderId = res.order?.id ?? res.id ?? Date.now();
+      const resolvedCustomerId = res.customer_id ?? res.user_id ?? savedProfile?.customerId ?? null;
+      const nextProfile: SavedCustomerProfile = {
+        customerId: resolvedCustomerId,
+        name: customerName.trim(),
+        phone: customerPhone.trim(),
+      };
+      setSavedProfile(nextProfile);
+      try {
+        localStorage.setItem(CUSTOMER_PROFILE_KEY, JSON.stringify(nextProfile));
+      } catch {
+        // ignore
+      }
+      fetchCustomerHistory(nextProfile);
       const targetPhone =
         data?.admin_whatsapp_phone && data.admin_whatsapp_phone !== '050-5551000'
           ? data.admin_whatsapp_phone
@@ -530,6 +610,128 @@ export function DigitalMenuPage() {
       </header>
 
       <main className="max-w-lg mx-auto px-3.5 pt-3.5 space-y-4">
+        {/* כרטיס לקוח חוזר אוטומטי (ללא סיסמה) — סטטוס פעיל, יתרה והיסטוריה */}
+        {savedProfile && (
+          <section className="bg-white rounded-3xl border border-[#DFC3A0] shadow-soft p-4 space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 min-w-0">
+                <div className="w-8 h-8 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
+                  <UserCheck className="w-4 h-4" />
+                </div>
+                <div className="min-w-0">
+                  <div className="font-extrabold text-sm text-slate-900 truncate">
+                    היי {savedProfile.name}, שמחים לראותך שוב!
+                  </div>
+                  <div className="text-[11px] text-slate-500 tabular-nums" dir="ltr">
+                    {savedProfile.phone}
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={handleSwitchUser}
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl bg-[#FAF6F0] border border-[#E8D5BE] text-[11px] font-bold text-slate-600 hover:text-red-600 shrink-0"
+              >
+                <LogOut className="w-3 h-3" />
+                <span>החלף משתמש</span>
+              </button>
+            </div>
+
+            {customerHistory && (
+              <div className="space-y-2.5 pt-2 border-t border-[#F3E9DC]">
+                {/* יתרת חשבון */}
+                <div className="flex items-center justify-between text-xs">
+                  <span className="inline-flex items-center gap-1 font-bold text-slate-600">
+                    <Wallet className="w-3.5 h-3.5 text-[#C85A17]" />
+                    <span>מצב חשבון:</span>
+                  </span>
+                  <span
+                    className={`font-extrabold tabular-nums ${
+                      customerHistory.balance < 0 ? 'text-red-600' : 'text-emerald-700'
+                    }`}
+                  >
+                    {customerHistory.balance < 0
+                      ? `חוב פתוח: ${formatILS(Math.abs(customerHistory.balance))}`
+                      : customerHistory.balance > 0
+                      ? `יתרת זכות: ${formatILS(customerHistory.balance)}`
+                      : 'מאוזן (₪0.00)'}
+                  </span>
+                </div>
+
+                {/* סטטוס הזמנה אחרונה / פעילה */}
+                {customerHistory.orders[0] && (() => {
+                  const latest = customerHistory.orders[0];
+                  const stepNum = getOrderStepNum(latest.status);
+                  const barCls =
+                    stepNum === 4
+                      ? 'bg-emerald-600'
+                      : stepNum === 3
+                      ? 'bg-orange-500'
+                      : stepNum === 2
+                      ? 'bg-blue-600'
+                      : 'bg-red-600';
+                  return (
+                    <div className="p-2.5 rounded-2xl bg-[#FAF6F0] border border-[#E8D5BE]/80 space-y-1.5">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="font-bold text-slate-800">
+                          הזמנה #{latest.id} ({formatFridayLabel(latest.friday_date)})
+                        </span>
+                        <span className="font-extrabold text-[#8A330B] tabular-nums">
+                          {formatILS(latest.total_amount)}
+                        </span>
+                      </div>
+                      <div className="w-full h-2 rounded-full bg-slate-200 overflow-hidden flex gap-0.5">
+                        {[1, 2, 3, 4].map((s) => (
+                          <div
+                            key={s}
+                            className={`flex-1 h-full ${s <= stepNum ? barCls : 'bg-slate-200'}`}
+                          />
+                        ))}
+                      </div>
+                      <div className="text-[11px] font-bold text-slate-600">
+                        סטטוס נוכחי: <strong className="text-slate-900">{ORDER_STATUS_LABELS[latest.status]}</strong>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* היסטוריית הזמנות קודמות */}
+                {customerHistory.orders.length > 1 && (
+                  <div>
+                    <button
+                      type="button"
+                      onClick={() => setShowPastOrders((v) => !v)}
+                      className="inline-flex items-center gap-1 text-[11px] font-extrabold text-[#C85A17] hover:underline"
+                    >
+                      <History className="w-3.5 h-3.5" />
+                      <span>
+                        {showPastOrders
+                          ? 'הסתר היסטוריית הזמנות'
+                          : `צפה בהיסטוריית הזמנות קודמות (${customerHistory.orders.length - 1})`}
+                      </span>
+                    </button>
+                    {showPastOrders && (
+                      <div className="mt-1.5 space-y-1 max-h-32 overflow-y-auto">
+                        {customerHistory.orders.slice(1).map((o) => (
+                          <div
+                            key={o.id}
+                            className="flex items-center justify-between text-[11px] px-2.5 py-1.5 rounded-xl bg-[#FAF6F0] border border-[#E8D5BE]/60 tabular-nums"
+                          >
+                            <span>
+                              #{o.id} · {formatFridayLabel(o.friday_date)}
+                            </span>
+                            <span className="font-bold text-slate-800">{formatILS(o.total_amount)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </section>
+        )}
+
         {/* מעקב שלבים חי לאחר שליחה */}
         {submitted && (
           <section className="bg-white rounded-2xl border-2 border-emerald-400 shadow-soft p-4 space-y-3">
