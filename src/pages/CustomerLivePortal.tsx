@@ -277,7 +277,7 @@ export function CustomerLivePortal({ customerId }: CustomerLivePortalProps) {
           <div className="p-4 rounded-2xl bg-orange-50 border border-orange-300 space-y-2.5">
             <div className="flex items-center gap-2 text-orange-950 font-extrabold text-sm">
               <CheckCircle2 className="w-5 h-5 text-orange-600 shrink-0" />
-              <span>בקשת הביטול להזמנה #{cancelNoticeOrderId} נרשמה — ממתין לאישור מנהל</span>
+              <span>בקשת הביטול להזמנה #{cancelNoticeOrderId} נרשמה — ממתין לאישור מוכר</span>
             </div>
             <a
               href={cancelWaUrl}
@@ -286,7 +286,7 @@ export function CustomerLivePortal({ customerId }: CustomerLivePortalProps) {
               className="w-full py-2.5 px-4 rounded-xl bg-[#25D366] hover:bg-[#1EB958] text-white font-extrabold text-sm flex items-center justify-center gap-2 shadow-sm"
             >
               <ExternalLink className="w-4 h-4" />
-              <span>שלח הודעת ביטול למנהל בוואטסאפ</span>
+              <span>שלח הודעת ביטול למוכר בוואטסאפ</span>
             </a>
           </div>
         )}
@@ -345,11 +345,11 @@ export function CustomerLivePortal({ customerId }: CustomerLivePortalProps) {
                 {currentOrder.status === 'cancel_requested' ? (
                   <div className="p-3 rounded-2xl bg-orange-50 border border-orange-300 flex items-center gap-2 text-xs font-extrabold text-orange-900">
                     <AlertTriangle className="w-4 h-4 text-orange-600 shrink-0" />
-                    <span>בקשת הביטול נשלחה — ממתין לאישור מנהל</span>
+                    <span>בקשת הביטול נשלחה — ממתין לאישור מוכר</span>
                   </div>
                 ) : currentOrder.status === 'cancelled' ? (
                   <div className="p-3 rounded-2xl bg-slate-100 border border-slate-300 text-xs font-extrabold text-slate-600 text-center">
-                    הזמנה זו בוטלה באישור מנהל
+                    הזמנה זו בוטלה באישור מוכר
                   </div>
                 ) : (
                   (() => {
@@ -515,8 +515,8 @@ export function CustomerLivePortal({ customerId }: CustomerLivePortalProps) {
               </button>
             </div>
             <p className="text-xs text-slate-600 leading-relaxed">
-              בקשת הביטול תועבר לאישור המנהל בוואטסאפ, וההזמנה תעבור לסטטוס{' '}
-              <strong>״ממתין לאישור ביטול״</strong> עד לאישור המנהל. האם להמשיך?
+              בקשת הביטול תועבר לאישור המוכר בוואטסאפ, וההזמנה תעבור לסטטוס{' '}
+              <strong>״ממתין לאישור ביטול״</strong> עד לאישור המוכר. האם להמשיך?
             </p>
             <div className="grid grid-cols-2 gap-2">
               <button
@@ -532,7 +532,7 @@ export function CustomerLivePortal({ customerId }: CustomerLivePortalProps) {
                 onClick={handleConfirmCancelRequest}
                 className="py-2.5 rounded-xl bg-red-600 hover:bg-red-700 disabled:opacity-60 text-white font-extrabold text-xs"
               >
-                {cancelling ? 'שולח...' : 'אשר ושלח למנהל'}
+                {cancelling ? 'שולח...' : 'אשר ושלח למוכר'}
               </button>
             </div>
           </div>

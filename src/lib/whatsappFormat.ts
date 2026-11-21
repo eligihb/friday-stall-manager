@@ -156,7 +156,8 @@ export function formatPublicApprovalWhatsApp(payload: {
     itemLines.push(`✨ הנחת מבצע זוג מארזים (2 ב-20 ₪): -${formatILS(payload.mix_discount!)}`);
   }
   const itemsText = itemLines.join('\n');
-  const notesLine = payload.notes ? `📝 הערה: ${payload.notes}` : '';
+  const trimmedNotes = (payload.notes || '').trim();
+  const notesLine = trimmedNotes ? `📝 הערה: ${trimmedNotes}` : '';
 
   const encoded = encodeOrderLinkPayload({
     id: payload.id,
@@ -164,7 +165,7 @@ export function formatPublicApprovalWhatsApp(payload: {
     p: payload.phone,
     f: payload.friday_date,
     t: payload.total_amount,
-    nt: payload.notes || '',
+    nt: trimmedNotes,
     i: payload.items.map((it) => ({
       pid: it.product_id ?? 0,
       q: it.quantity,
@@ -181,7 +182,8 @@ export function formatPublicApprovalWhatsApp(payload: {
     .replace(/\{תאריך\}/g, formatFridayLabel(payload.friday_date))
     .replace(/\{פריטים\}/g, itemsText)
     .replace(/\{סהכ\}/g, formatILS(payload.total_amount))
-    .replace(/\{הערות\}/g, notesLine)
+    .replace(/\{הערות\}\n?/g, notesLine ? `${notesLine}\n` : '')
+    .replace(/ממתין לאישור מנהל/g, 'ממתין לאישור מוכר')
     .replace(/\{קישור_אישור\}/g, buildQuickApproveUrl(payload.id, encoded))
     .replace(/\{קישור_צפייה\}/g, buildAdminOrderViewUrl(payload.id, encoded))
     .replace(/\{קישור\}/g, buildAdminOrderViewUrl(payload.id, encoded))

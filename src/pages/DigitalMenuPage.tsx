@@ -63,8 +63,19 @@ interface CatalogOption {
   mixGroup?: 'ciabatta_trio' | 'zalabia_trio';
 }
 
+type MenuCategory = 'all' | 'pastries' | 'jachnun' | 'ciabatta' | 'sweets';
+
+const MENU_CATEGORIES: Array<{ key: MenuCategory; label: string }> = [
+  { key: 'all', label: 'הכל' },
+  { key: 'pastries', label: 'מאפים' },
+  { key: 'jachnun', label: "ג'חנון" },
+  { key: 'ciabatta', label: "ג'בטות" },
+  { key: 'sweets', label: 'מתוקים ותוספות' },
+];
+
 interface CatalogCardItem {
   id: string;
+  category: Exclude<MenuCategory, 'all'>;
   emoji: string;
   title: string;
   description: string;
@@ -88,7 +99,7 @@ interface CartRow {
 
 const CUSTOMER_PROFILE_KEY = 'ht_public_customer_profile_v1';
 const FLAVORS = ['שום', 'זעתר', 'שומשום', 'רגיל'] as const;
-const LIVE_STEPS = ['1. ממתין לאישור', '2. אושרה והתקבלה', '3. מוכן למסירה', '4. נמסר'];
+const LIVE_STEPS = ['1. ממתין לאישור מוכר', '2. אושרה והתקבלה', '3. מוכן למסירה', '4. נמסר'];
 
 function loadSavedProfile(): SavedCustomerProfile | null {
   try {
@@ -129,6 +140,7 @@ export function DigitalMenuPage() {
   // סל הקניות (מערך שורות מותאמות אישית)
   const [cartRows, setCartRows] = useState<CartRow[]>([]);
   const [checkoutOpen, setCheckoutOpen] = useState(false);
+  const [selectedCategory, setSelectedCategory] = useState<MenuCategory>('all');
 
   // חלונית התאמה אישית למוצר (ProductOptionsModal)
   const [activeCard, setActiveCard] = useState<CatalogCardItem | null>(null);
@@ -247,6 +259,7 @@ export function DigitalMenuPage() {
       const packPrice = preorderOpen ? 20 : 25;
       cards.push({
         id: 'saluf',
+        category: 'pastries',
         emoji: '🫓',
         title: 'סאלוף',
         description: 'פיתה תימנית רכה ואוורירית מהטאבון',
@@ -280,6 +293,7 @@ export function DigitalMenuPage() {
       const packPrice = preorderOpen ? 20 : 25;
       cards.push({
         id: 'lahoh',
+        category: 'pastries',
         emoji: '🫓',
         title: 'לחוח',
         description: 'לחוח תימני מסורתי ורך במיוחד',
@@ -312,6 +326,7 @@ export function DigitalMenuPage() {
     if (jachnun) {
       cards.push({
         id: 'jachnun',
+        category: 'jachnun',
         emoji: '🍯',
         title: "ג'חנון ביתי",
         description: 'ג׳חנון אפוי לילה שלם, חם וריחני לשבת',
@@ -345,6 +360,7 @@ export function DigitalMenuPage() {
     if (ciabatta) {
       cards.push({
         id: 'ciabatta',
+        category: 'ciabatta',
         emoji: '🥖',
         title: "ג'בטה מאורכת בטעמים",
         description: 'טרייה ופריכה — ניתן לשלב בין טעמי שום, זעתר, שומשום ורגיל!',
@@ -377,6 +393,7 @@ export function DigitalMenuPage() {
     if (zalabia) {
       cards.push({
         id: 'zalabia',
+        category: 'sweets',
         emoji: '🍩',
         title: 'זלביה',
         description: 'מאפה מטוגן פריך וזהוב — נמכר במארז שלישייה',
@@ -421,6 +438,7 @@ export function DigitalMenuPage() {
       }
       cards.push({
         id: 'hilbe',
+        category: 'sweets',
         emoji: '🥣',
         title: 'חילבה טרייה',
         description: 'חילבה תימנית מוקצפת וטרייה',
@@ -450,8 +468,17 @@ export function DigitalMenuPage() {
         continue;
       }
       const isFrena = n.includes('פרנה');
+      const isSweetOrSide =
+        n.includes('סחוג') ||
+        n.includes('רוטב') ||
+        n.includes('סלסה') ||
+        n.includes('מתוק') ||
+        n.includes('עוג') ||
+        n.includes('כבד') ||
+        n.includes('חילבה');
       cards.push({
         id: `other_${p.id}`,
+        category: isSweetOrSide ? 'sweets' : 'pastries',
         emoji: '🥖',
         title: p.name,
         description: isFrena ? 'מאפה מרוקאי/תימני טרי וחם מהתנור' : 'טרי וחם מהמאפייה לשבת',
@@ -599,6 +626,7 @@ export function DigitalMenuPage() {
           customer_id: savedProfile?.customerId || undefined,
           recipient_name: customerName.trim(),
           phone: customerPhone.trim(),
+          total_amount: cartSummary.finalTotal,
           notes: combinedNotes,
           items: Array.from(mergedItems.entries()).map(([product_id, quantity]) => ({
             product_id,
@@ -640,7 +668,7 @@ export function DigitalMenuPage() {
         })),
         total_amount: cartSummary.finalTotal,
         mix_discount: cartSummary.totalMixDiscount,
-        notes: combinedNotes,
+        notes: notes.trim(),
       });
       const waUrl = buildWhatsAppShareUrl(waText, targetPhone);
       setSubmitted({ orderId, waUrl, total: cartSummary.finalTotal });
@@ -680,176 +708,36 @@ export function DigitalMenuPage() {
         </div>
       </header>
 
-      <main className="max-w-lg mx-auto px-3.5 pt-3.5 space-y-3">
-        {/* כרטיס לקוח חוזר אוטומטי (ללא סיסמה) */}
+      <main className="max-w-lg mx-auto px-3.5 pt-3 space-y-3">
+        {/* שורת ברכה קומפקטית ללקוח מזוהה */}
         {savedProfile && (
-          <section className="bg-white rounded-3xl border border-[#DFC3A0] shadow-soft p-3.5 space-y-2.5">
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2 min-w-0">
-                <div className="w-8 h-8 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
-                  <UserCheck className="w-4 h-4" />
-                </div>
-                <div className="min-w-0">
-                  <div className="font-extrabold text-sm text-slate-900 truncate">
-                    היי {savedProfile.name}, שמחים לראותך שוב!
-                  </div>
-                  <div className="text-[11px] text-slate-500 tabular-nums" dir="ltr">
-                    {savedProfile.phone}
-                  </div>
-                </div>
-              </div>
-                <div className="flex items-center gap-1.5 shrink-0">
-                  {savedProfile.customerId && (
-                    <a
-                      href={`#/c/${savedProfile.customerId}`}
-                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl bg-[#C85A17] hover:bg-[#A9440F] text-white text-[11px] font-extrabold shadow-sm"
-                    >
-                      <Wallet className="w-3 h-3" />
-                      <span>לאזור האישי שלי</span>
-                    </a>
-                  )}
-                  <button
-                    type="button"
-                    onClick={handleSwitchUser}
-                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl bg-[#FAF6F0] border border-[#E8D5BE] text-[11px] font-bold text-slate-600 hover:text-red-600 shrink-0"
-                  >
-                    <LogOut className="w-3 h-3" />
-                    <span>החלף משתמש</span>
-                  </button>
-                </div>
+          <div className="bg-white rounded-2xl border border-[#DFC3A0] shadow-soft px-3.5 py-2.5 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 min-w-0">
+              <UserCheck className="w-4 h-4 text-emerald-600 shrink-0" />
+              <span className="font-extrabold text-sm text-slate-900 truncate">
+                היי {savedProfile.name} 👋
+              </span>
             </div>
-
-            {customerHistory && (
-              <div className="space-y-2 pt-2 border-t border-[#F3E9DC]">
-                <div className="flex items-center justify-between text-xs">
-                  <span className="inline-flex items-center gap-1 font-bold text-slate-600">
-                    <Wallet className="w-3.5 h-3.5 text-[#C85A17]" />
-                    <span>מצב חשבון:</span>
-                  </span>
-                  <span
-                    className={`font-extrabold tabular-nums ${
-                      customerHistory.balance < 0 ? 'text-red-600' : 'text-emerald-700'
-                    }`}
-                  >
-                    {customerHistory.balance < 0
-                      ? `חוב פתוח: ${formatILS(Math.abs(customerHistory.balance))}`
-                      : customerHistory.balance > 0
-                      ? `יתרת זכות: ${formatILS(customerHistory.balance)}`
-                      : 'מאוזן (₪0.00)'}
-                  </span>
-                </div>
-
-                {customerHistory.orders[0] && (() => {
-                  const latest = customerHistory.orders[0];
-                  const stepNum = getOrderStepNum(latest.status);
-                  const barCls =
-                    stepNum === 4
-                      ? 'bg-emerald-600'
-                      : stepNum === 3
-                      ? 'bg-orange-500'
-                      : stepNum === 2
-                      ? 'bg-blue-600'
-                      : 'bg-red-600';
-                  return (
-                    <div className="p-2.5 rounded-2xl bg-[#FAF6F0] border border-[#E8D5BE]/80 space-y-1.5">
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="font-bold text-slate-800">
-                          הזמנה #{latest.id} ({formatFridayLabel(latest.friday_date)})
-                        </span>
-                        <span className="font-extrabold text-[#8A330B] tabular-nums">
-                          {formatILS(latest.total_amount)}
-                        </span>
-                      </div>
-                      <div className="w-full h-2 rounded-full bg-slate-200 overflow-hidden flex gap-0.5">
-                        {[1, 2, 3, 4].map((s) => (
-                          <div key={s} className={`flex-1 h-full ${s <= stepNum ? barCls : 'bg-slate-200'}`} />
-                        ))}
-                      </div>
-                      <div className="text-[11px] font-bold text-slate-600">
-                        סטטוס: <strong className="text-slate-900">{ORDER_STATUS_LABELS[latest.status]}</strong>
-                      </div>
-                    </div>
-                  );
-                })()}
-
-                {customerHistory.orders.length > 1 && (
-                  <div>
-                    <button
-                      type="button"
-                      onClick={() => setShowPastOrders((v) => !v)}
-                      className="inline-flex items-center gap-1 text-[11px] font-extrabold text-[#C85A17] hover:underline"
-                    >
-                      <History className="w-3.5 h-3.5" />
-                      <span>
-                        {showPastOrders
-                          ? 'הסתר היסטוריית הזמנות'
-                          : `היסטוריית הזמנות קודמות (${customerHistory.orders.length - 1})`}
-                      </span>
-                    </button>
-                    {showPastOrders && (
-                      <div className="mt-1.5 space-y-1 max-h-32 overflow-y-auto">
-                        {customerHistory.orders.slice(1).map((o) => (
-                          <div
-                            key={o.id}
-                            className="flex items-center justify-between text-[11px] px-2.5 py-1.5 rounded-xl bg-[#FAF6F0] border border-[#E8D5BE]/60 tabular-nums"
-                          >
-                            <span>
-                              #{o.id} · {formatFridayLabel(o.friday_date)}
-                            </span>
-                            <span className="font-bold text-slate-800">{formatILS(o.total_amount)}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
-          </section>
-        )}
-
-        {/* מעקב שלבים חי מיד לאחר שליחה */}
-        {submitted && (
-          <section className="bg-white rounded-2xl border-2 border-emerald-400 shadow-soft p-4 space-y-3">
-            <div className="flex items-center gap-2 text-emerald-800 font-extrabold text-sm">
-              <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
-              <span>הזמנה #{submitted.orderId} נשלחה לאישור המוכר!</span>
-            </div>
-            <div className="w-full h-2 rounded-full bg-slate-100 overflow-hidden flex gap-1">
-              <div className="flex-1 bg-red-600" />
-              <div className="flex-1 bg-slate-200" />
-              <div className="flex-1 bg-slate-200" />
-              <div className="flex-1 bg-slate-200" />
-            </div>
-            <div className="grid grid-cols-4 text-center text-[10px] font-bold">
-              {LIVE_STEPS.map((st, idx) => (
-                <span key={st} className={idx === 0 ? 'text-red-700 font-extrabold' : 'text-slate-400'}>
-                  {st}
-                </span>
-              ))}
-            </div>
-            <a
-              href={submitted.waUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="w-full py-2.5 px-4 rounded-xl bg-[#25D366] text-white font-extrabold text-xs flex items-center justify-center gap-1.5 shadow-sm"
-            >
-              <ExternalLink className="w-4 h-4" />
-              <span>פתח וואטסאפ לאישור הזמנה ({formatILS(submitted.total)})</span>
-            </a>
-
-            <QuickCustomerPayBox amountToPay={submitted.total} />
-
-            {savedProfile?.customerId && (
-              <a
-                href={`#/c/${savedProfile.customerId}`}
-                className="w-full py-2 px-4 rounded-xl bg-[#FAF6F0] border border-[#E8D5BE] text-[#8A330B] font-extrabold text-xs flex items-center justify-center gap-1.5 hover:bg-[#F3E9DC]"
+            <div className="flex items-center gap-1.5 shrink-0">
+              {savedProfile.customerId && (
+                <a
+                  href={`#/c/${savedProfile.customerId}`}
+                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl bg-[#C85A17] hover:bg-[#A9440F] text-white text-[11px] font-extrabold shadow-sm"
+                >
+                  <Wallet className="w-3 h-3" />
+                  <span>לאזור האישי שלי</span>
+                </a>
+              )}
+              <button
+                type="button"
+                onClick={handleSwitchUser}
+                className="inline-flex items-center gap-1 px-2 py-1 rounded-xl bg-[#FAF6F0] border border-[#E8D5BE] text-[11px] font-bold text-slate-600 hover:text-red-600 shrink-0"
               >
-                <Wallet className="w-3.5 h-3.5" />
-                <span>מעבר לאזור האישי ולמעקב אחר ההזמנה</span>
-              </a>
-            )}
-          </section>
+                <LogOut className="w-3 h-3" />
+                <span>החלף משתמש</span>
+              </button>
+            </div>
+          </div>
         )}
 
         {error && (
@@ -858,61 +746,157 @@ export function DigitalMenuPage() {
           </div>
         )}
 
-        {/* רשימת כרטיסיות מוצר נקיות — לחיצה פותחת ProductOptionsModal */}
-        {loading ? (
-          <div className="bg-white rounded-2xl p-8 text-center text-sm text-slate-400 border border-[#E8D5BE]">
-            טוען את התפריט...
-          </div>
-        ) : (
-          <div className="space-y-2.5">
-            {catalogCards.map((card) => {
-              const inCartCount = cardBadgeCount(card.id);
-              return (
-                <button
-                  key={card.id}
-                  type="button"
-                  disabled={!card.inStock}
-                  onClick={() => openProductModal(card)}
-                  className={`w-full text-right rounded-2xl p-4 border transition-all flex items-center justify-between gap-3 ${
-                    !card.inStock
-                      ? 'bg-slate-50 border-slate-200 opacity-60 cursor-not-allowed'
-                      : inCartCount > 0
-                      ? 'bg-[#FFF7ED] border-[#C85A17] shadow-sm active:scale-[0.99]'
-                      : 'bg-white border-[#E8D5BE] hover:border-[#C85A17]/60 shadow-soft active:scale-[0.99]'
-                  }`}
+        {/* מסך אישור הזמנה ממוקד (מסתיר את רשימת התפריט שמתחת) */}
+        {submitted ? (
+          <section className="bg-white rounded-3xl border-2 border-emerald-400 shadow-card p-5 space-y-4">
+            <div className="text-center space-y-1.5">
+              <div className="w-12 h-12 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto">
+                <CheckCircle2 className="w-7 h-7" />
+              </div>
+              <h2 className="font-serif text-xl font-extrabold text-emerald-900">
+                הזמנה #{submitted.orderId} נשלחה לאישור המוכר!
+              </h2>
+              <p className="text-xs text-slate-600">
+                סה״כ להזמנה: <strong className="text-[#C85A17]">{formatILS(submitted.total)}</strong>
+              </p>
+            </div>
+
+            {/* סרגל 4 שלבים */}
+            <div className="space-y-1.5">
+              <div className="w-full h-2.5 rounded-full bg-slate-100 overflow-hidden flex gap-1">
+                <div className="flex-1 bg-red-600" />
+                <div className="flex-1 bg-slate-200" />
+                <div className="flex-1 bg-slate-200" />
+                <div className="flex-1 bg-slate-200" />
+              </div>
+              <div className="grid grid-cols-4 text-center text-[10px] font-bold leading-tight">
+                {LIVE_STEPS.map((st, idx) => (
+                  <span key={st} className={idx === 0 ? 'text-red-700 font-extrabold' : 'text-slate-400'}>
+                    {st}
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            {/* קופסת תשלום מהיר ב-Bit / PayBox / מזומן */}
+            <QuickCustomerPayBox amountToPay={submitted.total} />
+
+            {/* פעולות המשך */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+              {savedProfile?.customerId && (
+                <a
+                  href={`#/c/${savedProfile.customerId}`}
+                  className="py-2.5 px-4 rounded-xl bg-[#2A1F18] hover:bg-[#3d2e24] text-white font-extrabold text-xs flex items-center justify-center gap-1.5"
                 >
-                  <div className="flex items-start gap-3 min-w-0 flex-1">
-                    <div className="w-11 h-11 rounded-2xl bg-[#FAF3E8] border border-[#E8D5BE] flex items-center justify-center text-xl shrink-0">
-                      {card.emoji}
-                    </div>
-                    <div className="min-w-0 flex-1 space-y-1">
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        <span className="font-extrabold text-base text-slate-900">{card.title}</span>
-                        <span
-                          className={`px-1.5 py-0.5 rounded-full text-[10px] font-extrabold ${
-                            card.inStock ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-700'
-                          }`}
-                        >
-                          {card.inStock ? 'במלאי' : 'אזל'}
-                        </span>
-                        {inCartCount > 0 && (
-                          <span className="px-2 py-0.5 rounded-full bg-[#C85A17] text-white text-[10px] font-extrabold tabular-nums">
-                            {inCartCount} בסל
-                          </span>
-                        )}
-                      </div>
-                      <div className="text-xs font-bold text-[#8A330B] leading-snug">
-                        {card.priceSummary}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="w-8 h-8 rounded-xl bg-[#FAF6F0] border border-[#E8D5BE] flex items-center justify-center text-[#C85A17] shrink-0">
-                    {card.inStock ? <Plus className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4 text-slate-400" />}
-                  </div>
-                </button>
-              );
-            })}
-          </div>
+                  <Wallet className="w-3.5 h-3.5" />
+                  <span>לאזור האישי שלי</span>
+                </a>
+              )}
+              <button
+                type="button"
+                onClick={() => setSubmitted(null)}
+                className="py-2.5 px-4 rounded-xl bg-[#FAF6F0] border border-[#E8D5BE] text-[#8A330B] font-extrabold text-xs flex items-center justify-center gap-1.5 hover:bg-[#F3E9DC]"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>חזרה לתפריט / הזמנה נוספת</span>
+              </button>
+            </div>
+
+            {/* קישור משני עדין לשליחה חוזרת בוואטסאפ */}
+            <div className="pt-2 border-t border-[#F3E9DC] text-center">
+              <a
+                href={submitted.waUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-[11px] font-semibold text-slate-500 hover:text-[#25D366] underline underline-offset-2"
+              >
+                <ExternalLink className="w-3 h-3" />
+                <span>וואטסאפ לא נפתח אוטומטית? לחץ לשליחה חוזרת</span>
+              </a>
+            </div>
+          </section>
+        ) : (
+          <>
+            {/* סרגל סינון קטגוריות מהיר */}
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar">
+              {MENU_CATEGORIES.map((cat) => {
+                const active = selectedCategory === cat.key;
+                return (
+                  <button
+                    key={cat.key}
+                    type="button"
+                    onClick={() => setSelectedCategory(cat.key)}
+                    className={`px-3 py-1.5 rounded-full text-xs font-extrabold whitespace-nowrap transition-all border ${
+                      active
+                        ? 'bg-[#2B1B12] text-amber-50 border-[#2B1B12] shadow-sm'
+                        : 'bg-white text-slate-700 border-[#E8D5BE] hover:border-[#C85A17]/60'
+                    }`}
+                  >
+                    {cat.label}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* רשימת כרטיסיות מוצר קומפקטיות — לחיצה פותחת ProductOptionsModal */}
+            {loading ? (
+              <div className="bg-white rounded-2xl p-8 text-center text-sm text-slate-400 border border-[#E8D5BE]">
+                טוען את התפריט...
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {catalogCards
+                  .filter((c) => selectedCategory === 'all' || c.category === selectedCategory)
+                  .map((card) => {
+                    const inCartCount = cardBadgeCount(card.id);
+                    return (
+                      <button
+                        key={card.id}
+                        type="button"
+                        disabled={!card.inStock}
+                        onClick={() => openProductModal(card)}
+                        className={`w-full text-right rounded-2xl px-3.5 py-2.5 border transition-all flex items-center justify-between gap-2.5 ${
+                          !card.inStock
+                            ? 'bg-slate-50 border-slate-200 opacity-60 cursor-not-allowed'
+                            : inCartCount > 0
+                            ? 'bg-[#FFF7ED] border-[#C85A17] shadow-sm active:scale-[0.99]'
+                            : 'bg-white border-[#E8D5BE] hover:border-[#C85A17]/60 shadow-soft active:scale-[0.99]'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                          <div className="w-9 h-9 rounded-xl bg-[#FAF3E8] border border-[#E8D5BE] flex items-center justify-center text-lg shrink-0">
+                            {card.emoji}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="font-extrabold text-sm text-slate-900">{card.title}</span>
+                              <span
+                                className={`px-1.5 py-0.5 rounded-full text-[10px] font-extrabold ${
+                                  card.inStock ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-700'
+                                }`}
+                              >
+                                {card.inStock ? 'במלאי' : 'אזל'}
+                              </span>
+                              {inCartCount > 0 && (
+                                <span className="px-2 py-0.5 rounded-full bg-[#C85A17] text-white text-[10px] font-extrabold tabular-nums">
+                                  {inCartCount} בסל
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-[11px] font-bold text-[#8A330B] leading-snug mt-0.5">
+                              {card.priceSummary}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="w-7 h-7 rounded-xl bg-[#FAF6F0] border border-[#E8D5BE] flex items-center justify-center text-[#C85A17] shrink-0">
+                          {card.inStock ? <Plus className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4 text-slate-400" />}
+                        </div>
+                      </button>
+                    );
+                  })}
+              </div>
+            )}
+          </>
         )}
       </main>
 
@@ -1037,7 +1021,8 @@ export function DigitalMenuPage() {
         )}
       </BottomSheet>
 
-      {/* סרגל סיכום צף בתחתית המסך + באנר Upsell חכם */}
+      {/* סרגל סיכום צף בתחתית המסך + באנר Upsell חכם (מוסתר במסך אישור ההזמנה) */}
+      {!submitted && (
       <div className="fixed bottom-0 inset-x-0 z-30 bg-white/95 backdrop-blur-md border-t border-[#E8D5BE] shadow-[0_-6px_24px_rgba(30,36,43,0.12)]">
         {cartSummary.upsell && (
           <div className="bg-amber-50 border-b border-amber-200 px-4 py-1.5 text-center text-[11px] font-extrabold text-amber-950 flex items-center justify-center gap-1.5">
@@ -1070,6 +1055,7 @@ export function DigitalMenuPage() {
           </button>
         </div>
       </div>
+      )}
 
       {/* חלונית סל קניות חכם ושליחה בוואטסאפ */}
       <BottomSheet
@@ -1174,6 +1160,12 @@ export function DigitalMenuPage() {
             onChange={(e) => setNotes(e.target.value)}
             placeholder="הערות להזמנה (אופציונלי)"
             className="w-full px-3.5 py-2.5 rounded-xl border border-[#E8D5BE] bg-white text-sm"
+          />
+
+          {/* קופסת תשלום מהיר (Bit / PayBox / מזומן) כבר בתוך סל ההזמנה לפני השליחה */}
+          <QuickCustomerPayBox
+            amountToPay={cartSummary.finalTotal}
+            title="אפשרויות תשלום (ניתן לשלם עכשיו או לאחר השליחה)"
           />
 
           <div className="p-2.5 rounded-xl bg-amber-50 border border-amber-300 text-amber-950 text-[11px] font-bold flex items-start gap-2">

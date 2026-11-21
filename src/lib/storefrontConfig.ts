@@ -19,7 +19,7 @@ export const DEFAULT_CUSTOMER_ORDER_TEMPLATE = `🫓 *{שם_עסק} — הזמנ
 ━━━━━━━━━━━━━━━━
 💳 *סה״כ לתשלום: {סהכ}*
 {הערות}
-⏳ סטטוס: ממתין לאישור מנהל
+⏳ סטטוס: ממתין לאישור מוכר
 
 ✅ *אישור מיידי להזמנה:*
 {קישור_אישור}
@@ -50,11 +50,15 @@ export function loadStorefrontConfig(): StorefrontConfig {
       if (shareTpl.includes('{פריטים}') && shareTpl.includes('להזמנה מהירה אונליין')) {
         shareTpl = DEFAULT_MENU_SHARE_TEMPLATE;
       }
+      const orderTpl = (parsed.customerOrderTemplate || DEFAULT_CUSTOMER_ORDER_TEMPLATE).replace(
+        /ממתין לאישור מנהל/g,
+        'ממתין לאישור מוכר'
+      );
       return {
         customerPriceMode: parsed.customerPriceMode || 'auto',
         hiddenProductIds: parsed.hiddenProductIds || {},
         menuShareTemplate: shareTpl,
-        customerOrderTemplate: parsed.customerOrderTemplate || DEFAULT_CUSTOMER_ORDER_TEMPLATE,
+        customerOrderTemplate: orderTpl,
         paymentPhone: parsed.paymentPhone || DEFAULT_PAYMENT_PHONE,
         bitLink: parsed.bitLink || '',
         payboxLink: parsed.payboxLink || '',

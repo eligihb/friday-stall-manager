@@ -790,10 +790,17 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
     }
 
     const pMap = new Map(db.products.map((p) => [p.id, p]));
-    const custOrders = db.orders
+    const allCustOrders = db.orders
       .filter((o) => o.user_id === found!.id)
-      .sort((a, b) => b.id - a.id)
-      .slice(0, 10)
+      .sort((a, b) => b.friday_date.localeCompare(a.friday_date) || b.id - a.id);
+
+    const activeOrders = allCustOrders.filter((o) => o.status !== 'cancelled');
+    const computedTotal = round2(activeOrders.reduce((s, o) => s + (Number(o.total_amount) || 0), 0));
+    const computedPaid = round2(activeOrders.reduce((s, o) => s + (Number(o.paid_amount) || 0), 0));
+    const computedBalance = round2(computedPaid - computedTotal);
+
+    const custOrders = allCustOrders
+      .slice(0, 20)
       .map((o) => ({
         ...o,
         items: db.order_items
@@ -809,7 +816,7 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
         id: found.id,
         name: found.name,
         phone: found.phone,
-        balance: found.balance,
+        balance: computedBalance,
       },
       orders: custOrders,
     } as T;
@@ -891,7 +898,8 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
       });
     }
 
-    total_amount = round2(total_amount);
+    const clientTotal = Number(body.total_amount ?? 0);
+    total_amount = clientTotal > 0 ? round2(clientTotal) : round2(total_amount);
     const combinedNotes = [`טלפון: ${phone}`, notesRaw].filter(Boolean).join(' | ');
     db.orders.push({
       id: orderId,
@@ -907,6 +915,7 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
       notes: combinedNotes,
       created_at: new Date().toISOString().slice(0, 10),
     });
+    matchedCustomer.balance = round2((matchedCustomer.balance || 0) - total_amount);
     saveDb(db);
 
     return {

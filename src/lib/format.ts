@@ -84,7 +84,7 @@ export const ORDER_TYPE_LABELS: Record<OrderType, string> = {
 };
 
 export const ORDER_STATUS_LABELS: Record<OrderStatus, string> = {
-  awaiting_approval: 'ממתין לאישור מנהל',
+  awaiting_approval: 'ממתין לאישור מוכר',
   pending: 'ממתין',
   received: 'התקבל',
   ready: 'מוכן למסירה',
