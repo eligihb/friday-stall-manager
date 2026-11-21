@@ -243,7 +243,7 @@ export function CustomerLivePortal({ customerId }: CustomerLivePortalProps) {
               </div>
             </div>
             <div className="p-3 rounded-2xl bg-emerald-50/70 border border-emerald-200">
-              <div className="text-[11px] font-bold text-emerald-700">מתוכם שולם</div>
+              <div className="text-[11px] font-bold text-emerald-700">שולם בפועל</div>
               <div className="text-lg sm:text-xl font-extrabold text-emerald-700 mt-1">
                 {formatILS(accountSummary.totalPaid)}
               </div>
@@ -260,7 +260,7 @@ export function CustomerLivePortal({ customerId }: CustomerLivePortalProps) {
                   accountSummary.balanceDue > 0 ? 'text-red-700' : 'text-emerald-700'
                 }`}
               >
-                יתרה לתשלום
+                יתרה לתשלום בפועל
               </div>
               <div
                 className={`text-lg sm:text-xl font-extrabold mt-1 ${
@@ -407,12 +407,17 @@ export function CustomerLivePortal({ customerId }: CustomerLivePortalProps) {
                 <div className="flex items-center justify-between pt-2 border-t border-[#F3E9DC] text-sm tabular-nums">
                   <div className="space-y-0.5">
                     <div className="text-slate-600 font-semibold">סה״כ להזמנה:</div>
-                    {currentOrder.paid_amount > 0 && (
-                      <div className="text-xs font-bold text-emerald-700">
-                        שולם: {formatILS(currentOrder.paid_amount)}
-                        {unpaid > 0 && ` · נותר: ${formatILS(unpaid)}`}
-                      </div>
-                    )}
+                    <div
+                      className={`text-xs font-bold ${
+                        currentOrder.paid_amount > 0 ? 'text-emerald-700' : 'text-red-600'
+                      }`}
+                    >
+                      {currentOrder.paid_amount > 0
+                        ? `שולם ${formatILS(currentOrder.paid_amount)} מתוך ${formatILS(
+                            currentOrder.total_amount
+                          )}${unpaid > 0 ? ` · נותר: ${formatILS(unpaid)}` : ''}`
+                        : `לא שולם (₪0.00 מתוך ${formatILS(currentOrder.total_amount)})`}
+                    </div>
                   </div>
                   <span className="font-extrabold text-lg text-[#C85A17]">
                     {formatILS(currentOrder.total_amount)}
@@ -497,6 +502,24 @@ export function CustomerLivePortal({ customerId }: CustomerLivePortalProps) {
                         ))}
                       </div>
                     )}
+                    <div className="flex items-center justify-between pt-1.5 border-t border-[#E8D5BE]/60 text-[11px] font-bold tabular-nums">
+                      <span className="text-slate-500">מצב תשלום להזמנה:</span>
+                      <span
+                        className={
+                          o.status === 'cancelled'
+                            ? 'text-slate-500'
+                            : o.paid_amount > 0
+                            ? 'text-emerald-700'
+                            : 'text-red-600'
+                        }
+                      >
+                        {o.status === 'cancelled'
+                          ? 'בוטל (₪0.00)'
+                          : o.paid_amount > 0
+                          ? `שולם ${formatILS(o.paid_amount)} מתוך ${formatILS(o.total_amount)}`
+                          : `לא שולם (₪0.00 מתוך ${formatILS(o.total_amount)})`}
+                      </span>
+                    </div>
                   </div>
                 );
               })}

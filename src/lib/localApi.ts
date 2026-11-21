@@ -243,11 +243,39 @@ function mergeImportedBackupIntoDb(db: LocalDb): boolean {
         (o) =>
           o.user_id === cust!.id &&
           o.friday_date === pl.f &&
-          Math.abs(o.total_amount - pl.t) < 0.01
+          o.status !== 'cancelled' &&
+          o.status !== 'delivered'
       ) ||
       null;
 
     if (existing) {
+      if (pl.t > 0 && Math.abs(existing.total_amount - pl.t) > 0.01) {
+        existing.total_amount = round2(pl.t);
+        mutated = true;
+      }
+      if (Array.isArray(pl.i) && pl.i.length > 0) {
+        db.order_items = db.order_items.filter((oi) => oi.order_id !== existing.id);
+        for (const it of pl.i) {
+          const prod = pMap.get(Number(it.pid)) || db.products[0];
+          if (!prod) continue;
+          db.order_items.push({
+            id: db.nextIds.order_items++,
+            order_id: existing.id,
+            product_id: prod.id,
+            quantity: Math.max(1, Number(it.q) || 1),
+            unit_price_snapshot: Math.max(0, Number(it.u) || prod.customer_price),
+            cost_price_snapshot: prod.cost_price,
+          });
+        }
+        mutated = true;
+      }
+      if (pl.nt) {
+        const updatedNotes = [pl.p ? `טלפון: ${pl.p}` : '', pl.nt].filter(Boolean).join(' | ');
+        if (existing.notes !== updatedNotes) {
+          existing.notes = updatedNotes;
+          mutated = true;
+        }
+      }
       if (rec.status === 'received' && (existing.status === 'awaiting_approval' || existing.status === 'pending')) {
         existing.status = 'received';
         mutated = true;
@@ -595,7 +623,7 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
       db.users.push(matchedCustomer);
     }
 
-    // 2. בדיקה אם ההזמנה כבר קיימת לפי ID או לפי אותו לקוח + תאריך + סכום
+    // 2. בדיקה אם ההזמנה כבר קיימת לפי ID או לפי אותו לקוח + תאריך שישי פעיל (למניעת כפילויות ומיזוג תוספות)
     const incomingTotal = round2(Number(body.total_amount ?? body.t ?? 0));
     const existingOrder =
       (externalId ? db.orders.find((o) => o.id === externalId) : null) ||
@@ -603,24 +631,50 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
         (o) =>
           o.user_id === matchedCustomer!.id &&
           o.friday_date === friday_date &&
-          Math.abs(o.total_amount - incomingTotal) < 0.01 &&
-          o.notes.includes(notesRaw.slice(0, 20))
+          o.status !== 'cancelled' &&
+          o.status !== 'delivered'
       ) ||
       null;
 
+    const pMap = new Map(db.products.map((p) => [p.id, p]));
+
     if (existingOrder) {
-      if (targetStatus === 'received' && (existingOrder.status === 'awaiting_approval' || existingOrder.status === 'pending')) {
-        existingOrder.status = 'received';
-        saveDb(db);
+      if (incomingTotal > 0) {
+        existingOrder.total_amount = incomingTotal;
       }
-      return { id: existingOrder.id, order: existingOrder, imported: false } as T;
+      if (rawItems.length > 0) {
+        db.order_items = db.order_items.filter((oi) => oi.order_id !== existingOrder.id);
+        for (const it of rawItems) {
+          const pid = Number(it.product_id ?? it.pid ?? 0);
+          const qty = Math.max(1, Number(it.quantity ?? it.q ?? 1));
+          const prod = pMap.get(pid) || db.products[0];
+          const unitPrice = Math.max(0, Number(it.unit_price ?? it.u ?? prod?.customer_price ?? 0));
+          if (prod) {
+            db.order_items.push({
+              id: db.nextIds.order_items++,
+              order_id: existingOrder.id,
+              product_id: prod.id,
+              quantity: qty,
+              unit_price_snapshot: unitPrice,
+              cost_price_snapshot: prod.cost_price,
+            });
+          }
+        }
+      }
+      if (notesRaw) {
+        existingOrder.notes = [phone ? `טלפון: ${phone}` : '', notesRaw].filter(Boolean).join(' | ');
+      }
+      if (targetStatus === 'received') {
+        existingOrder.status = 'received';
+      }
+      saveDb(db);
+      return { id: existingOrder.id, order: existingOrder, imported: false, updated: true } as T;
     }
 
     // 3. יצירת ההזמנה במאגר המנהל
     const orderId = externalId && !db.orders.some((o) => o.id === externalId) ? externalId : db.nextIds.orders++;
     if (orderId >= db.nextIds.orders) db.nextIds.orders = orderId + 1;
 
-    const pMap = new Map(db.products.map((p) => [p.id, p]));
     let calcTotal = 0;
     for (const it of rawItems) {
       const pid = Number(it.product_id ?? it.pid ?? 0);
@@ -799,9 +853,7 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
     const computedPaid = round2(activeOrders.reduce((s, o) => s + (Number(o.paid_amount) || 0), 0));
     const computedBalance = round2(computedPaid - computedTotal);
 
-    const custOrders = allCustOrders
-      .slice(0, 20)
-      .map((o) => ({
+    const custOrders = allCustOrders.map((o) => ({
         ...o,
         items: db.order_items
           .filter((it) => it.order_id === o.id)
@@ -868,6 +920,97 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
 
     const pMap = new Map(db.products.map((p) => [p.id, p]));
     const pricing = getFridayPricingStatus(friday_date);
+    const payPrefMap: Record<string, string> = {
+      cash_pickup: 'תשלום במזומן בעת האיסוף',
+      bank_transfer: 'תשלום בהעברה בנקאית',
+      bit: 'תשלום מראש ב-Bit',
+      paybox: 'תשלום מראש ב-PayBox',
+    };
+    const payPrefNote = payPrefMap[String(body.payment_preference || '')] || '';
+
+    // בדיקה אם התבקש מיזוג להזמנה קיימת לאותו יום שישי
+    const mergeOrderId = Number(body.merge_order_id || 0);
+    const existingToMerge = mergeOrderId
+      ? db.orders.find(
+          (o) =>
+            o.id === mergeOrderId &&
+            o.status !== 'cancelled' &&
+            o.status !== 'delivered'
+        ) || null
+      : null;
+
+    if (existingToMerge) {
+      let addedCalcTotal = 0;
+      const resultItems: Array<{
+        product_id: number;
+        product_name: string;
+        quantity: number;
+        unit_price: number;
+      }> = [];
+
+      for (const it of validItems) {
+        const prod = pMap.get(Number(it.product_id));
+        if (!prod || !prod.is_active) throwErr('אחד המוצרים שנבחרו אינו זמין', 400);
+        const unitPrice = pricing.isPreorder ? prod.preorder_price : prod.customer_price;
+        addedCalcTotal += unitPrice * it.quantity;
+
+        const existingItem = db.order_items.find(
+          (oi) => oi.order_id === existingToMerge.id && oi.product_id === prod.id
+        );
+        if (existingItem) {
+          existingItem.quantity += it.quantity;
+        } else {
+          db.order_items.push({
+            id: db.nextIds.order_items++,
+            order_id: existingToMerge.id,
+            product_id: prod.id,
+            quantity: it.quantity,
+            unit_price_snapshot: unitPrice,
+            cost_price_snapshot: prod.cost_price,
+          });
+        }
+        resultItems.push({
+          product_id: prod.id,
+          product_name: prod.name,
+          quantity: it.quantity,
+          unit_price: unitPrice,
+        });
+      }
+
+      const oldTotal = existingToMerge.total_amount;
+      const clientMergedTotal = Number(body.total_amount ?? 0);
+      const nextTotal =
+        clientMergedTotal > 0 ? round2(clientMergedTotal) : round2(oldTotal + addedCalcTotal);
+
+      existingToMerge.total_amount = nextTotal;
+      existingToMerge.status = 'awaiting_approval';
+      const additionNote = [payPrefNote, notesRaw ? `תוספת: ${notesRaw}` : '']
+        .filter(Boolean)
+        .join(' | ');
+      if (additionNote) {
+        existingToMerge.notes = [existingToMerge.notes, additionNote].filter(Boolean).join(' | ');
+      }
+      matchedCustomer.balance = round2((matchedCustomer.balance || 0) - Math.max(0, nextTotal - oldTotal));
+      saveDb(db);
+
+      return {
+        id: existingToMerge.id,
+        merged: true,
+        customer_id: matchedCustomer.id,
+        user_id: matchedCustomer.id,
+        friday_date,
+        recipient_name: matchedCustomer.name || recipient_name,
+        phone,
+        pricing_mode: pricing.mode,
+        total_amount: nextTotal,
+        status: 'awaiting_approval',
+        items: resultItems,
+        business_name: db.settings.business_name || 'דוכן שישי תימני',
+        admin_whatsapp_phone: db.settings.admin_whatsapp_phone || '0542452100',
+        whatsapp_footer: db.settings.whatsapp_footer || 'שבת שלום ומבורכת! 🕯️',
+      } as T;
+    }
+
     const orderId = db.nextIds.orders++;
     let total_amount = 0;
     const resultItems: Array<{
@@ -900,13 +1043,6 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
 
     const clientTotal = Number(body.total_amount ?? 0);
     total_amount = clientTotal > 0 ? round2(clientTotal) : round2(total_amount);
-    const payPrefMap: Record<string, string> = {
-      cash_pickup: 'תשלום במזומן בעת האיסוף',
-      bank_transfer: 'תשלום בהעברה בנקאית',
-      bit: 'תשלום מראש ב-Bit',
-      paybox: 'תשלום מראש ב-PayBox',
-    };
-    const payPrefNote = payPrefMap[String(body.payment_preference || '')] || '';
     const combinedNotes = [`טלפון: ${phone}`, payPrefNote, notesRaw].filter(Boolean).join(' | ');
     db.orders.push({
       id: orderId,

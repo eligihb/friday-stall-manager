@@ -148,6 +148,9 @@ export function formatPublicApprovalWhatsApp(payload: {
   mix_discount?: number;
   payment_label?: string;
   notes?: string;
+  is_update?: boolean;
+  previous_total?: number;
+  added_items?: Array<{ product_name: string; quantity: number; unit_price: number }>;
 }): string {
   const cfg = loadStorefrontConfig();
   const itemLines = payload.items.map(
@@ -156,7 +159,23 @@ export function formatPublicApprovalWhatsApp(payload: {
   if ((payload.mix_discount ?? 0) > 0) {
     itemLines.push(`✨ הנחת מבצע זוג מארזים (2 ב-20 ₪): -${formatILS(payload.mix_discount!)}`);
   }
-  const itemsText = itemLines.join('\n');
+
+  let itemsText = itemLines.join('\n');
+  if (payload.is_update && payload.added_items && payload.added_items.length > 0) {
+    const addedLines = payload.added_items.map(
+      (it) => `➕ ${it.quantity} × ${it.product_name} — ${formatILS(it.quantity * it.unit_price)}`
+    );
+    const prevTotal = payload.previous_total ?? 0;
+    const addedDelta = Math.max(0, payload.total_amount - prevTotal);
+    itemsText = [
+      `🔄 *מה נוסף כעת להזמנה #${payload.id}:*`,
+      ...addedLines,
+      `➕ תוספת לתשלום: *${formatILS(addedDelta)}* (קודם: ${formatILS(prevTotal)})`,
+      ``,
+      `📦 *סה״כ הזמנה מאוחדת מעודכנת (#${payload.id}):*`,
+      ...itemLines,
+    ].join('\n');
+  }
   const trimmedNotes = (payload.notes || '').trim();
   const paymentLine = payload.payment_label ? `💰 אופן תשלום: ${payload.payment_label}` : '';
   const notesLine = [paymentLine, trimmedNotes ? `📝 הערה: ${trimmedNotes}` : '']
@@ -178,7 +197,7 @@ export function formatPublicApprovalWhatsApp(payload: {
     })),
   });
 
-  return cfg.customerOrderTemplate
+  const baseMsg = cfg.customerOrderTemplate
     .replace(/\{שם_עסק\}/g, payload.business_name)
     .replace(/\{מספר\}/g, String(payload.id))
     .replace(/\{שם\}/g, payload.recipient_name)
@@ -193,6 +212,11 @@ export function formatPublicApprovalWhatsApp(payload: {
     .replace(/\{קישור\}/g, buildAdminOrderViewUrl(payload.id, encoded))
     .replace(/\n{3,}/g, '\n\n')
     .trim();
+
+  if (payload.is_update) {
+    return `🔄 *תוספת להזמנה קיימת (#${payload.id})*\n` + baseMsg;
+  }
+  return baseMsg;
 }
 
 export function formatSupplierLedgerWhatsApp(user: User, orders: Order[]): string {

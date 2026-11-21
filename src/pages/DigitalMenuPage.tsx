@@ -146,6 +146,7 @@ export function DigitalMenuPage() {
   const [cartRows, setCartRows] = useState<CartRow[]>([]);
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState<MenuCategory>('all');
+  const [mergeMode, setMergeMode] = useState<'merge' | 'new'>('merge');
 
   // חלונית התאמה אישית למוצר (ProductOptionsModal)
   const [activeCard, setActiveCard] = useState<CatalogCardItem | null>(null);
@@ -172,11 +173,26 @@ export function DigitalMenuPage() {
     orderId: number;
     waUrl: string;
     total: number;
+    addedAmount?: number;
+    merged?: boolean;
     paymentChoice: CustomerPaymentChoice;
     prepayMethod: PrepayMethod;
   } | null>(null);
 
   const canSubmitPayment = paymentChoice === 'cash_pickup' || prepayMethod !== null;
+
+  // איתור הזמנה פעילה קיימת של הלקוח לאותו יום שישי (שאינה מבוטלת ואינה נמסרה)
+  const activeFridayOrder = useMemo(() => {
+    if (!customerHistory?.orders) return null;
+    return (
+      customerHistory.orders.find(
+        (o) =>
+          o.friday_date === fridayDate &&
+          o.status !== 'cancelled' &&
+          o.status !== 'delivered'
+      ) || null
+    );
+  }, [customerHistory, fridayDate]);
 
   const fetchCustomerHistory = async (profile: SavedCustomerProfile | null) => {
     if (!profile || (!profile.customerId && !profile.phone)) {
@@ -602,9 +618,63 @@ export function DigitalMenuPage() {
       finalTotal,
       totalSavings,
       totalMixDiscount,
+      ciabattaTrios,
+      zalabiaTrios,
       upsell,
     };
   }, [cartRows]);
+
+  // חישוב איחוד חכם עם הזמנה קיימת לאותו יום שישי (כולל השלמת מבצע זוג מארזים ב-20 ₪ בין ההזמנה הקיימת לתוספת!)
+  const mergeCalculation = useMemo(() => {
+    const isMerging = Boolean(activeFridayOrder && mergeMode === 'merge');
+    if (!isMerging || !activeFridayOrder) {
+      return {
+        isMerging: false,
+        existingTotal: 0,
+        crossOrderMixBonus: 0,
+        addedAmountToPay: cartSummary.finalTotal,
+        mergedOrderTotal: cartSummary.finalTotal,
+      };
+    }
+
+    const countExistingTrios = (keyword: string) => {
+      const notesStr = String(activeFridayOrder.notes || '');
+      const regex = new RegExp(`(\\d+)×[^|·]*${keyword}[^|·]*מארז שלישייה`, 'g');
+      let countFromNotes = 0;
+      let match: RegExpExecArray | null;
+      while ((match = regex.exec(notesStr)) !== null) {
+        countFromNotes += Number(match[1]) || 0;
+      }
+      if (countFromNotes > 0) return countFromNotes;
+      return (activeFridayOrder.items || [])
+        .filter((it) => it.product_name.includes(keyword) && Math.abs(it.unit_price_snapshot - 12) < 0.5)
+        .reduce((s, it) => s + it.quantity, 0);
+    };
+
+    const existingCiabatta = countExistingTrios("ג'בטה") + countExistingTrios('ג׳בטה');
+    const existingZalabia = countExistingTrios('זלביה');
+
+    const extraCiabattaBonus =
+      existingCiabatta % 2 === 1 && cartSummary.ciabattaTrios % 2 === 1 ? 4 : 0;
+    const extraZalabiaBonus =
+      existingZalabia % 2 === 1 && cartSummary.zalabiaTrios % 2 === 1 ? 4 : 0;
+    const crossOrderMixBonus = extraCiabattaBonus + extraZalabiaBonus;
+
+    const addedAmountToPay = Math.max(
+      0,
+      Math.round((cartSummary.finalTotal - crossOrderMixBonus) * 100) / 100
+    );
+    const mergedOrderTotal =
+      Math.round((activeFridayOrder.total_amount + addedAmountToPay) * 100) / 100;
+
+    return {
+      isMerging: true,
+      existingTotal: activeFridayOrder.total_amount,
+      crossOrderMixBonus,
+      addedAmountToPay,
+      mergedOrderTotal,
+    };
+  }, [activeFridayOrder, mergeMode, cartSummary]);
 
   const cardBadgeCount = (cardId: string) =>
     cartRows.filter((r) => r.cardId === cardId).reduce((s, r) => s + r.quantity, 0);
@@ -634,8 +704,17 @@ export function DigitalMenuPage() {
         paybox: 'תשלום מראש ב-PayBox',
       };
 
+      const isMerging = mergeCalculation.isMerging && activeFridayOrder;
+      const targetTotal = isMerging
+        ? mergeCalculation.mergedOrderTotal
+        : cartSummary.finalTotal;
+      const addedAmount = isMerging
+        ? mergeCalculation.addedAmountToPay
+        : cartSummary.finalTotal;
+
       const res = await apiFetch<{
         id?: number;
+        merged?: boolean;
         customer_id?: number;
         user_id?: number;
         order?: { id: number };
@@ -643,10 +722,11 @@ export function DigitalMenuPage() {
         method: 'POST',
         body: JSON.stringify({
           friday_date: fridayDate,
+          merge_order_id: isMerging ? activeFridayOrder.id : undefined,
           customer_id: savedProfile?.customerId || undefined,
           recipient_name: customerName.trim(),
           phone: customerPhone.trim(),
-          total_amount: cartSummary.finalTotal,
+          total_amount: targetTotal,
           payment_preference: effectivePayPref,
           notes: combinedNotes,
           items: Array.from(mergedItems.entries()).map(([product_id, quantity]) => ({
@@ -656,7 +736,9 @@ export function DigitalMenuPage() {
         }),
       });
 
-      const orderId = res.order?.id ?? res.id ?? Date.now();
+      const orderId = isMerging
+        ? activeFridayOrder.id
+        : res.order?.id ?? res.id ?? Date.now();
       const resolvedCustomerId = res.customer_id ?? res.user_id ?? savedProfile?.customerId ?? null;
       const nextProfile: SavedCustomerProfile = {
         customerId: resolvedCustomerId,
@@ -674,6 +756,26 @@ export function DigitalMenuPage() {
           ? data.admin_whatsapp_phone
           : DEFAULT_ADMIN_WHATSAPP;
 
+      const addedItemsForWa = cartRows.map((r) => ({
+        product_id: r.productId,
+        product_name: r.label,
+        quantity: r.quantity,
+        unit_price: r.unitPrice,
+      }));
+
+      // איחוד רשימת הפריטים המלאה לקישור האישור (?d=...) כך שהמוכר יאשר את כל ההזמנה המעודכנת בלחיצה אחת
+      const combinedWaItems = isMerging
+        ? [
+            ...(activeFridayOrder.items || []).map((it) => ({
+              product_id: it.product_id,
+              product_name: it.product_name,
+              quantity: it.quantity,
+              unit_price: it.unit_price_snapshot,
+            })),
+            ...addedItemsForWa,
+          ]
+        : addedItemsForWa;
+
       const waText = formatPublicApprovalWhatsApp({
         id: orderId,
         business_name: data?.business_name || 'המטבח התימני – תפריט יום שישי',
@@ -681,22 +783,22 @@ export function DigitalMenuPage() {
         phone: customerPhone.trim(),
         friday_date: fridayDate,
         pricing_mode: preorderOpen ? 'preorder' : 'stall',
-        items: cartRows.map((r) => ({
-          product_id: r.productId,
-          product_name: r.label,
-          quantity: r.quantity,
-          unit_price: r.unitPrice,
-        })),
-        total_amount: cartSummary.finalTotal,
-        mix_discount: cartSummary.totalMixDiscount,
+        items: combinedWaItems,
+        total_amount: targetTotal,
+        mix_discount: cartSummary.totalMixDiscount + mergeCalculation.crossOrderMixBonus,
         payment_label: payLabelMap[effectivePayPref] || '',
         notes: notes.trim(),
+        is_update: Boolean(isMerging),
+        previous_total: isMerging ? activeFridayOrder.total_amount : undefined,
+        added_items: isMerging ? addedItemsForWa : undefined,
       });
       const waUrl = buildWhatsAppShareUrl(waText, targetPhone);
       setSubmitted({
         orderId,
         waUrl,
-        total: cartSummary.finalTotal,
+        total: targetTotal,
+        addedAmount,
+        merged: Boolean(isMerging),
         paymentChoice,
         prepayMethod,
       });
@@ -739,14 +841,14 @@ export function DigitalMenuPage() {
             )}
           </div>
 
-          {/* צד שמאל: כפתור האזור האישי + כפתור סל קניות צף */}
+          {/* צד שמאל: כפתור ההזמנות והיתרה שלי + כפתור סל קניות צף */}
           <div className="flex items-center gap-1.5 shrink-0">
             {savedProfile?.customerId && (
               <a
                 href={`#/c/${savedProfile.customerId}`}
-                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-white/15 hover:bg-white/25 text-white text-[11px] font-extrabold transition-colors"
+                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-amber-400/20 hover:bg-amber-400/30 border border-amber-300/40 text-amber-100 text-[11px] font-extrabold transition-colors"
               >
-                <span>👤 האזור האישי</span>
+                <span>📋 ההזמנות והיתרה שלי</span>
               </a>
             )}
             <button
@@ -798,6 +900,24 @@ export function DigitalMenuPage() {
           </div>
         )}
 
+        {/* באנר התראה ללקוח שכבר קיימת עבורו הזמנה פעילה לאותו יום שישי */}
+        {!submitted && activeFridayOrder && (
+          <div className="p-3 rounded-2xl bg-amber-50 border border-amber-300 text-amber-950 text-xs font-bold flex items-center justify-between gap-2 shadow-soft">
+            <span>
+              💡 יש לך כבר הזמנה פעילה לשישי הקרוב (#{activeFridayOrder.id} —{' '}
+              {formatILS(activeFridayOrder.total_amount)}). פריטים שתוסיף יצורפו להזמנה הקיימת!
+            </span>
+            {savedProfile?.customerId && (
+              <a
+                href={`#/c/${savedProfile.customerId}`}
+                className="shrink-0 px-2.5 py-1 rounded-xl bg-[#2B1B12] text-amber-100 text-[11px] font-extrabold whitespace-nowrap"
+              >
+                📋 לצפייה
+              </a>
+            )}
+          </div>
+        )}
+
         {/* מסך אישור הזמנה ממוקד (מסתיר את רשימת התפריט שמתחת) */}
         {submitted ? (
           <section className="bg-white rounded-3xl border-2 border-emerald-400 shadow-card p-5 space-y-4">
@@ -806,10 +926,19 @@ export function DigitalMenuPage() {
                 <CheckCircle2 className="w-7 h-7" />
               </div>
               <h2 className="font-serif text-xl font-extrabold text-emerald-900">
-                הזמנה #{submitted.orderId} נשלחה לאישור המוכר!
+                {submitted.merged
+                  ? `התוספת צורפה להזמנה #${submitted.orderId} ונשלחה לאישור המוכר!`
+                  : `הזמנה #${submitted.orderId} נשלחה לאישור המוכר!`}
               </h2>
               <p className="text-xs text-slate-600">
-                סה״כ להזמנה: <strong className="text-[#C85A17]">{formatILS(submitted.total)}</strong>
+                סה״כ מעודכן להזמנה:{' '}
+                <strong className="text-[#C85A17]">{formatILS(submitted.total)}</strong>
+                {submitted.merged && submitted.addedAmount !== undefined && (
+                  <span className="text-emerald-700 font-bold">
+                    {' '}
+                    (תוספת נוכחית: {formatILS(submitted.addedAmount)})
+                  </span>
+                )}
               </p>
             </div>
 
@@ -832,7 +961,7 @@ export function DigitalMenuPage() {
 
             {/* קופסת תשלום מהיר ב-Bit / PayBox / מזומן */}
             <QuickCustomerPayBox
-              amountToPay={submitted.total}
+              amountToPay={submitted.addedAmount ?? submitted.total}
               paymentChoice={submitted.paymentChoice}
               onPaymentChoiceChange={(next) =>
                 setSubmitted((prev) => (prev ? { ...prev, paymentChoice: next } : prev))
@@ -850,8 +979,7 @@ export function DigitalMenuPage() {
                   href={`#/c/${savedProfile.customerId}`}
                   className="py-2.5 px-3 rounded-xl bg-[#2A1F18] hover:bg-[#3d2e24] text-white font-extrabold text-xs flex items-center justify-center gap-1.5 text-center"
                 >
-                  <Wallet className="w-3.5 h-3.5 shrink-0" />
-                  <span>לאזור האישי שלי</span>
+                  <span>📋 ההזמנות והיתרה שלי</span>
                 </a>
               ) : (
                 <a
@@ -1132,10 +1260,62 @@ export function DigitalMenuPage() {
         open={checkoutOpen}
         onClose={() => setCheckoutOpen(false)}
         title="סל ההזמנה שלך"
-        subtitle={`סה״כ לתשלום: ${formatILS(cartSummary.finalTotal)}`}
+        subtitle={
+          mergeCalculation.isMerging && activeFridayOrder
+            ? `תוספת להזמנה #${activeFridayOrder.id}: ${formatILS(mergeCalculation.addedAmountToPay)} (סה״כ מעודכן: ${formatILS(mergeCalculation.mergedOrderTotal)})`
+            : `סה״כ לתשלום: ${formatILS(cartSummary.finalTotal)}`
+        }
         maxWidthClass="md:max-w-md"
       >
         <form onSubmit={handleSendOrder} className="space-y-3.5">
+          {/* בורר איחוד להזמנה קיימת לאותו יום שישי לעומת פתיחת הזמנה נפרדת */}
+          {activeFridayOrder && (
+            <div className="p-3 rounded-2xl bg-amber-50/90 border border-amber-300 space-y-2">
+              <div className="text-xs font-extrabold text-amber-950">
+                💡 נמצאה הזמנה פעילה לשישי הקרוב (#{activeFridayOrder.id} — {formatILS(activeFridayOrder.total_amount)})
+              </div>
+              <div className="grid grid-cols-2 gap-1.5 p-1 rounded-xl bg-white border border-amber-300">
+                <button
+                  type="button"
+                  onClick={() => setMergeMode('merge')}
+                  className={`py-2 px-2 rounded-lg text-[11px] font-extrabold transition-all ${
+                    mergeMode === 'merge'
+                      ? 'bg-[#C85A17] text-white shadow-sm'
+                      : 'text-slate-600 hover:bg-[#FAF6F0]'
+                  }`}
+                >
+                  ➕ הוסף להזמנה הקיימת (#{activeFridayOrder.id})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMergeMode('new')}
+                  className={`py-2 px-2 rounded-lg text-[11px] font-extrabold transition-all ${
+                    mergeMode === 'new'
+                      ? 'bg-[#2B1B12] text-amber-50 shadow-sm'
+                      : 'text-slate-600 hover:bg-[#FAF6F0]'
+                  }`}
+                >
+                  🆕 פתח הזמנה נפרדת
+                </button>
+              </div>
+              {mergeCalculation.isMerging && (
+                <div className="text-[11px] text-amber-900 font-bold flex items-center justify-between pt-1 border-t border-amber-200/80 tabular-nums">
+                  <span>
+                    קיים: {formatILS(mergeCalculation.existingTotal)} + תוספת:{' '}
+                    {formatILS(mergeCalculation.addedAmountToPay)}
+                  </span>
+                  <span className="text-[#8A330B] font-extrabold">
+                    סה״כ מאוחד: {formatILS(mergeCalculation.mergedOrderTotal)}
+                  </span>
+                </div>
+              )}
+              {mergeCalculation.isMerging && mergeCalculation.crossOrderMixBonus > 0 && (
+                <div className="text-[11px] font-extrabold text-emerald-800 bg-emerald-100/80 px-2.5 py-1 rounded-lg">
+                  ✨ השלמת זוג מארזים עם ההזמנה הקיימת! הופעלה הנחת מבצע זוג ב-20 ₪ (-{formatILS(mergeCalculation.crossOrderMixBonus)})
+                </div>
+              )}
+            </div>
+          )}
           <div className="divide-y divide-[#F3E9DC] border border-[#E8D5BE] rounded-2xl overflow-hidden">
             {cartRows.map((r) => (
               <div key={r.rowKey} className="p-2.5 flex items-center justify-between gap-2 text-xs bg-[#FAF6F0]">
@@ -1234,7 +1414,16 @@ export function DigitalMenuPage() {
 
           {/* קופסת תשלום נקייה (תשלום מראש / תשלום באיסוף) */}
           <QuickCustomerPayBox
-            amountToPay={cartSummary.finalTotal}
+            amountToPay={
+              mergeCalculation.isMerging
+                ? mergeCalculation.addedAmountToPay
+                : cartSummary.finalTotal
+            }
+            title={
+              mergeCalculation.isMerging && activeFridayOrder
+                ? `תשלום עבור התוספת להזמנה #${activeFridayOrder.id}`
+                : 'אופן תשלום'
+            }
             paymentChoice={paymentChoice}
             onPaymentChoiceChange={setPaymentChoice}
             prepayMethod={prepayMethod}
@@ -1256,6 +1445,10 @@ export function DigitalMenuPage() {
                 ? 'שולח...'
                 : !canSubmitPayment
                 ? 'יש ללחוץ לתשלום מראש לפני שליחת ההזמנה'
+                : mergeCalculation.isMerging && activeFridayOrder
+                ? `הוסף להזמנה #${activeFridayOrder.id} ושלח בוואטסאפ (+${formatILS(
+                    mergeCalculation.addedAmountToPay
+                  )})`
                 : `שלח הזמנה בוואטסאפ (${formatILS(cartSummary.finalTotal)})`}
             </span>
           </button>
