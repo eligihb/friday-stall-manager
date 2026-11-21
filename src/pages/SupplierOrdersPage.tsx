@@ -353,7 +353,7 @@ export function SupplierOrdersPage() {
   };
 
   const handleDeleteOrder = async (id: number) => {
-    if (!selectedSupplierId || !window.confirm('למחוק הזמנת ספק זו? יתרת החוב תתעדכן בהתאם.')) return;
+    if (!selectedSupplierId) return;
     await apiFetch(`/api/orders/${id}`, { method: 'DELETE' });
     await loadLedger(selectedSupplierId);
   };

@@ -177,10 +177,11 @@ export function formatPublicApprovalWhatsApp(payload: {
     ].join('\n');
   }
   const trimmedNotes = (payload.notes || '').trim();
-  const paymentLine = payload.payment_label ? `💰 אופן תשלום: ${payload.payment_label}` : '';
+  const paymentLine = payload.payment_label ? `💳 אמצעי תשלום: ${payload.payment_label}` : '';
   const notesLine = [paymentLine, trimmedNotes ? `📝 הערה: ${trimmedNotes}` : '']
     .filter(Boolean)
     .join('\n');
+  const encodedNotes = [payload.payment_label || '', trimmedNotes].filter(Boolean).join(' | ');
 
   const encoded = encodeOrderLinkPayload({
     id: payload.id,
@@ -188,7 +189,7 @@ export function formatPublicApprovalWhatsApp(payload: {
     p: payload.phone,
     f: payload.friday_date,
     t: payload.total_amount,
-    nt: trimmedNotes,
+    nt: encodedNotes,
     i: payload.items.map((it) => ({
       pid: it.product_id ?? 0,
       q: it.quantity,

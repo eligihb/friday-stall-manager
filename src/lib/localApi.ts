@@ -14,7 +14,7 @@ import type {
 } from '../types';
 import { getNextFridayISO, isBeforeFridayCancelCutoff } from './format';
 import { getFridayPricingStatus } from './pricingCutoff';
-import { loadImportedOrdersBackup } from './orderLinkCodec';
+import { loadImportedOrdersBackup, removeImportedOrderBackup } from './orderLinkCodec';
 
 const STORAGE_KEY = 'ht_static_db_v1';
 const SESSION_KEY = 'ht_static_session_uid';
@@ -1488,11 +1488,12 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
     return { id: orderId, total_amount } as T;
   }
 
-  const orderMatch = path.match(/^\/api\/orders\/(\d+)$/);
+  const orderMatch = path.match(/^\/api\/orders\/([^/]+)$/);
   if (orderMatch) {
     requireAdmin();
-    const oid = Number(orderMatch[1]);
-    const ord = db.orders.find((o) => o.id === oid);
+    const oidRaw = orderMatch[1];
+    const oid = Number(oidRaw);
+    const ord = db.orders.find((o) => String(o.id) === String(oidRaw));
     if (!ord) throwErr('ההזמנה לא נמצאה', 404);
 
     if (method === 'PATCH') {
@@ -1602,12 +1603,13 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
     }
 
     if (method === 'DELETE') {
-      if (ord.user_id && ord.order_type !== 'charity') {
+      if (ord.user_id && ord.order_type !== 'charity' && ord.status !== 'cancelled') {
         const u = userMap.get(ord.user_id);
         if (u) u.balance = round2(u.balance + (ord.total_amount - ord.paid_amount));
       }
-      db.orders = db.orders.filter((o) => o.id !== oid);
-      db.order_items = db.order_items.filter((i) => i.order_id !== oid);
+      db.orders = db.orders.filter((o) => String(o.id) !== String(oidRaw));
+      db.order_items = db.order_items.filter((i) => String(i.order_id) !== String(oidRaw));
+      removeImportedOrderBackup(oidRaw, ord.recipient_name, ord.friday_date);
       saveDb(db);
       return { ok: true } as T;
     }

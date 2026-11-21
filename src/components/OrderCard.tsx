@@ -13,7 +13,13 @@ import {
   XCircle,
   AlertTriangle,
 } from 'lucide-react';
-import { formatFridayLabel, formatILS, ORDER_STATUS_LABELS, ORDER_TYPE_LABELS } from '../lib/format';
+import {
+  formatFridayLabel,
+  formatILS,
+  isOrderPrepayPendingVerification,
+  ORDER_STATUS_LABELS,
+  ORDER_TYPE_LABELS,
+} from '../lib/format';
 import { buildCustomerPortalUrl, buildWhatsAppShareUrl, formatOrderWhatsApp } from '../lib/whatsappFormat';
 import { getOrderPaymentMeta } from '../lib/paymentMeta';
 import { useContactDrawer } from '../context/ContactDrawerContext';
@@ -54,7 +60,10 @@ export function OrderCard({
   const [copied, setCopied] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
   const [pendingStatus, setPendingStatus] = useState<OrderStatus | null>(null);
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const paymentMeta = getOrderPaymentMeta(order.id);
+  const prepayPendingVerify = isOrderPrepayPendingVerification(order);
 
   const handleCopyCustomerLink = async () => {
     if (!order.user_id) return;
@@ -145,12 +154,18 @@ export function OrderCard({
                     e.stopPropagation();
                     onQuickPay?.(order);
                   }}
-                  className={`inline-block px-2 py-0.5 rounded-full text-[11px] font-extrabold border transition-transform hover:scale-105 ${payState.badgeCls}`}
+                  className={`inline-block px-2 py-0.5 rounded-full text-[11px] font-extrabold border transition-transform hover:scale-105 ${
+                    prepayPendingVerify
+                      ? 'bg-orange-100 text-orange-950 border-orange-400'
+                      : payState.badgeCls
+                  }`}
                 >
                   {payState.status === 'paid'
                     ? 'שולם מלא'
                     : payState.status === 'partial'
                     ? 'שולם חלקית'
+                    : prepayPendingVerify
+                    ? '⏳ ממתין לאימות תשלום'
                     : 'לא שולם'}
                 </button>
                 {payState.status === 'partial' && (
@@ -324,6 +339,22 @@ export function OrderCard({
           </div>
         )}
 
+        {/* תגית כתומה מעל כפתור סמן תשלום כאשר הלקוח לחץ על Bit / PayBox / העברה בנקאית */}
+        {!isCharity && prepayPendingVerify && (
+          <div className="px-3 py-1.5 rounded-xl bg-orange-100 border border-orange-300 text-orange-950 text-[11px] font-extrabold flex items-center justify-between gap-2">
+            <span>⏳ ממתין לאימות תשלום (הלקוח לחץ לתשלום מראש ב-Bit/PayBox)</span>
+            {onQuickPay && (
+              <button
+                type="button"
+                onClick={() => onQuickPay(order)}
+                className="px-2 py-0.5 rounded-lg bg-orange-600 hover:bg-orange-700 text-white text-[10px] font-extrabold shrink-0"
+              >
+                אמת ואשר
+              </button>
+            )}
+          </div>
+        )}
+
         {/* שורת פעולות: תשלום + חשבונית (לספק) + וואטסאפ */}
         <div className="flex items-center gap-2">
           {!isCharity && onQuickPay && (
@@ -421,8 +452,11 @@ export function OrderCard({
             {onDelete && (
               <button
                 type="button"
-                onClick={() => onDelete(order.id)}
-                className="p-2 rounded-lg hover:bg-red-50 hover:text-red-600"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setConfirmDeleteOpen(true);
+                }}
+                className="p-2 rounded-lg hover:bg-red-50 hover:text-red-600 text-slate-500"
                 title="מחק הזמנה"
               >
                 <Trash2 className="w-4 h-4" />
@@ -431,6 +465,58 @@ export function OrderCard({
           </div>
         </div>
       </div>
+
+      {/* חלונית אישור מחיקת הזמנה מובנית (עובדת בכל דפדפן נייד ללא window.confirm) */}
+      {confirmDeleteOpen && onDelete && (
+        <div
+          className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
+          onClick={(e) => {
+            e.stopPropagation();
+            if (!deleting) setConfirmDeleteOpen(false);
+          }}
+        >
+          <div
+            className="max-w-xs w-full bg-white rounded-3xl border border-[#E8D5BE] shadow-card p-5 space-y-3.5 text-center"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="w-12 h-12 rounded-full bg-red-100 text-red-600 flex items-center justify-center mx-auto">
+              <Trash2 className="w-6 h-6" />
+            </div>
+            <h3 className="font-serif text-lg font-extrabold text-slate-900">
+              האם למחוק לצמיתות את הזמנה #{order.id}?
+            </h3>
+            <p className="text-xs text-slate-600">
+              הזמנה של <strong>{order.recipient_name}</strong> ({formatILS(order.total_amount)}) תימחק ויתרת החשבון תתעדכן בהתאם.
+            </p>
+            <div className="grid grid-cols-2 gap-2 pt-1">
+              <button
+                type="button"
+                disabled={deleting}
+                onClick={() => setConfirmDeleteOpen(false)}
+                className="py-2.5 rounded-xl border border-[#E8D5BE] bg-[#FAF6F0] text-slate-700 font-bold text-xs"
+              >
+                ביטול
+              </button>
+              <button
+                type="button"
+                disabled={deleting}
+                onClick={async () => {
+                  setDeleting(true);
+                  try {
+                    await onDelete(order.id);
+                  } finally {
+                    setDeleting(false);
+                    setConfirmDeleteOpen(false);
+                  }
+                }}
+                className="py-2.5 rounded-xl bg-red-600 hover:bg-red-700 disabled:opacity-60 text-white font-extrabold text-xs"
+              >
+                {deleting ? 'מוחק...' : 'מחק הזמנה'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

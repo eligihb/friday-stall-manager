@@ -17,6 +17,7 @@ import {
   formatFridayLabel,
   formatILS,
   isBeforeFridayCancelCutoff,
+  isOrderPrepayPendingVerification,
   ORDER_STATUS_LABELS,
 } from '../lib/format';
 import {
@@ -57,6 +58,12 @@ function getPaymentBadge(order: Order): { label: string; cls: string } {
   }
   if (order.paid_amount > 0) {
     return { label: 'שולם חלקית', cls: 'bg-amber-100 text-amber-900 border-amber-300' };
+  }
+  if (isOrderPrepayPendingVerification(order)) {
+    return {
+      label: '⏳ ממתין לאימות תשלום מהמוכר',
+      cls: 'bg-orange-100 text-orange-950 border-orange-300',
+    };
   }
   return { label: 'טרם שולם', cls: 'bg-red-100 text-red-800 border-red-300' };
 }
@@ -409,13 +416,19 @@ export function CustomerLivePortal({ customerId }: CustomerLivePortalProps) {
                     <div className="text-slate-600 font-semibold">סה״כ להזמנה:</div>
                     <div
                       className={`text-xs font-bold ${
-                        currentOrder.paid_amount > 0 ? 'text-emerald-700' : 'text-red-600'
+                        currentOrder.paid_amount > 0
+                          ? 'text-emerald-700'
+                          : isOrderPrepayPendingVerification(currentOrder)
+                          ? 'text-orange-800'
+                          : 'text-red-600'
                       }`}
                     >
                       {currentOrder.paid_amount > 0
                         ? `שולם ${formatILS(currentOrder.paid_amount)} מתוך ${formatILS(
                             currentOrder.total_amount
                           )}${unpaid > 0 ? ` · נותר: ${formatILS(unpaid)}` : ''}`
+                        : isOrderPrepayPendingVerification(currentOrder)
+                        ? '⏳ ממתין לאימות תשלום מהמוכר — התשלום יאושר ויעודכן בחשבונך מיד לאחר שהמוכר יאמת את ההעברה'
                         : `לא שולם (₪0.00 מתוך ${formatILS(currentOrder.total_amount)})`}
                     </div>
                   </div>
@@ -510,6 +523,8 @@ export function CustomerLivePortal({ customerId }: CustomerLivePortalProps) {
                             ? 'text-slate-500'
                             : o.paid_amount > 0
                             ? 'text-emerald-700'
+                            : isOrderPrepayPendingVerification(o)
+                            ? 'text-orange-800'
                             : 'text-red-600'
                         }
                       >
@@ -517,6 +532,8 @@ export function CustomerLivePortal({ customerId }: CustomerLivePortalProps) {
                           ? 'בוטל (₪0.00)'
                           : o.paid_amount > 0
                           ? `שולם ${formatILS(o.paid_amount)} מתוך ${formatILS(o.total_amount)}`
+                          : isOrderPrepayPendingVerification(o)
+                          ? '⏳ ממתין לאימות תשלום מהמוכר'
                           : `לא שולם (₪0.00 מתוך ${formatILS(o.total_amount)})`}
                       </span>
                     </div>

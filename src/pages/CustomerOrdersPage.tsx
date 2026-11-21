@@ -316,7 +316,7 @@ export function CustomerOrdersPage() {
   };
 
   const handleDelete = async (id: number) => {
-    if (!window.confirm('למחוק הזמנת לקוח זו?')) return;
+    setOrders((prev) => prev.filter((o) => String(o.id) !== String(id)));
     await apiFetch(`/api/orders/${id}`, { method: 'DELETE' });
     await loadData();
   };

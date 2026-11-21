@@ -115,3 +115,30 @@ export function persistImportedOrderBackup(
     // ignore
   }
 }
+
+export function removeImportedOrderBackup(
+  orderId: number | string,
+  recipientName?: string,
+  fridayDate?: string
+): void {
+  try {
+    const existing = loadImportedOrdersBackup();
+    if (!existing.length) return;
+    const idStr = String(orderId);
+    const filtered = existing.filter((r) => {
+      if (String(r.payload.id) === idStr) return false;
+      if (
+        recipientName &&
+        fridayDate &&
+        r.payload.n.trim() === recipientName.trim() &&
+        r.payload.f === fridayDate
+      ) {
+        return false;
+      }
+      return true;
+    });
+    localStorage.setItem(IMPORTED_BACKUP_KEY, JSON.stringify(filtered));
+  } catch {
+    // ignore
+  }
+}

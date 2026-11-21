@@ -65,6 +65,8 @@ export function AdminDashboard({ onNavigate }: AdminDashboardProps) {
     setTimeout(() => setCopiedMenuLink(false), 1800);
   };
 
+  const [confirmRejectId, setConfirmRejectId] = useState<number | null>(null);
+
   const handleApproveOrder = async (orderId: number) => {
     await apiFetch(`/api/orders/${orderId}`, {
       method: 'PATCH',
@@ -74,7 +76,8 @@ export function AdminDashboard({ onNavigate }: AdminDashboardProps) {
   };
 
   const handleRejectOrder = async (orderId: number) => {
-    if (!window.confirm('למחוק הזמנה זו לצמיתות?')) return;
+    setAwaitingOrders((prev) => prev.filter((o) => String(o.id) !== String(orderId)));
+    setConfirmRejectId(null);
     await apiFetch(`/api/orders/${orderId}`, { method: 'DELETE' });
     await loadAll();
   };
@@ -228,13 +231,34 @@ export function AdminDashboard({ onNavigate }: AdminDashboardProps) {
                   </button>
                   <button
                     type="button"
-                    onClick={() => handleRejectOrder(ord.id)}
+                    onClick={() => setConfirmRejectId(ord.id)}
                     className="col-span-4 min-h-[44px] rounded-xl bg-red-50 hover:bg-red-100 border border-red-200 text-red-700 font-extrabold text-xs flex items-center justify-center gap-1"
                   >
                     <Trash2 className="w-4 h-4" />
                     <span>מחק</span>
                   </button>
                 </div>
+                {confirmRejectId === ord.id && (
+                  <div className="p-2.5 rounded-xl bg-red-50 border border-red-300 flex items-center justify-between gap-2 text-xs">
+                    <span className="font-extrabold text-red-900">למחוק לצמיתות את הזמנה #{ord.id}?</span>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setConfirmRejectId(null)}
+                        className="px-2.5 py-1 rounded-lg bg-white border border-red-200 font-bold text-slate-600"
+                      >
+                        ביטול
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleRejectOrder(ord.id)}
+                        className="px-2.5 py-1 rounded-lg bg-red-600 text-white font-extrabold"
+                      >
+                        מחק הזמנה
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             ))}
           </div>

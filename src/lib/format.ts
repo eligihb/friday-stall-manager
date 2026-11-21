@@ -103,6 +103,28 @@ export function isBeforeFridayCancelCutoff(fridayDate: string, now = new Date())
   return now.getTime() < cutoff.getTime();
 }
 
+/**
+ * Returns true if the customer clicked prepay (Bit / PayBox / Bank transfer) and the seller hasn't marked it paid yet.
+ */
+export function isOrderPrepayPendingVerification(order: {
+  status?: string;
+  total_amount?: number;
+  paid_amount?: number;
+  notes?: string | null;
+}): boolean {
+  if (!order || order.status === 'cancelled') return false;
+  const total = Number(order.total_amount) || 0;
+  const paid = Number(order.paid_amount) || 0;
+  if (total <= 0 || paid >= total - 0.01) return false;
+  const notes = String(order.notes || '');
+  return (
+    notes.includes('תשלום מראש') ||
+    notes.includes('העברה בנקאית') ||
+    notes.includes('Bit') ||
+    notes.includes('PayBox')
+  );
+}
+
 export const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
   cash: 'מזומן',
   paybox: 'פייבוקס',

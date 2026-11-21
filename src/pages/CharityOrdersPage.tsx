@@ -344,7 +344,7 @@ export function CharityOrdersPage() {
   };
 
   const handleDeleteOrder = async (id: number) => {
-    if (!window.confirm('למחוק הזמנה מסובסדת זו?')) return;
+    setOrders((prev) => prev.filter((o) => String(o.id) !== String(id)));
     await apiFetch(`/api/orders/${id}`, { method: 'DELETE' });
     await loadData();
   };

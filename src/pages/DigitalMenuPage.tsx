@@ -699,9 +699,9 @@ export function DigitalMenuPage() {
         paymentChoice === 'cash_pickup' ? 'cash_pickup' : prepayMethod || 'prepay';
       const payLabelMap: Record<string, string> = {
         cash_pickup: 'תשלום במזומן בעת האיסוף',
-        bank_transfer: 'תשלום בהעברה בנקאית',
-        bit: 'תשלום מראש ב-Bit',
-        paybox: 'תשלום מראש ב-PayBox',
+        bank_transfer: 'הלקוח לחץ לתשלום מראש (העברה בנקאית) — יש לאמת קבלה',
+        bit: 'הלקוח לחץ לתשלום מראש (Bit/PayBox) — יש לאמת קבלה',
+        paybox: 'הלקוח לחץ לתשלום מראש (Bit/PayBox) — יש לאמת קבלה',
       };
 
       const isMerging = mergeCalculation.isMerging && activeFridayOrder;
@@ -940,6 +940,16 @@ export function DigitalMenuPage() {
                   </span>
                 )}
               </p>
+              {submitted.paymentChoice === 'prepay' && submitted.prepayMethod && (
+                <div className="mt-2 p-2.5 rounded-2xl bg-orange-50 border border-orange-300 space-y-1">
+                  <div className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-orange-100 text-orange-950 text-xs font-extrabold">
+                    ⏳ ממתין לאימות תשלום מהמוכר
+                  </div>
+                  <p className="text-[11px] text-orange-900 font-semibold leading-snug">
+                    התשלום יאושר ויעודכן בחשבונך מיד לאחר שהמוכר יאמת את ההעברה
+                  </p>
+                </div>
+              )}
             </div>
 
             {/* סרגל 4 שלבים */}
