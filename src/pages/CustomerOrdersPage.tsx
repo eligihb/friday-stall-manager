@@ -81,7 +81,7 @@ export function CustomerOrdersPage() {
     setLoading(true);
     try {
       const qs = new URLSearchParams({ order_type: 'customer' });
-      if (fridayDate) qs.set('friday_date', fridayDate);
+      if (fridayDate && statusFilter !== 'deleted_by_vendor') qs.set('friday_date', fridayDate);
       if (statusFilter && statusFilter !== 'pending') qs.set('status', statusFilter);
 
       const [ordRes, allCustOrdRes, prodRes, usrRes, setRes] = await Promise.all([
@@ -305,7 +305,12 @@ export function CustomerOrdersPage() {
         ...(nextStatus === 'cancelled' ? { cancelled_by: 'vendor' } : {}),
       }),
     });
-    if (nextStatus === 'cancelled' || order.status === 'cancelled') {
+    if (
+      nextStatus === 'cancelled' ||
+      order.status === 'cancelled' ||
+      nextStatus === 'deleted_by_vendor' ||
+      order.status === 'deleted_by_vendor'
+    ) {
       await loadData();
     }
   };
@@ -325,6 +330,12 @@ export function CustomerOrdersPage() {
   const handleDelete = async (id: number) => {
     setOrders((prev) => prev.filter((o) => String(o.id) !== String(id)));
     await apiFetch(`/api/orders/${id}`, { method: 'DELETE' });
+    await loadData();
+  };
+
+  const handlePermanentDelete = async (id: number) => {
+    setOrders((prev) => prev.filter((o) => String(o.id) !== String(id)));
+    await apiFetch(`/api/orders/${id}?permanent=true`, { method: 'DELETE' });
     await loadData();
   };
 
@@ -436,6 +447,7 @@ export function CustomerOrdersPage() {
             { key: 'received', label: 'התקבל', activeCls: 'bg-blue-600 text-white' },
             { key: 'ready', label: 'מוכן למסירה', activeCls: 'bg-orange-500 text-white' },
             { key: 'delivered', label: 'נמסר', activeCls: 'bg-emerald-600 text-white' },
+            { key: 'deleted_by_vendor', label: '🗑️ הזמנות שנמחקו', activeCls: 'bg-slate-700 text-white' },
           ].map((f) => (
             <button
               key={f.key}
@@ -512,11 +524,12 @@ export function CustomerOrdersPage() {
               key={o.id}
               order={o}
               bizSettings={bizSettings}
-              showFridayDate={!fridayDate}
+              showFridayDate={!fridayDate || statusFilter === 'deleted_by_vendor'}
               onCycleStatus={handleCycleStatus}
               onQuickPay={(ord) => setPayOrder(ord)}
               onEdit={openEditModal}
               onDelete={handleDelete}
+              onPermanentDelete={handlePermanentDelete}
               onOpenLedger={openCustomerLedger}
             />
           ))}

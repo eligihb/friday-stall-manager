@@ -90,6 +90,19 @@ export function formatDigitalMenuWhatsApp(
     .replace(/\{קישור\}/g, buildDigitalMenuUrl());
 }
 
+function dedupeProductName(rawName: string): string {
+  const clean = String(rawName || '').trim();
+  const parts = clean.split(/\s+[—–-]\s+/);
+  if (parts.length >= 2) {
+    const first = parts[0].trim();
+    const second = parts[1].trim();
+    if (first && first === second) {
+      return [first, ...parts.slice(2)].join(' — ');
+    }
+  }
+  return clean;
+}
+
 export function formatOrderWhatsApp(order: Order, settings?: Partial<BusinessSettings>): string {
   const bizName = settings?.business_name || 'דוכן שישי תימני';
   const footer = settings?.whatsapp_footer ?? 'שבת שלום ומבורכת! 🕯️';
@@ -102,7 +115,7 @@ export function formatOrderWhatsApp(order: Order, settings?: Partial<BusinessSet
 
   for (const it of order.items) {
     lines.push(
-      `• ${it.quantity} × ${it.product_name} — ${formatILS(it.quantity * it.unit_price_snapshot)}`
+      `• ${it.quantity} × ${dedupeProductName(it.product_name)} — ${formatILS(it.quantity * it.unit_price_snapshot)}`
     );
   }
 
@@ -159,7 +172,7 @@ export function formatPublicApprovalWhatsApp(payload: {
 }): string {
   const cfg = loadStorefrontConfig();
   const itemLines = payload.items.map(
-    (it) => `• ${it.quantity} × ${it.product_name} — ${formatILS(it.quantity * it.unit_price)}`
+    (it) => `• ${it.quantity} × ${dedupeProductName(it.product_name)} — ${formatILS(it.quantity * it.unit_price)}`
   );
   if ((payload.mix_discount ?? 0) > 0) {
     itemLines.push(`✨ הנחת מבצע זוג מארזים (2 ב-20 ₪): -${formatILS(payload.mix_discount!)}`);
@@ -168,7 +181,7 @@ export function formatPublicApprovalWhatsApp(payload: {
   let itemsText = itemLines.join('\n');
   if (payload.is_update && payload.added_items && payload.added_items.length > 0) {
     const addedLines = payload.added_items.map(
-      (it) => `➕ ${it.quantity} × ${it.product_name} — ${formatILS(it.quantity * it.unit_price)}`
+      (it) => `➕ ${it.quantity} × ${dedupeProductName(it.product_name)} — ${formatILS(it.quantity * it.unit_price)}`
     );
     const prevTotal = payload.previous_total ?? 0;
     const addedDelta = Math.max(0, payload.total_amount - prevTotal);
@@ -207,7 +220,14 @@ export function formatPublicApprovalWhatsApp(payload: {
     ? buildCustomerPortalUrl(payload.customer_id)
     : buildDigitalMenuUrl();
 
-  let baseMsg = cfg.customerOrderTemplate
+  // ניקוי אוטומטי של שורות קישורים כפולות מתבניות ישנות כדי שיופיע קישור אחד נקי בלבד
+  const cleanTemplate = cfg.customerOrderTemplate
+    .replace(/\n*✅\s*\*?אישור מיידי להזמנה:?\*?\s*\n\{קישור_אישור\}/g, '')
+    .replace(/\n*👁️\s*\*?צפייה ועריכה ביישומון:?\*?\s*\n\{קישור_צפייה\}/g, '')
+    .replace(/\n*\{קישור_אישור\}/g, '')
+    .replace(/\n*\{קישור_צפייה\}/g, '');
+
+  let baseMsg = cleanTemplate
     .replace(/\{שם_עסק\}/g, payload.business_name)
     .replace(/\{מספר\}/g, String(payload.id))
     .replace(/\{שם\}/g, payload.recipient_name)
@@ -218,9 +238,7 @@ export function formatPublicApprovalWhatsApp(payload: {
     .replace(/\{הערות\}\n?/g, notesLine ? `${notesLine}\n` : '')
     .replace(/ממתין לאישור מנהל/g, 'ממתין לאישור מוכר')
     .replace(/\{קישור_לקוח\}/g, customerPersonalLink)
-    .replace(/\{קישור_אישור\}/g, buildQuickApproveUrl(payload.id, encoded))
-    .replace(/\{קישור_צפייה\}/g, buildAdminOrderViewUrl(payload.id, encoded))
-    .replace(/\{קישור\}/g, buildAdminOrderViewUrl(payload.id, encoded))
+    .replace(/\{קישור\}/g, customerPersonalLink)
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 

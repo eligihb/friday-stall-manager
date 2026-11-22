@@ -54,6 +54,7 @@ export function PastOrdersArchivePage() {
   const [selectedMonth, setSelectedMonth] = useState('');
   const [selectedYear, setSelectedYear] = useState('');
   const [typeFilter, setTypeFilter] = useState<'all' | 'customer' | 'supplier' | 'charity'>('all');
+  const [showDeletedBin, setShowDeletedBin] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState<ArchiveSort>('date_desc');
   const [payOrder, setPayOrder] = useState<Order | null>(null);
@@ -61,8 +62,9 @@ export function PastOrdersArchivePage() {
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
+      const ordersEndpoint = showDeletedBin ? '/api/orders?status=deleted_by_vendor' : '/api/orders';
       const [ordRes, usrRes, setRes] = await Promise.all([
-        apiFetch<{ orders: Order[] }>('/api/orders'),
+        apiFetch<{ orders: Order[] }>(ordersEndpoint),
         apiFetch<{ users: User[] }>('/api/users'),
         apiFetch<{ settings: BusinessSettings }>('/api/settings'),
       ]);
@@ -75,7 +77,7 @@ export function PastOrdersArchivePage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [showDeletedBin]);
 
   useEffect(() => {
     loadData();
@@ -192,8 +194,19 @@ export function PastOrdersArchivePage() {
     setOrders((prev) => prev.map((o) => (o.id === order.id ? { ...o, status: nextStatus } : o)));
     await apiFetch(`/api/orders/${order.id}`, {
       method: 'PATCH',
-      body: JSON.stringify({ status: nextStatus }),
+      body: JSON.stringify({
+        status: nextStatus,
+        ...(nextStatus === 'cancelled' ? { cancelled_by: 'vendor' } : {}),
+      }),
     });
+    if (
+      nextStatus === 'cancelled' ||
+      order.status === 'cancelled' ||
+      nextStatus === 'deleted_by_vendor' ||
+      order.status === 'deleted_by_vendor'
+    ) {
+      await loadData();
+    }
   };
 
   const handleConfirmQuickPay = async (
@@ -214,6 +227,12 @@ export function PastOrdersArchivePage() {
     await loadData();
   };
 
+  const handlePermanentDelete = async (id: number) => {
+    setOrders((prev) => prev.filter((o) => String(o.id) !== String(id)));
+    await apiFetch(`/api/orders/${id}?permanent=true`, { method: 'DELETE' });
+    await loadData();
+  };
+
   return (
     <div className="space-y-5">
       {/* כותרת המסך */}
@@ -223,10 +242,21 @@ export function PastOrdersArchivePage() {
             <History className="w-7 h-7 text-[#C85A17]" />
             <span>ארכיון והזמנות קודמות</span>
           </h2>
-          <p className="text-sm text-slate-600 mt-1">
+            <p className="text-sm text-slate-600 mt-1">
             צפייה, חיפוש וסינון מתקדם של כל ההזמנות לפי שבוע, חודש, שנה או לקוח.
           </p>
         </div>
+        <button
+          type="button"
+          onClick={() => setShowDeletedBin((v) => !v)}
+          className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-extrabold border transition-colors self-start sm:self-center ${
+            showDeletedBin
+              ? 'bg-slate-800 text-white border-slate-800 shadow-sm'
+              : 'bg-white hover:bg-slate-50 text-slate-700 border-[#E8D5BE]'
+          }`}
+        >
+          <span>{showDeletedBin ? '← חזרה לארכיון ההזמנות' : '🗑️ הזמנות שנמחקו'}</span>
+        </button>
       </div>
 
       {/* כרטיסי סיכום דינמיים בהתאם לסינון שנבחר */}
@@ -416,6 +446,7 @@ export function PastOrdersArchivePage() {
               onCycleStatus={handleCycleStatus}
               onQuickPay={(ord) => setPayOrder(ord)}
               onDelete={handleDelete}
+              onPermanentDelete={handlePermanentDelete}
             />
           ))}
         </div>

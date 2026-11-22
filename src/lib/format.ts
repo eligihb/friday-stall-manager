@@ -91,6 +91,7 @@ export const ORDER_STATUS_LABELS: Record<OrderStatus, string> = {
   delivered: 'נמסר',
   cancel_requested: 'ממתין לאישור ביטול',
   cancelled: 'בוטל',
+  deleted_by_vendor: 'נמחקה',
 };
 
 /**
@@ -189,7 +190,14 @@ export function computeEffectiveOrderTotal(order: {
   vat_amount?: number;
   items?: Array<{ quantity: number; unit_price_snapshot: number }>;
 }): number {
-  if (!order || order.order_type === 'charity' || order.status === 'cancelled') return 0;
+  if (
+    !order ||
+    order.order_type === 'charity' ||
+    order.status === 'cancelled' ||
+    order.status === 'deleted_by_vendor'
+  ) {
+    return 0;
+  }
   const stored = Number(order.total_amount) || 0;
   if (stored > 0) return Math.round(stored * 100) / 100;
   const itemsSum = (order.items || []).reduce(

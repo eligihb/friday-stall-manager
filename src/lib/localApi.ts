@@ -63,6 +63,15 @@ interface StoredWasteLog {
   notes: string;
 }
 
+interface DeletedOrderNotice {
+  id: number;
+  user_id: number | null;
+  recipient_name: string;
+  friday_date: string;
+  cancelled_by: 'vendor' | 'customer';
+  deleted_at: string;
+}
+
 interface LocalDb {
   nextIds: {
     users: number;
@@ -86,6 +95,7 @@ interface LocalDb {
   subsidized_entities?: StoredSubsidizedEntity[];
   subsidized_payments?: StoredSubsidizedPayment[];
   waste_logs?: StoredWasteLog[];
+  deleted_order_notices?: DeletedOrderNotice[];
   demoPurgedV191?: boolean;
   settings: BusinessSettings;
 }
@@ -886,8 +896,9 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
       const itemsSum = round2(
         items.reduce((s, it) => s + (Number(it.unit_price_snapshot) || 0) * (Number(it.quantity) || 0), 0)
       );
+      const isCancelledOrDeleted = o.status === 'cancelled' || o.status === 'deleted_by_vendor';
       const effectiveTotal =
-        o.status === 'cancelled' || o.order_type === 'charity'
+        isCancelledOrDeleted || o.order_type === 'charity'
           ? 0
           : Number(o.total_amount) > 0
           ? Number(o.total_amount)
@@ -899,7 +910,35 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
       };
     });
 
-    const activeOrders = custOrders.filter((o) => o.status !== 'cancelled');
+    // צירוף רשומות סטטוס מינימליות של הזמנות שנמחקו סופית אצל המוכר כדי שהלקוח תמיד יראה שבוטלו
+    const existingIds = new Set(custOrders.map((o) => o.id));
+    const noticesForCust = (db.deleted_order_notices || [])
+      .filter((n) => n.user_id === found!.id && !existingIds.has(n.id))
+      .map((n) => ({
+        id: n.id,
+        user_id: n.user_id,
+        recipient_name: n.recipient_name,
+        friday_date: n.friday_date,
+        order_type: 'customer' as const,
+        delivery_fee: 0,
+        credit_discount: 0,
+        total_amount: 0,
+        paid_amount: 0,
+        status: 'deleted_by_vendor' as const,
+        cancelled_by: n.cancelled_by,
+        cancelled_at: n.deleted_at,
+        notes: '',
+        created_at: n.deleted_at.slice(0, 10),
+        items: [],
+      }));
+
+    const mergedCustOrders = [...custOrders, ...noticesForCust].sort(
+      (a, b) => b.friday_date.localeCompare(a.friday_date) || b.id - a.id
+    );
+
+    const activeOrders = mergedCustOrders.filter(
+      (o) => o.status !== 'cancelled' && o.status !== 'deleted_by_vendor'
+    );
     const computedTotal = round2(activeOrders.reduce((s, o) => s + (Number(o.total_amount) || 0), 0));
     const computedPaid = round2(activeOrders.reduce((s, o) => s + (Number(o.paid_amount) || 0), 0));
     const computedBalance = round2(computedPaid - computedTotal);
@@ -911,7 +950,7 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
         phone: found.phone,
         balance: computedBalance,
       },
-      orders: custOrders,
+      orders: mergedCustOrders,
     } as T;
   }
 
@@ -1559,7 +1598,14 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
     if (q.get('order_type') && me.role === 'admin') {
       list = list.filter((o) => o.order_type === q.get('order_type'));
     }
-    if (q.get('status')) list = list.filter((o) => o.status === q.get('status'));
+    const statusParam = q.get('status');
+    const includeDeleted = q.get('include_deleted') === 'true';
+    if (statusParam) {
+      list = list.filter((o) => o.status === statusParam);
+    } else if (!includeDeleted) {
+      // הסתרת הזמנות שבסל המחזור ("הזמנות שנמחקו") מרשימת ההזמנות הרגילות
+      list = list.filter((o) => o.status !== 'deleted_by_vendor');
+    }
     list.sort((a, b) => b.friday_date.localeCompare(a.friday_date) || b.id - a.id);
     return { orders: list.map(hydrateOrder) } as T;
   }
@@ -1715,9 +1761,11 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
       if (body.status) {
         const prevStatus = ord.status;
         const nextStatus = body.status as OrderStatus;
+        const wasInactive = prevStatus === 'cancelled' || prevStatus === 'deleted_by_vendor';
+        const willBeInactive = nextStatus === 'cancelled' || nextStatus === 'deleted_by_vendor';
         ord.status = nextStatus;
 
-        if (nextStatus === 'cancelled' && prevStatus !== 'cancelled') {
+        if (willBeInactive && !wasInactive) {
           ord.pre_cancel_total = ord.total_amount;
           ord.pre_cancel_paid = ord.paid_amount;
           ord.pre_cancel_status = prevStatus;
@@ -1731,8 +1779,8 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
           ord.paid_amount = 0;
           ord.delivery_fee = 0;
           ord.credit_discount = 0;
-        } else if (prevStatus === 'cancelled' && nextStatus !== 'cancelled') {
-          // שחזור הזמנה שבוטלה בטעות: החזרת הסכום המקורי (או חישוב מתוך הפריטים)
+        } else if (wasInactive && !willBeInactive) {
+          // שחזור הזמנה שבוטלה או הועברה לסל המחזור: החזרת הסכום המקורי (או חישוב מתוך הפריטים)
           const itemsTotal = round2(
             db.order_items
               .filter((it) => String(it.order_id) === String(ord.id))
@@ -1852,9 +1900,50 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
     }
 
     if (method === 'DELETE') {
-      if (ord.user_id && ord.order_type !== 'charity' && ord.status !== 'cancelled') {
+      const isPermanent = q.get('permanent') === 'true';
+      if (!isPermanent) {
+        // העברה לסל מחזור ("הזמנות שנמחקו") במקום מחיקה סופית מיידית
+        const wasInactive = ord.status === 'cancelled' || ord.status === 'deleted_by_vendor';
+        if (!wasInactive) {
+          ord.pre_cancel_total = ord.total_amount;
+          ord.pre_cancel_paid = ord.paid_amount;
+          ord.pre_cancel_status = ord.status;
+          if (ord.user_id && ord.order_type !== 'charity') {
+            const u = userMap.get(ord.user_id);
+            if (u) u.balance = round2(u.balance + (ord.total_amount - ord.paid_amount));
+          }
+        }
+        ord.status = 'deleted_by_vendor';
+        ord.cancelled_by = ord.cancelled_by || 'vendor';
+        ord.cancelled_at = ord.cancelled_at || new Date().toISOString();
+        ord.total_amount = 0;
+        ord.paid_amount = 0;
+        ord.delivery_fee = 0;
+        ord.credit_discount = 0;
+        saveDb(db);
+        return { ok: true, softDeleted: true } as T;
+      }
+
+      // מחיקה סופית מהמערכת (מתוך "הזמנות שנמחקו" בלבד) + שמירת רשומת סטטוס מינימלית ללקוח
+      if (
+        ord.user_id &&
+        ord.order_type !== 'charity' &&
+        ord.status !== 'cancelled' &&
+        ord.status !== 'deleted_by_vendor'
+      ) {
         const u = userMap.get(ord.user_id);
         if (u) u.balance = round2(u.balance + (ord.total_amount - ord.paid_amount));
+      }
+      if (!db.deleted_order_notices) db.deleted_order_notices = [];
+      if (!db.deleted_order_notices.some((n) => n.id === ord.id)) {
+        db.deleted_order_notices.push({
+          id: ord.id,
+          user_id: ord.user_id,
+          recipient_name: ord.recipient_name,
+          friday_date: ord.friday_date,
+          cancelled_by: ord.cancelled_by || 'vendor',
+          deleted_at: new Date().toISOString(),
+        });
       }
       db.orders = db.orders.filter((o) => String(o.id) !== String(oidRaw));
       db.order_items = db.order_items.filter((i) => String(i.order_id) !== String(oidRaw));
@@ -1863,7 +1952,7 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
       db.transactions = db.transactions.filter((t) => !String(t.notes || '').includes(orderTag));
       removeImportedOrderBackup(oidRaw, ord.recipient_name, ord.friday_date);
       saveDb(db);
-      return { ok: true } as T;
+      return { ok: true, permanent: true } as T;
     }
   }
 
@@ -1996,7 +2085,8 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
       (o) =>
         o.friday_date === fri &&
         o.status !== 'awaiting_approval' &&
-        o.status !== 'cancelled'
+        o.status !== 'cancelled' &&
+        o.status !== 'deleted_by_vendor'
     );
     const orderTypeById = new Map(friOrders.map((o) => [o.id, o.order_type]));
     const items = sortProducts(db.products)

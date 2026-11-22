@@ -24,12 +24,7 @@ export const DEFAULT_CUSTOMER_ORDER_TEMPLATE = `🫓 *{שם_עסק} — הזמנ
 ⏳ סטטוס: ממתין לאישור מוכר
 
 🔗 לצפייה בהזמנה, תשלום או עדכון/ביטול (עד יום שישי ב-06:00):
-{קישור_לקוח}
-
-✅ *אישור מיידי להזמנה:*
-{קישור_אישור}
-👁️ *צפייה ועריכה ביישומון:*
-{קישור_צפייה}`;
+{קישור_לקוח}`;
 
 export const DEFAULT_PAYMENT_PHONE = '054-2452100';
 
@@ -61,10 +56,13 @@ export function loadStorefrontConfig(): StorefrontConfig {
           .replace(/ניתן להזמין עד ליום חמישי בשעה 24:00/g, 'מחירי מכירה מוקדמת תקפים להזמנות עד יום חמישי בשעה 24:00');
       shareTpl = normalizeCutoffPhrase(shareTpl);
       const orderTpl = normalizeCutoffPhrase(
-        (parsed.customerOrderTemplate || DEFAULT_CUSTOMER_ORDER_TEMPLATE).replace(
-          /ממתין לאישור מנהל/g,
-          'ממתין לאישור מוכר'
-        )
+        (parsed.customerOrderTemplate || DEFAULT_CUSTOMER_ORDER_TEMPLATE)
+          .replace(/ממתין לאישור מנהל/g, 'ממתין לאישור מוכר')
+          .replace(/\n*✅\s*\*?אישור מיידי להזמנה:?\*?\s*\n\{קישור_אישור\}/g, '')
+          .replace(/\n*👁️\s*\*?צפייה ועריכה ביישומון:?\*?\s*\n\{קישור_צפייה\}/g, '')
+          .replace(/\n*\{קישור_אישור\}\n*/g, '\n')
+          .replace(/\n*\{קישור_צפייה\}\n*/g, '\n')
+          .trim()
       );
       return {
         customerPriceMode: parsed.customerPriceMode || 'auto',

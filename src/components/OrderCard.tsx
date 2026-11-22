@@ -44,6 +44,7 @@ interface OrderCardProps {
   onOpenInvoice?: (order: Order) => void;
   onEdit?: (order: Order) => void;
   onDelete?: (orderId: number) => void;
+  onPermanentDelete?: (orderId: number) => void;
   onOpenLedger?: (userId: number) => void;
 }
 
@@ -56,6 +57,7 @@ export function OrderCard({
   onOpenInvoice,
   onEdit,
   onDelete,
+  onPermanentDelete,
   onOpenLedger,
 }: OrderCardProps) {
   const { openContactById } = useContactDrawer();
@@ -65,6 +67,8 @@ export function OrderCard({
   const [showChanges, setShowChanges] = useState(false);
   const [confirmCancelOpen, setConfirmCancelOpen] = useState(false);
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
+  const [confirmPermanentDeleteOpen, setConfirmPermanentDeleteOpen] = useState(false);
+  const isInactiveOrder = order.status === 'cancelled' || order.status === 'deleted_by_vendor';
   const [deleting, setDeleting] = useState(false);
   const paymentMeta = getOrderPaymentMeta(order.id);
   const prepayPendingVerify = isOrderPrepayPendingVerification(order);
@@ -225,7 +229,7 @@ export function OrderCard({
       className={`bg-white rounded-2xl border shadow-soft p-4 flex flex-col justify-between transition-all ${
         isPendingStatus ? 'cursor-pointer hover:border-blue-400' : ''
       } ${
-        order.status === 'cancelled'
+        isInactiveOrder
           ? 'border-slate-300 bg-slate-100/80 opacity-75 grayscale'
           : order.status === 'cancel_requested'
           ? 'border-orange-400 bg-orange-50/30 ring-1 ring-orange-300'
@@ -284,9 +288,9 @@ export function OrderCard({
           {/* סכום + תגית תשלום לחיצה הפותחת חלונית אישור תשלום */}
           <div className="text-left shrink-0 tabular-nums space-y-1">
             <div className="font-extrabold text-lg text-slate-900 leading-tight">
-              {isCharity || order.status === 'cancelled' ? '₪0.00' : formatILS(effectiveTotal)}
+              {isCharity || isInactiveOrder ? '₪0.00' : formatILS(effectiveTotal)}
             </div>
-            {!isCharity && order.status !== 'cancelled' ? (
+            {!isCharity && !isInactiveOrder ? (
               <div className="flex flex-col items-end gap-1">
                 <button
                   type="button"
@@ -319,9 +323,13 @@ export function OrderCard({
                   </span>
                 )}
               </div>
-            ) : order.status === 'cancelled' ? (
+            ) : isInactiveOrder ? (
               <span className="inline-block px-2 py-0.5 rounded-full text-[11px] font-extrabold bg-slate-200 text-slate-700 border border-slate-300">
-                {order.cancelled_by === 'customer' ? 'בוטלה ע"י הלקוח' : 'בוטלה ע"י המוכר'}
+                {order.status === 'deleted_by_vendor'
+                  ? '🗑️ בסל מחזור'
+                  : order.cancelled_by === 'customer'
+                  ? 'בוטלה ע"י הלקוח'
+                  : 'בוטלה ע"י המוכר'}
               </span>
             ) : (
               <div className="text-[11px] font-bold text-purple-800">
@@ -333,7 +341,7 @@ export function OrderCard({
 
         {/* סרגל התקדמות ויזואלי 4 שלבים */}
         {order.status !== 'cancel_requested' &&
-          order.status !== 'cancelled' &&
+          !isInactiveOrder &&
           (() => {
             const normalizedKey: OrderStatus =
               order.status === 'awaiting_approval' ? 'pending' : order.status;
@@ -485,6 +493,30 @@ export function OrderCard({
               </button>
             </div>
           </div>
+        ) : order.status === 'deleted_by_vendor' ? (
+          <div className="p-3 rounded-xl bg-slate-200/80 border border-slate-300 space-y-2.5">
+            <div className="text-xs font-extrabold text-slate-700">
+              🗑️ הזמנה זו הועברה לסל המחזור (״הזמנות שנמחקו״) ואינה פעילה.
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => onCycleStatus(order, order.pre_cancel_status || 'pending')}
+                className="py-2 px-3 rounded-xl bg-white hover:bg-slate-50 border border-slate-400 text-xs font-extrabold text-slate-800 shadow-sm"
+              >
+                ↩️ שחזר הזמנה
+              </button>
+              {onPermanentDelete && (
+                <button
+                  type="button"
+                  onClick={() => setConfirmPermanentDeleteOpen(true)}
+                  className="py-2 px-3 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-extrabold shadow-sm"
+                >
+                  ❌ מחק סופית מהמערכת
+                </button>
+              )}
+            </div>
+          </div>
         ) : order.status === 'cancelled' ? (
           <div className="p-3 rounded-xl bg-slate-200/80 border border-slate-300 space-y-2">
             <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -567,7 +599,7 @@ export function OrderCard({
         )}
 
         {/* שורת פעולות: עדכון תשלום אלגנטי (או תגית שולם + עריכה) + חשבונית (לספק) + וואטסאפ */}
-        {order.status !== 'cancelled' && (
+        {!isInactiveOrder && (
         <div className="flex items-center gap-2">
           {!isCharity && onQuickPay && (
             payState.status === 'paid' ? (
@@ -669,7 +701,7 @@ export function OrderCard({
                 <Edit3 className="w-4 h-4" />
               </button>
             )}
-            {order.status !== 'cancelled' && (
+            {!isInactiveOrder && (
               <button
                 type="button"
                 onClick={(e) => {
@@ -748,10 +780,10 @@ export function OrderCard({
               <Trash2 className="w-6 h-6" />
             </div>
             <h3 className="font-serif text-lg font-extrabold text-slate-900">
-              האם למחוק לצמיתות את הזמנה #{order.id}?
+              להעביר את הזמנה #{order.id} להזמנות שנמחקו?
             </h3>
             <p className="text-xs text-slate-600">
-              הזמנה של <strong>{order.recipient_name}</strong> ({formatILS(order.total_amount)}) תימחק ויתרת החשבון תתעדכן בהתאם.
+              הזמנה של <strong>{order.recipient_name}</strong> תוסתר מרשימת ההזמנות הרגילות ותועבר לסל המחזור (״🗑️ הזמנות שנמחקו״), משם ניתן לשחזר או למחוק סופית.
             </p>
             <div className="grid grid-cols-2 gap-2 pt-1">
               <button
@@ -776,7 +808,59 @@ export function OrderCard({
                 }}
                 className="py-2.5 rounded-xl bg-red-600 hover:bg-red-700 disabled:opacity-60 text-white font-extrabold text-xs"
               >
-                {deleting ? 'מוחק...' : 'מחק הזמנה'}
+                {deleting ? 'מעביר...' : 'העבר לנמחקו'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* חלונית אישור מחיקה סופית מהמערכת (מתוך סל המחזור בלבד) */}
+      {confirmPermanentDeleteOpen && onPermanentDelete && (
+        <div
+          className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
+          onClick={(e) => {
+            e.stopPropagation();
+            if (!deleting) setConfirmPermanentDeleteOpen(false);
+          }}
+        >
+          <div
+            className="max-w-xs w-full bg-white rounded-3xl border border-red-300 shadow-card p-5 space-y-3.5 text-center"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="w-12 h-12 rounded-full bg-red-100 text-red-600 flex items-center justify-center mx-auto">
+              <Trash2 className="w-6 h-6" />
+            </div>
+            <h3 className="font-serif text-lg font-extrabold text-red-800">
+              מחיקה סופית של הזמנה #{order.id}?
+            </h3>
+            <p className="text-xs text-slate-600 leading-relaxed">
+              פעולה זו תסיר את ההזמנה לצמיתות ממסך המוכר (אצל הלקוח תישמר הודעה קצרה שההזמנה בוטלה ואינה פעילה).
+            </p>
+            <div className="grid grid-cols-2 gap-2 pt-1">
+              <button
+                type="button"
+                disabled={deleting}
+                onClick={() => setConfirmPermanentDeleteOpen(false)}
+                className="py-2.5 rounded-xl border border-[#E8D5BE] bg-[#FAF6F0] text-slate-700 font-bold text-xs"
+              >
+                ביטול
+              </button>
+              <button
+                type="button"
+                disabled={deleting}
+                onClick={async () => {
+                  setDeleting(true);
+                  try {
+                    await onPermanentDelete(order.id);
+                  } finally {
+                    setDeleting(false);
+                    setConfirmPermanentDeleteOpen(false);
+                  }
+                }}
+                className="py-2.5 rounded-xl bg-red-600 hover:bg-red-700 disabled:opacity-60 text-white font-extrabold text-xs"
+              >
+                {deleting ? 'מוחק סופית...' : '❌ מחק סופית'}
               </button>
             </div>
           </div>

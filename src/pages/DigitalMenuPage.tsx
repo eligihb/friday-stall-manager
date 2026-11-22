@@ -189,7 +189,7 @@ export function DigitalMenuPage() {
 
   const canSubmitPayment = paymentChoice === 'cash_pickup' || prepayMethod !== null;
 
-  // איתור הזמנה פעילה קיימת של הלקוח לאותו יום שישי (שאינה מבוטלת ואינה נמסרה)
+  // איתור הזמנה פעילה קיימת של הלקוח לאותו יום שישי (שאינה מבוטלת, לא נמחקה ואינה נמסרה)
   const activeFridayOrder = useMemo(() => {
     if (!customerHistory?.orders) return null;
     return (
@@ -197,6 +197,7 @@ export function DigitalMenuPage() {
         (o) =>
           o.friday_date === fridayDate &&
           o.status !== 'cancelled' &&
+          o.status !== 'deleted_by_vendor' &&
           o.status !== 'delivered'
       ) || null
     );
@@ -571,10 +572,12 @@ export function DigitalMenuPage() {
     const cleanItemNote = modalItemNote.trim();
     const notePart = cleanItemNote ? ` [${cleanItemNote}]` : '';
     const rowKey = `${activeCard.id}__${activeOption.id}__${activeCard.hasFlavors ? selectedFlavor : ''}__${cleanItemNote}`;
-    const label =
-      activeCard.options.length === 1 && !activeCard.hasFlavors
-        ? `${activeCard.title} — ${activeOption.label}${notePart}`
-        : `${activeCard.title}${flavorPart} — ${activeOption.label}${notePart}`;
+    const sameTitleAndOption = activeCard.title.trim() === activeOption.label.trim();
+    const label = sameTitleAndOption
+      ? `${activeCard.title}${flavorPart}${notePart}`
+      : activeCard.options.length === 1 && !activeCard.hasFlavors
+      ? `${activeCard.title} — ${activeOption.label}${notePart}`
+      : `${activeCard.title}${flavorPart} — ${activeOption.label}${notePart}`;
 
     setCartRows((prev) => {
       const existing = prev.find((r) => r.rowKey === rowKey);
@@ -769,11 +772,12 @@ export function DigitalMenuPage() {
           card.options[0];
         if (matchedOpt) {
           const effPrice = Number(matchedOpt.price) || snapPrice;
+          const sameName = card.title.trim() === matchedOpt.label.trim();
           rows.push({
             rowKey: `${card.id}__${matchedOpt.id}____${rows.length}`,
             cardId: card.id,
             productId: matchedOpt.productId,
-            label: `${card.title} — ${matchedOpt.label}`,
+            label: sameName ? card.title : `${card.title} — ${matchedOpt.label}`,
             quantity: qty,
             unitsPerQty: matchedOpt.unitsPerQty,
             unitPrice: effPrice,
@@ -799,10 +803,12 @@ export function DigitalMenuPage() {
   const handleQuickAddOptionToCart = (card: CatalogCardItem, opt: CatalogOption) => {
     const flavorPart = card.hasFlavors ? ' (שום)' : '';
     const rowKey = `${card.id}__${opt.id}__${card.hasFlavors ? 'שום' : ''}__`;
-    const label =
-      card.options.length === 1 && !card.hasFlavors
-        ? `${card.title} — ${opt.label}`
-        : `${card.title}${flavorPart} — ${opt.label}`;
+    const sameName = card.title.trim() === opt.label.trim();
+    const label = sameName
+      ? `${card.title}${flavorPart}`
+      : card.options.length === 1 && !card.hasFlavors
+      ? `${card.title} — ${opt.label}`
+      : `${card.title}${flavorPart} — ${opt.label}`;
     setCartRows((prev) => {
       const existing = prev.find((r) => r.rowKey === rowKey);
       if (existing) {

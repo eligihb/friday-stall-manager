@@ -73,7 +73,8 @@ export type OrderStatus =
   | 'ready'
   | 'delivered'
   | 'cancel_requested'
-  | 'cancelled';
+  | 'cancelled'
+  | 'deleted_by_vendor';
 
 export interface Order {
   id: number;

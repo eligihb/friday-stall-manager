@@ -51,8 +51,11 @@ function getStepIndex(status: OrderStatus): number {
 }
 
 function getPaymentBadge(order: Order): { label: string; cls: string } {
-  if (order.status === 'cancelled') {
-    return { label: 'בוטל', cls: 'bg-slate-200 text-slate-700 border-slate-300' };
+  if (order.status === 'cancelled' || order.status === 'deleted_by_vendor') {
+    return {
+      label: order.cancelled_by === 'customer' ? 'בוטלה ע"י הלקוח' : 'בוטלה ע"י המוכר',
+      cls: 'bg-slate-200 text-slate-700 border-slate-300',
+    };
   }
   if (order.status === 'cancel_requested') {
     return { label: 'ממתין לאישור ביטול', cls: 'bg-orange-100 text-orange-900 border-orange-300' };
@@ -148,7 +151,9 @@ export function CustomerLivePortal({ customerId }: CustomerLivePortalProps) {
 
   // חישוב 3 נתוני סיכום חשבון אישי (מוצגים בטאב "היסטוריית הזמנות ותשלומים")
   const accountSummary = useMemo(() => {
-    const valid = orders.filter((o) => o.status !== 'cancelled');
+    const valid = orders.filter(
+      (o) => o.status !== 'cancelled' && o.status !== 'deleted_by_vendor'
+    );
     const totalOrdered = valid.reduce((s, o) => s + (Number(o.total_amount) || 0), 0);
     const totalPaid = valid.reduce((s, o) => s + (Number(o.paid_amount) || 0), 0);
     const balanceDue = Math.max(0, totalOrdered - totalPaid);
@@ -356,7 +361,7 @@ export function CustomerLivePortal({ customerId }: CustomerLivePortalProps) {
         {activeTab === 'active_order' ? (
           <section
             className={`rounded-3xl border shadow-soft p-4 sm:p-5 space-y-4 transition-all ${
-              focusedOrder?.status === 'cancelled'
+              focusedOrder?.status === 'cancelled' || focusedOrder?.status === 'deleted_by_vendor'
                 ? 'bg-slate-100/90 border-slate-300 opacity-85 grayscale-[60%]'
                 : 'bg-white border-[#E8D5BE]'
             }`}
@@ -393,9 +398,11 @@ export function CustomerLivePortal({ customerId }: CustomerLivePortalProps) {
               const unpaid = Math.max(0, effectiveTotal - focusedOrder.paid_amount);
               const payBadge = getPaymentBadge({ ...focusedOrder, total_amount: effectiveTotal });
               const canStillCancel = isBeforeFridayCancelCutoff(focusedOrder.friday_date);
+              const isCancelledOrDeleted =
+                focusedOrder.status === 'cancelled' || focusedOrder.status === 'deleted_by_vendor';
               const isCancelableStatus =
                 focusedOrder.status !== 'delivered' &&
-                focusedOrder.status !== 'cancelled' &&
+                !isCancelledOrDeleted &&
                 focusedOrder.status !== 'cancel_requested';
               const savings = computeOrderPromoSavings({
                 ...focusedOrder,
@@ -424,12 +431,12 @@ export function CustomerLivePortal({ customerId }: CustomerLivePortalProps) {
                       <AlertTriangle className="w-4 h-4 text-orange-600 shrink-0" />
                       <span>בקשת הביטול נשלחה — ממתין לאישור מוכר</span>
                     </div>
-                  ) : focusedOrder.status === 'cancelled' ? (
+                  ) : isCancelledOrDeleted ? (
                     <div className="p-4 rounded-2xl bg-slate-200/90 border border-slate-400/70 space-y-3 text-center">
                       <div className="text-sm font-extrabold text-slate-800">
                         {focusedOrder.cancelled_by === 'customer'
-                          ? '❌ ההזמנה בוטלה על ידך'
-                          : '❌ ההזמנה בוטלה על ידי המוכר'}
+                          ? `❌ הזמנה #${focusedOrder.id} בוטלה על ידי הלקוח`
+                          : `❌ הזמנה #${focusedOrder.id} בוטלה על ידי המוכר`}
                       </div>
                       <p className="text-xs text-slate-600">
                         הזמנה זו אינה פעילה עוד וחיובה אופס ל-₪0.00.
@@ -514,8 +521,10 @@ export function CustomerLivePortal({ customerId }: CustomerLivePortalProps) {
                             : 'text-red-600'
                         }`}
                       >
-                        {focusedOrder.status === 'cancelled'
-                          ? 'הזמנה מבוטלת (₪0.00)'
+                        {isCancelledOrDeleted
+                          ? focusedOrder.cancelled_by === 'customer'
+                            ? `הזמנה #${focusedOrder.id} בוטלה על ידי הלקוח (₪0.00)`
+                            : `הזמנה #${focusedOrder.id} בוטלה על ידי המוכר (₪0.00)`
                           : focusedOrder.paid_amount > 0
                           ? `שולם ${formatILS(focusedOrder.paid_amount)} מתוך ${formatILS(
                               effectiveTotal
@@ -532,7 +541,7 @@ export function CustomerLivePortal({ customerId }: CustomerLivePortalProps) {
 
                   {/* קוביית התשלום מוצגת מתחת להזמנה אך ורק אם ההזמנה טרם שולמה במלואה */}
                   {unpaid > 0.01 &&
-                    focusedOrder.status !== 'cancelled' &&
+                    !isCancelledOrDeleted &&
                     focusedOrder.status !== 'cancel_requested' && (
                       <QuickCustomerPayBox
                         amountToPay={unpaid}
@@ -721,7 +730,7 @@ export function CustomerLivePortal({ customerId }: CustomerLivePortalProps) {
                           <span className="text-slate-500">מצב תשלום להזמנה:</span>
                           <span
                             className={
-                              o.status === 'cancelled'
+                              o.status === 'cancelled' || o.status === 'deleted_by_vendor'
                                 ? 'text-slate-500'
                                 : o.paid_amount > 0
                                 ? 'text-emerald-700'
@@ -730,8 +739,10 @@ export function CustomerLivePortal({ customerId }: CustomerLivePortalProps) {
                                 : 'text-red-600'
                             }
                           >
-                            {o.status === 'cancelled'
-                              ? 'בוטל (₪0.00)'
+                            {o.status === 'cancelled' || o.status === 'deleted_by_vendor'
+                              ? o.cancelled_by === 'customer'
+                                ? 'בוטלה על ידי הלקוח (₪0.00)'
+                                : 'בוטלה על ידי המוכר (₪0.00)'
                               : o.paid_amount > 0
                               ? `שולם ${formatILS(o.paid_amount)} מתוך ${formatILS(o.total_amount)}`
                               : isOrderPrepayPendingVerification(o)

@@ -37,6 +37,7 @@ const NEXT_STATUS: Record<OrderStatus, OrderStatus> = {
   delivered: 'pending',
   cancel_requested: 'cancelled',
   cancelled: 'cancelled',
+  deleted_by_vendor: 'deleted_by_vendor',
 };
 
 export function SupplierOrdersPage() {
