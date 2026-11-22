@@ -33,7 +33,7 @@ type StatusListener = (snapshot: CloudSyncStatusSnapshot) => void;
 type DataUpdatedListener = () => void;
 
 let currentStatus: CloudSyncStatusSnapshot = {
-  state: 'syncing',
+  state: 'offline',
   lastSyncedAt: (() => {
     try {
       return localStorage.getItem(LAST_CLOUD_SYNC_AT_KEY);
@@ -47,18 +47,21 @@ let currentStatus: CloudSyncStatusSnapshot = {
 const statusListeners = new Set<StatusListener>();
 const dataUpdatedListeners = new Set<DataUpdatedListener>();
 let invalidateDbCallback: (() => void) | null = null;
-let ensureLocalDbInitializedCallback: (() => void) | null = null;
 
-export function registerDbCacheInvalidator(
-  invalidateFn: () => void,
-  ensureInitFn?: () => void
-): void {
+export function registerDbCacheInvalidator(invalidateFn: () => void): void {
   invalidateDbCallback = invalidateFn;
-  if (ensureInitFn) ensureLocalDbInitializedCallback = ensureInitFn;
 }
 
 function setSyncStatus(patch: Partial<CloudSyncStatusSnapshot>): void {
-  currentStatus = { ...currentStatus, ...patch };
+  const next: CloudSyncStatusSnapshot = { ...currentStatus, ...patch };
+  if (
+    next.state === currentStatus.state &&
+    next.lastSyncedAt === currentStatus.lastSyncedAt &&
+    next.lastError === currentStatus.lastError
+  ) {
+    return;
+  }
+  currentStatus = next;
   for (const listener of statusListeners) {
     try {
       listener(currentStatus);
@@ -147,10 +150,6 @@ function formatSupabaseError(err: unknown): string {
   return parts.join(' ');
 }
 
-/**
- * Fetches row `id = 'main_stall'` from `public.stall_sync` using `@supabase/supabase-js`
- * with automatic fallback to PostgREST `apikey` header for `sb_publishable_...` keys.
- */
 async function fetchRemoteStallSyncRow(): Promise<{
   id: string;
   data: StallSyncPayload | null;
@@ -167,7 +166,6 @@ async function fetchRemoteStallSyncRow(): Promise<{
     return (data as { id: string; data: StallSyncPayload | null; updated_at?: string } | null) || null;
   }
 
-  // Fallback: קריאת REST ישירה עם apikey בלבד (עבור מפתחות sb_publishable_ חדשים)
   const { url, key } = getActiveSupabaseCredentials();
   const endpoint = `${url.replace(/\/$/, '')}/rest/v1/stall_sync?id=eq.${encodeURIComponent(
     STALL_SYNC_ROW_ID
@@ -196,10 +194,6 @@ async function fetchRemoteStallSyncRow(): Promise<{
   return Array.isArray(rows) && rows.length > 0 ? rows[0] : null;
 }
 
-/**
- * Upserts row `id = 'main_stall'` into `public.stall_sync` using `@supabase/supabase-js`
- * with automatic fallback to PostgREST `apikey` header for `sb_publishable_...` keys.
- */
 async function upsertRemoteStallSyncRow(
   payload: StallSyncPayload,
   nowIso: string
@@ -216,7 +210,6 @@ async function upsertRemoteStallSyncRow(
 
   if (!error) return;
 
-  // Fallback: שליחת REST upsert ישירה עם apikey בלבד
   const { url, key } = getActiveSupabaseCredentials();
   const endpoint = `${url.replace(/\/$/, '')}/rest/v1/stall_sync?on_conflict=id`;
   const res = await fetch(endpoint, {
@@ -265,15 +258,11 @@ export interface StallSyncPayload {
   backups: unknown[];
 }
 
-export function buildLocalSyncPayload(): StallSyncPayload {
-  if (ensureLocalDbInitializedCallback) {
-    try {
-      ensureLocalDbInitializedCallback();
-    } catch {
-      // ignore
-    }
-  }
+function computeStorageFingerprint(rawStorage: Record<string, string | null>): string {
+  return SYNCED_STORAGE_KEYS.map((k) => `${k}:${rawStorage[k] || ''}`).join('||');
+}
 
+export function buildLocalSyncPayload(): StallSyncPayload {
   const rawStorage: Record<string, string | null> = {};
   for (const k of SYNCED_STORAGE_KEYS) {
     try {
@@ -297,7 +286,7 @@ export function buildLocalSyncPayload(): StallSyncPayload {
   const nowIso = new Date().toISOString();
 
   return {
-    version: 'v2.16.1',
+    version: 'v2.16.2',
     updatedAt: nowIso,
     rawStorage,
     orders: Array.isArray(mainDb.orders) ? mainDb.orders : [],
@@ -326,10 +315,6 @@ function hasRemotePayloadContent(data: Partial<StallSyncPayload> | null | undefi
   return false;
 }
 
-/**
- * Merges remote ht_static_db_v1 with local ht_static_db_v1 so that all orders, customers,
- * suppliers, and transactions from both localStorage and Supabase are preserved without loss.
- */
 function mergeRemoteAndLocalMainDb(
   remoteRawDb: string | null | undefined,
   localRawDb: string | null | undefined,
@@ -423,6 +408,13 @@ function mergeRemoteAndLocalMainDb(
   }
 }
 
+let pushTimeoutId: ReturnType<typeof setTimeout> | null = null;
+let isSyncInProgress = false;
+let isApplyingRemoteData = false;
+let hasCompletedStartupAttempt = false;
+let cloudSyncPausedOnError = false;
+let lastSyncedFingerprint = '';
+
 function applyCloudPayloadToLocalStorage(
   remotePayload: StallSyncPayload,
   mergeLocalAdditions = true
@@ -430,11 +422,11 @@ function applyCloudPayloadToLocalStorage(
   const remoteMap = remotePayload.rawStorage;
   if (!remoteMap || typeof remoteMap !== 'object') return false;
   let changed = false;
-
-  for (const key of SYNCED_STORAGE_KEYS) {
-    const incomingVal = remoteMap[key];
-    if (incomingVal === undefined || incomingVal === null) continue;
-    try {
+  isApplyingRemoteData = true;
+  try {
+    for (const key of SYNCED_STORAGE_KEYS) {
+      const incomingVal = remoteMap[key];
+      if (incomingVal === undefined || incomingVal === null) continue;
       const currentVal = localStorage.getItem(key);
       const finalVal =
         key === 'ht_static_db_v1' && mergeLocalAdditions
@@ -444,24 +436,35 @@ function applyCloudPayloadToLocalStorage(
         localStorage.setItem(key, finalVal);
         changed = true;
       }
-    } catch {
-      // ignore
     }
+    const snapAfter = buildLocalSyncPayload();
+    lastSyncedFingerprint = computeStorageFingerprint(snapAfter.rawStorage);
+  } catch {
+    // ignore
+  } finally {
+    isApplyingRemoteData = false;
   }
   return changed;
 }
 
-let pushTimeoutId: ReturnType<typeof setTimeout> | null = null;
-let isSyncInProgress = false;
-let lastKnownRemoteUpdatedAt = '';
-let initialUpsertCompleted = false;
-
 /**
- * Immediately uploads the current localStorage state to `public.stall_sync` (`id = 'main_stall'`).
+ * Uploads the current localStorage state to `public.stall_sync` (`id = 'main_stall'`).
+ * Never retries in a loop on error.
  */
 export async function pushLocalStateToCloud(options?: {
   mergeWithRemoteFirst?: boolean;
+  force?: boolean;
 }): Promise<boolean> {
+  if (isSyncInProgress && !options?.force) return false;
+  if (cloudSyncPausedOnError && !options?.force) return false;
+
+  const currentPayload = buildLocalSyncPayload();
+  const currentFp = computeStorageFingerprint(currentPayload.rawStorage);
+  if (!options?.force && currentFp === lastSyncedFingerprint) {
+    return true;
+  }
+
+  isSyncInProgress = true;
   setSyncStatus({ state: 'syncing', lastError: null });
   try {
     if (options?.mergeWithRemoteFirst) {
@@ -472,7 +475,9 @@ export async function pushLocalStateToCloud(options?: {
         const remoteDbRaw = remotePayload.rawStorage?.ht_static_db_v1;
         const mergedDb = mergeRemoteAndLocalMainDb(remoteDbRaw, localDbRaw, true);
         if (mergedDb) {
+          isApplyingRemoteData = true;
           localStorage.setItem('ht_static_db_v1', mergedDb);
+          isApplyingRemoteData = false;
           if (invalidateDbCallback) invalidateDbCallback();
         }
       }
@@ -482,8 +487,8 @@ export async function pushLocalStateToCloud(options?: {
     const nowIso = new Date().toISOString();
     await upsertRemoteStallSyncRow(payload, nowIso);
 
-    lastKnownRemoteUpdatedAt = nowIso;
-    initialUpsertCompleted = true;
+    lastSyncedFingerprint = computeStorageFingerprint(payload.rawStorage);
+    cloudSyncPausedOnError = false;
     try {
       localStorage.setItem(LAST_CLOUD_SYNC_AT_KEY, nowIso);
       localStorage.setItem(LOCAL_UPDATED_AT_KEY, nowIso);
@@ -491,8 +496,11 @@ export async function pushLocalStateToCloud(options?: {
       // ignore
     }
     setSyncStatus({ state: 'synced', lastSyncedAt: nowIso, lastError: null });
+    isSyncInProgress = false;
     return true;
   } catch (err) {
+    isSyncInProgress = false;
+    cloudSyncPausedOnError = true;
     setSyncStatus({
       state: 'offline',
       lastError: formatSupabaseError(err),
@@ -502,9 +510,12 @@ export async function pushLocalStateToCloud(options?: {
 }
 
 /**
- * Schedules a debounced background push to Supabase whenever local data changes.
+ * Schedules a debounced background push to Supabase only when user-initiated writes happen.
  */
 export function scheduleCloudPush(immediate = false): void {
+  if (isApplyingRemoteData || isSyncInProgress || cloudSyncPausedOnError) {
+    return;
+  }
   try {
     localStorage.setItem(LOCAL_UPDATED_AT_KEY, new Date().toISOString());
   } catch {
@@ -518,63 +529,50 @@ export function scheduleCloudPush(immediate = false): void {
     void pushLocalStateToCloud({ mergeWithRemoteFirst: true });
     return;
   }
-  setSyncStatus({ state: 'syncing' });
   pushTimeoutId = setTimeout(() => {
     pushTimeoutId = null;
     void pushLocalStateToCloud();
-  }, 450);
+  }, 1800);
 }
 
 /**
- * Startup & periodic Cloud Sync + Safe Initial Migration:
- * - Connects automatically using default Supabase URL & Key if localStorage is empty.
- * - Merges existing localStorage data with cloud row `id = 'main_stall'` and immediately upserts
- *   all local data to `public.stall_sync` on startup so nothing is ever lost.
- * - Updates the top badge to `☁️ מסונכרן לענן` on success, or records the exact Supabase error on failure.
+ * Runs ONCE on app startup (or when user clicks "סנכרן עכשיו" with `isManual = true`).
+ * Never loops or retries automatically if an error occurs.
  */
 export async function syncWithCloudOnStartupOrPoll(isManual = false): Promise<boolean> {
-  if (isSyncInProgress && !isManual) return false;
-  isSyncInProgress = true;
-
-  if (isManual || currentStatus.state !== 'synced') {
-    setSyncStatus({ state: 'syncing', lastError: null });
+  if (!isManual && hasCompletedStartupAttempt) {
+    return currentStatus.state === 'synced';
   }
+  if (isSyncInProgress && !isManual) {
+    return false;
+  }
+
+  hasCompletedStartupAttempt = true;
+  isSyncInProgress = true;
+  if (isManual) {
+    cloudSyncPausedOnError = false;
+  }
+  setSyncStatus({ state: 'syncing', lastError: null });
 
   try {
     const row = await fetchRemoteStallSyncRow();
     const remotePayload = row?.data || null;
     const remoteHasData = hasRemotePayloadContent(remotePayload);
 
-    // אם בענן כבר קיימים נתונים — נמזג אותם עם הנתונים המקומיים כך ששום הזמנה מקומית או מהענן לא תאבד
     if (remoteHasData && remotePayload) {
-      const remoteUpdatedAt = String(row?.updated_at || remotePayload.updatedAt || '');
-      const isNewerRemote =
-        !lastKnownRemoteUpdatedAt ||
-        remoteUpdatedAt > lastKnownRemoteUpdatedAt ||
-        isManual;
-
-      if (isNewerRemote) {
-        const mutated = applyCloudPayloadToLocalStorage(remotePayload, true);
-        lastKnownRemoteUpdatedAt = remoteUpdatedAt || new Date().toISOString();
-        try {
-          localStorage.setItem(LAST_CLOUD_SYNC_AT_KEY, lastKnownRemoteUpdatedAt);
-        } catch {
-          // ignore
-        }
-        if (mutated) {
-          notifyCloudDataUpdated();
-        }
+      const mutated = applyCloudPayloadToLocalStorage(remotePayload, true);
+      if (mutated) {
+        notifyCloudDataUpdated();
       }
     }
 
-    // בעליית האפליקציה הראשונית, בלחיצה על "סנכרן עכשיו", או אם הענן היה ריק:
-    // מבצעים מיד upsert של כל הנתונים הקיימים ב-localStorage לשורה id = 'main_stall' בטבלת public.stall_sync!
-    if (!initialUpsertCompleted || !remoteHasData || isManual) {
-      const payload = buildLocalSyncPayload();
+    // העלאת הנתונים המעודכנים מ-localStorage לשורה id = 'main_stall'
+    const payload = buildLocalSyncPayload();
+    const fp = computeStorageFingerprint(payload.rawStorage);
+    if (!remoteHasData || isManual || fp !== lastSyncedFingerprint) {
       const nowIso = new Date().toISOString();
       await upsertRemoteStallSyncRow(payload, nowIso);
-      lastKnownRemoteUpdatedAt = nowIso;
-      initialUpsertCompleted = true;
+      lastSyncedFingerprint = fp;
       try {
         localStorage.setItem(LAST_CLOUD_SYNC_AT_KEY, nowIso);
       } catch {
@@ -582,15 +580,17 @@ export async function syncWithCloudOnStartupOrPoll(isManual = false): Promise<bo
       }
     }
 
+    cloudSyncPausedOnError = false;
     setSyncStatus({
       state: 'synced',
-      lastSyncedAt: lastKnownRemoteUpdatedAt || new Date().toISOString(),
+      lastSyncedAt: new Date().toISOString(),
       lastError: null,
     });
     isSyncInProgress = false;
     return true;
   } catch (err) {
     isSyncInProgress = false;
+    cloudSyncPausedOnError = true;
     setSyncStatus({
       state: 'offline',
       lastError: formatSupabaseError(err),

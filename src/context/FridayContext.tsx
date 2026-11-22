@@ -23,34 +23,16 @@ export function FridayProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
-    // 1. סנכרון ראשוני והעלאה בטוחה (Migration) מול Supabase בעליית האפליקציה
-    void syncWithCloudOnStartupOrPoll();
+    // סנכרון ראשוני חד-פעמי בעליית האפליקציה (ללא לולאת פולינג אינסופית)
+    void syncWithCloudOnStartupOrPoll(false);
 
-    // 2. האזנה לעדכוני נתונים מהענן כדי לרענן את המסכים בזמן אמת
+    // האזנה לעדכוני נתונים מהענן כדי לרענן את המסכים רק כשאכן התקבל שינוי חדש
     const unsubscribe = subscribeCloudDataUpdated(() => {
       setRefreshTick((t) => t + 1);
     });
 
-    // 3. רענון אוטומטי מהענן בעת חזרה ללשונית (focus / visibilitychange) וכל 15 שניות
-    const onFocusOrVisible = () => {
-      if (document.visibilityState === 'visible') {
-        void syncWithCloudOnStartupOrPoll();
-      }
-    };
-    window.addEventListener('focus', onFocusOrVisible);
-    document.addEventListener('visibilitychange', onFocusOrVisible);
-
-    const intervalId = setInterval(() => {
-      if (document.visibilityState === 'visible') {
-        void syncWithCloudOnStartupOrPoll();
-      }
-    }, 15000);
-
     return () => {
       unsubscribe();
-      window.removeEventListener('focus', onFocusOrVisible);
-      document.removeEventListener('visibilitychange', onFocusOrVisible);
-      clearInterval(intervalId);
     };
   }, []);
 

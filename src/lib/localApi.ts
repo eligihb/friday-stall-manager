@@ -186,9 +186,7 @@ export function invalidateLocalDbCache(): void {
   memoryDbFallback = null;
 }
 
-registerDbCacheInvalidator(invalidateLocalDbCache, () => {
-  loadDb();
-});
+registerDbCacheInvalidator(invalidateLocalDbCache);
 
 function safeGetItem(key: string): string | null {
   try {
@@ -265,30 +263,22 @@ function mergeImportedBackupIntoDb(db: LocalDb): boolean {
     if (existing) {
       if (pl.t > 0 && Math.abs(existing.total_amount - pl.t) > 0.01) {
         existing.total_amount = round2(pl.t);
-        mutated = true;
-      }
-      if (Array.isArray(pl.i) && pl.i.length > 0) {
-        db.order_items = db.order_items.filter((oi) => oi.order_id !== existing.id);
-        for (const it of pl.i) {
-          const prod = pMap.get(Number(it.pid)) || db.products[0];
-          if (!prod) continue;
-          db.order_items.push({
-            id: db.nextIds.order_items++,
-            order_id: existing.id,
-            product_id: prod.id,
-            quantity: Math.max(1, Number(it.q) || 1),
-            unit_price_snapshot: Math.max(0, Number(it.u) || prod.customer_price),
-            cost_price_snapshot: prod.cost_price,
-          });
+        if (Array.isArray(pl.i) && pl.i.length > 0) {
+          db.order_items = db.order_items.filter((oi) => oi.order_id !== existing.id);
+          for (const it of pl.i) {
+            const prod = pMap.get(Number(it.pid)) || db.products[0];
+            if (!prod) continue;
+            db.order_items.push({
+              id: db.nextIds.order_items++,
+              order_id: existing.id,
+              product_id: prod.id,
+              quantity: Math.max(1, Number(it.q) || 1),
+              unit_price_snapshot: Math.max(0, Number(it.u) || prod.customer_price),
+              cost_price_snapshot: prod.cost_price,
+            });
+          }
         }
         mutated = true;
-      }
-      if (pl.nt) {
-        const updatedNotes = [pl.p ? `טלפון: ${pl.p}` : '', pl.nt].filter(Boolean).join(' | ');
-        if (existing.notes !== updatedNotes) {
-          existing.notes = updatedNotes;
-          mutated = true;
-        }
       }
       if (rec.status === 'received' && (existing.status === 'awaiting_approval' || existing.status === 'pending')) {
         existing.status = 'received';
@@ -336,7 +326,7 @@ function mergeImportedBackupIntoDb(db: LocalDb): boolean {
 function loadDb(): LocalDb {
   if (memoryDbFallback) {
     if (mergeImportedBackupIntoDb(memoryDbFallback)) {
-      saveDb(memoryDbFallback);
+      saveDb(memoryDbFallback, false, false);
     }
     return memoryDbFallback;
   }
@@ -355,20 +345,22 @@ function loadDb(): LocalDb {
         mutated = true;
       }
       memoryDbFallback = parsed;
-      if (mutated) saveDb(parsed);
+      if (mutated) saveDb(parsed, false, false);
       return memoryDbFallback;
     }
   } catch {}
   const fresh = createInitialDb();
   mergeImportedBackupIntoDb(fresh);
-  saveDb(fresh);
+  saveDb(fresh, false, false);
   return fresh;
 }
 
-function saveDb(db: LocalDb, immediateCloudSync = false) {
+function saveDb(db: LocalDb, immediateCloudSync = false, shouldSyncToCloud = true) {
   memoryDbFallback = db;
   safeSetItem(STORAGE_KEY, JSON.stringify(db));
-  scheduleCloudPush(immediateCloudSync);
+  if (shouldSyncToCloud) {
+    scheduleCloudPush(immediateCloudSync);
+  }
 }
 
 function sanitizeUser(u: StoredUser): User {
@@ -564,7 +556,7 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
   }
 
   if (dbMutated) {
-    saveDb(db);
+    saveDb(db, false, false);
   }
 
   // --- PUBLIC STOREFRONT (ללא התחברות) ---
