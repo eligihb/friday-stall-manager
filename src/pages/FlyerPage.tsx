@@ -313,7 +313,7 @@ export function FlyerPage() {
           </div>
 
           <div className="text-center text-[11px] font-extrabold text-[#6D280B] pt-1">
-            הזמנה מוקדמת פתוחה ימים א׳–ו׳ עד 06:00 · שבת שלום ומבורכת! 🕯️
+            ניתן להזמין עד ליום חמישי בשעה 24:00 · שבת שלום ומבורכת! 🕯️
           </div>
         </div>
       </div>

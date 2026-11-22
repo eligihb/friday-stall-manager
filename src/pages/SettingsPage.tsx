@@ -699,7 +699,7 @@ export function SettingsPage() {
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                 {(
                   [
-                    ['auto', 'אוטומטי (א׳ 00:00 – ו׳ 06:00)'],
+                    ['auto', 'אוטומטי (ניתן להזמין עד ליום חמישי בשעה 24:00)'],
                     ['preorder', 'מחיר הזמנה מוקדמת'],
                     ['stall', 'מחיר דוכן רגיל'],
                   ] as Array<[CustomerPriceMode, string]>

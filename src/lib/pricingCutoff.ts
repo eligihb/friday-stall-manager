@@ -21,7 +21,7 @@ export function getFridayPricingStatus(fridayIso: string, now = new Date()): Fri
       mode: 'preorder',
       isPreorder: true,
       cutoffIso: `${cleanDate}T06:00:00`,
-      badgeText: 'מחירון הזמנה מוקדמת פעיל (עד יום שישי בשעה 06:00)',
+      badgeText: 'מחירון הזמנה מוקדמת פעיל — ניתן להזמין עד ליום חמישי בשעה 24:00',
       shortBadge: 'מחיר הזמנה מוקדמת',
     };
   }
