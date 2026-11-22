@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
+import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
 import { getNextFridayISO } from '../lib/format';
 import {
   subscribeCloudDataUpdated,
@@ -17,16 +17,19 @@ const FridayContext = createContext<FridayContextValue | null>(null);
 export function FridayProvider({ children }: { children: React.ReactNode }) {
   const [fridayDate, setFridayDate] = useState(getNextFridayISO());
   const [refreshTick, setRefreshTick] = useState(0);
+  const startupSyncedRef = useRef(false);
 
   const triggerRefresh = useCallback(() => {
     setRefreshTick((t) => t + 1);
   }, []);
 
   useEffect(() => {
-    // סנכרון ראשוני חד-פעמי בעליית האפליקציה (ללא לולאת פולינג אינסופית)
-    void syncWithCloudOnStartupOrPoll(false);
+    // סנכרון ראשוני חד-פעמי בלבד בעליית האפליקציה (עם useRef למניעת הרצה כפולה)
+    if (!startupSyncedRef.current) {
+      startupSyncedRef.current = true;
+      void syncWithCloudOnStartupOrPoll(false);
+    }
 
-    // האזנה לעדכוני נתונים מהענן כדי לרענן את המסכים רק כשאכן התקבל שינוי חדש
     const unsubscribe = subscribeCloudDataUpdated(() => {
       setRefreshTick((t) => t + 1);
     });

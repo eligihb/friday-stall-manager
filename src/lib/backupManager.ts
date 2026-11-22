@@ -101,11 +101,16 @@ export function loadBackupSnapshots(): BackupSnapshot[] {
   }
 }
 
-export function saveBackupSnapshots(list: BackupSnapshot[]): BackupSnapshot[] {
+export function saveBackupSnapshots(
+  list: BackupSnapshot[],
+  shouldTriggerCloudPush = false
+): BackupSnapshot[] {
   const trimmed = list.slice(0, MAX_WEEKLY_SNAPSHOTS);
   try {
     localStorage.setItem(BACKUPS_STORAGE_KEY, JSON.stringify(trimmed));
-    scheduleCloudPush();
+    if (shouldTriggerCloudPush) {
+      scheduleCloudPush();
+    }
   } catch {
     // If localStorage quota is tight, keep fewer snapshots
     try {
@@ -195,7 +200,7 @@ export function createBackupSnapshot(
     kind === 'pre_restore'
       ? existing.filter((s) => s.kind !== 'pre_restore')
       : existing;
-  const next = saveBackupSnapshots([snap, ...filtered]);
+  const next = saveBackupSnapshots([snap, ...filtered], kind === 'manual');
   return { created: snap, all: next };
 }
 

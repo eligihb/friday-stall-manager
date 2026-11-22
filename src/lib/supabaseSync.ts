@@ -1,4 +1,3 @@
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import {
   DEFAULT_SUPABASE_ANON_KEY,
   DEFAULT_SUPABASE_URL,
@@ -107,82 +106,65 @@ function notifyCloudDataUpdated(): void {
   }
 }
 
-let cachedClientUrl = '';
-let cachedClientKey = '';
-let cachedClient: SupabaseClient | null = null;
-
 export function getActiveSupabaseCredentials(): { url: string; key: string } {
   const cfg = getSavedCloudConfig();
   const url = (cfg.supabaseUrl || '').trim() || DEFAULT_SUPABASE_URL;
   const key = (cfg.supabaseAnonKey || '').trim() || DEFAULT_SUPABASE_ANON_KEY;
-  return { url, key };
+  return { url: url.replace(/\/$/, ''), key };
 }
 
-export function getSupabaseClient(): SupabaseClient {
-  const { url, key } = getActiveSupabaseCredentials();
-  if (cachedClient && cachedClientUrl === url && cachedClientKey === key) {
-    return cachedClient;
-  }
-  cachedClientUrl = url;
-  cachedClientKey = key;
-  cachedClient = createClient(url, key, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-  return cachedClient;
+function getSupabaseHeaders(key: string): Record<string, string> {
+  return {
+    apikey: key,
+    Authorization: `Bearer ${key}`,
+    'Content-Type': 'application/json',
+    Prefer: 'resolution=merge-duplicates,return=representation',
+  };
 }
 
 function formatSupabaseError(err: unknown): string {
   if (!err) return 'שגיאה לא ידועה בחיבור ל-Supabase';
   if (typeof err === 'string') return err;
+  if (err instanceof Error) return err.message;
   const e = err as {
     message?: string;
     details?: string;
     hint?: string;
     code?: string;
+    error?: string;
     error_description?: string;
   };
   const parts = [
     e.code ? `[${e.code}]` : '',
-    e.message || e.error_description || 'שגיאת Supabase',
+    e.message || e.error_description || e.error || 'שגיאת Supabase',
     e.details ? `(${e.details})` : '',
     e.hint ? `רמז: ${e.hint}` : '',
   ].filter(Boolean);
   return parts.join(' ');
 }
 
+/**
+ * Direct GET /rest/v1/stall_sync?id=eq.main_stall&select=*
+ */
 async function fetchRemoteStallSyncRow(): Promise<{
   id: string;
   data: StallSyncPayload | null;
   updated_at?: string;
 } | null> {
-  const client = getSupabaseClient();
-  const { data, error } = await client
-    .from('stall_sync')
-    .select('id, data, updated_at')
-    .eq('id', STALL_SYNC_ROW_ID)
-    .maybeSingle();
-
-  if (!error) {
-    return (data as { id: string; data: StallSyncPayload | null; updated_at?: string } | null) || null;
-  }
-
   const { url, key } = getActiveSupabaseCredentials();
-  const endpoint = `${url.replace(/\/$/, '')}/rest/v1/stall_sync?id=eq.${encodeURIComponent(
+  const endpoint = `${url}/rest/v1/stall_sync?id=eq.${encodeURIComponent(
     STALL_SYNC_ROW_ID
-  )}&select=id,data,updated_at`;
+  )}&select=*`;
 
   const res = await fetch(endpoint, {
     method: 'GET',
-    headers: {
-      apikey: key,
-      Accept: 'application/json',
-    },
+    headers: getSupabaseHeaders(key),
   });
 
   if (!res.ok) {
     const errBody = await res.json().catch(() => null);
     throw new Error(
-      errBody ? formatSupabaseError(errBody) : `${formatSupabaseError(error)} (HTTP ${res.status})`
+      errBody ? formatSupabaseError(errBody) : `HTTP ${res.status}: ${res.statusText}`
     );
   }
 
@@ -194,34 +176,22 @@ async function fetchRemoteStallSyncRow(): Promise<{
   return Array.isArray(rows) && rows.length > 0 ? rows[0] : null;
 }
 
+/**
+ * Direct POST /rest/v1/stall_sync (Upsert with Prefer: resolution=merge-duplicates,return=representation)
+ */
 async function upsertRemoteStallSyncRow(
-  payload: StallSyncPayload,
+  allAppData: StallSyncPayload,
   nowIso: string
 ): Promise<void> {
-  const client = getSupabaseClient();
-  const { error } = await client.from('stall_sync').upsert(
-    {
-      id: STALL_SYNC_ROW_ID,
-      data: payload,
-      updated_at: nowIso,
-    },
-    { onConflict: 'id' }
-  );
-
-  if (!error) return;
-
   const { url, key } = getActiveSupabaseCredentials();
-  const endpoint = `${url.replace(/\/$/, '')}/rest/v1/stall_sync?on_conflict=id`;
+  const endpoint = `${url}/rest/v1/stall_sync`;
+
   const res = await fetch(endpoint, {
     method: 'POST',
-    headers: {
-      apikey: key,
-      'Content-Type': 'application/json',
-      Prefer: 'resolution=merge-duplicates,return=minimal',
-    },
+    headers: getSupabaseHeaders(key),
     body: JSON.stringify({
       id: STALL_SYNC_ROW_ID,
-      data: payload,
+      data: allAppData,
       updated_at: nowIso,
     }),
   });
@@ -229,7 +199,7 @@ async function upsertRemoteStallSyncRow(
   if (!res.ok) {
     const errBody = await res.json().catch(() => null);
     throw new Error(
-      errBody ? formatSupabaseError(errBody) : `${formatSupabaseError(error)} (HTTP ${res.status})`
+      errBody ? formatSupabaseError(errBody) : `HTTP ${res.status}: ${res.statusText}`
     );
   }
 }
@@ -286,7 +256,7 @@ export function buildLocalSyncPayload(): StallSyncPayload {
   const nowIso = new Date().toISOString();
 
   return {
-    version: 'v2.16.2',
+    version: 'v2.16.3',
     updatedAt: nowIso,
     rawStorage,
     orders: Array.isArray(mainDb.orders) ? mainDb.orders : [],
@@ -312,6 +282,13 @@ function hasRemotePayloadContent(data: Partial<StallSyncPayload> | null | undefi
   if (data.rawStorage && data.rawStorage.ht_static_db_v1) return true;
   if (Array.isArray(data.orders) && data.orders.length > 0) return true;
   if (Array.isArray(data.customers) && data.customers.length > 0) return true;
+  return false;
+}
+
+function hasLocalDataToUpload(payload: StallSyncPayload): boolean {
+  if (payload.rawStorage && payload.rawStorage.ht_static_db_v1) return true;
+  if (Array.isArray(payload.orders) && payload.orders.length > 0) return true;
+  if (Array.isArray(payload.customers) && payload.customers.length > 0) return true;
   return false;
 }
 
@@ -412,7 +389,7 @@ let pushTimeoutId: ReturnType<typeof setTimeout> | null = null;
 let isSyncInProgress = false;
 let isApplyingRemoteData = false;
 let hasCompletedStartupAttempt = false;
-let cloudSyncPausedOnError = false;
+let circuitBreakerTripped = false;
 let lastSyncedFingerprint = '';
 
 function applyCloudPayloadToLocalStorage(
@@ -448,15 +425,15 @@ function applyCloudPayloadToLocalStorage(
 }
 
 /**
- * Uploads the current localStorage state to `public.stall_sync` (`id = 'main_stall'`).
- * Never retries in a loop on error.
+ * Case 2 & 3: Uploads local state to `public.stall_sync` (`id = 'main_stall'`).
+ * Circuit breaker stops automatic retries if an error occurred until a manual sync is requested.
  */
 export async function pushLocalStateToCloud(options?: {
   mergeWithRemoteFirst?: boolean;
   force?: boolean;
 }): Promise<boolean> {
   if (isSyncInProgress && !options?.force) return false;
-  if (cloudSyncPausedOnError && !options?.force) return false;
+  if (circuitBreakerTripped && !options?.force) return false;
 
   const currentPayload = buildLocalSyncPayload();
   const currentFp = computeStorageFingerprint(currentPayload.rawStorage);
@@ -483,12 +460,12 @@ export async function pushLocalStateToCloud(options?: {
       }
     }
 
-    const payload = buildLocalSyncPayload();
+    const allAppData = buildLocalSyncPayload();
     const nowIso = new Date().toISOString();
-    await upsertRemoteStallSyncRow(payload, nowIso);
+    await upsertRemoteStallSyncRow(allAppData, nowIso);
 
-    lastSyncedFingerprint = computeStorageFingerprint(payload.rawStorage);
-    cloudSyncPausedOnError = false;
+    lastSyncedFingerprint = computeStorageFingerprint(allAppData.rawStorage);
+    circuitBreakerTripped = false;
     try {
       localStorage.setItem(LAST_CLOUD_SYNC_AT_KEY, nowIso);
       localStorage.setItem(LOCAL_UPDATED_AT_KEY, nowIso);
@@ -500,7 +477,7 @@ export async function pushLocalStateToCloud(options?: {
     return true;
   } catch (err) {
     isSyncInProgress = false;
-    cloudSyncPausedOnError = true;
+    circuitBreakerTripped = true;
     setSyncStatus({
       state: 'offline',
       lastError: formatSupabaseError(err),
@@ -510,10 +487,10 @@ export async function pushLocalStateToCloud(options?: {
 }
 
 /**
- * Schedules a debounced background push to Supabase only when user-initiated writes happen.
+ * Case 2: Debounced (1.5s) push triggered ONLY by explicit user write actions.
  */
 export function scheduleCloudPush(immediate = false): void {
-  if (isApplyingRemoteData || isSyncInProgress || cloudSyncPausedOnError) {
+  if (isApplyingRemoteData || isSyncInProgress || circuitBreakerTripped) {
     return;
   }
   try {
@@ -532,12 +509,15 @@ export function scheduleCloudPush(immediate = false): void {
   pushTimeoutId = setTimeout(() => {
     pushTimeoutId = null;
     void pushLocalStateToCloud();
-  }, 1800);
+  }, 1500);
 }
 
 /**
- * Runs ONCE on app startup (or when user clicks "סנכרן עכשיו" with `isManual = true`).
- * Never loops or retries automatically if an error occurs.
+ * Case 1 (onMount once) & Case 3 (Manual "סנכרן עכשיו"):
+ * - GET /rest/v1/stall_sync?id=eq.main_stall&select=*
+ * - If cloud is empty and localStorage has data -> POST upsert all local data to cloud.
+ * - If cloud has data -> sync it to local device without triggering a re-push loop.
+ * - On manual sync (`isManual = true`), also POST upserts the merged data to cloud.
  */
 export async function syncWithCloudOnStartupOrPoll(isManual = false): Promise<boolean> {
   if (!isManual && hasCompletedStartupAttempt) {
@@ -550,7 +530,7 @@ export async function syncWithCloudOnStartupOrPoll(isManual = false): Promise<bo
   hasCompletedStartupAttempt = true;
   isSyncInProgress = true;
   if (isManual) {
-    cloudSyncPausedOnError = false;
+    circuitBreakerTripped = false;
   }
   setSyncStatus({ state: 'syncing', lastError: null });
 
@@ -558,29 +538,39 @@ export async function syncWithCloudOnStartupOrPoll(isManual = false): Promise<bo
     const row = await fetchRemoteStallSyncRow();
     const remotePayload = row?.data || null;
     const remoteHasData = hasRemotePayloadContent(remotePayload);
+    const localPayloadBefore = buildLocalSyncPayload();
+    const localHasData = hasLocalDataToUpload(localPayloadBefore);
 
-    if (remoteHasData && remotePayload) {
-      const mutated = applyCloudPayloadToLocalStorage(remotePayload, true);
-      if (mutated) {
-        notifyCloudDataUpdated();
-      }
-    }
-
-    // העלאת הנתונים המעודכנים מ-localStorage לשורה id = 'main_stall'
-    const payload = buildLocalSyncPayload();
-    const fp = computeStorageFingerprint(payload.rawStorage);
-    if (!remoteHasData || isManual || fp !== lastSyncedFingerprint) {
+    if (!remoteHasData && localHasData) {
+      // הענן ריק ובמכשיר קיימים נתונים ב-localStorage — מעלים מיד לענן (POST)
       const nowIso = new Date().toISOString();
-      await upsertRemoteStallSyncRow(payload, nowIso);
-      lastSyncedFingerprint = fp;
+      await upsertRemoteStallSyncRow(localPayloadBefore, nowIso);
+      lastSyncedFingerprint = computeStorageFingerprint(localPayloadBefore.rawStorage);
       try {
         localStorage.setItem(LAST_CLOUD_SYNC_AT_KEY, nowIso);
       } catch {
         // ignore
       }
+    } else if (remoteHasData && remotePayload) {
+      // בענן קיימים נתונים — מסנכרנים אותם למכשיר המקומי
+      const mutated = applyCloudPayloadToLocalStorage(remotePayload, true);
+      if (mutated) {
+        notifyCloudDataUpdated();
+      }
+      // אם זו לחיצה ידנית על "סנכרן עכשיו" — שומרים גם את המצב הממוזג חזרה לענן
+      if (isManual) {
+        const mergedPayload = buildLocalSyncPayload();
+        const nowIso = new Date().toISOString();
+        await upsertRemoteStallSyncRow(mergedPayload, nowIso);
+        lastSyncedFingerprint = computeStorageFingerprint(mergedPayload.rawStorage);
+      }
+    } else if (isManual) {
+      const nowIso = new Date().toISOString();
+      await upsertRemoteStallSyncRow(localPayloadBefore, nowIso);
+      lastSyncedFingerprint = computeStorageFingerprint(localPayloadBefore.rawStorage);
     }
 
-    cloudSyncPausedOnError = false;
+    circuitBreakerTripped = false;
     setSyncStatus({
       state: 'synced',
       lastSyncedAt: new Date().toISOString(),
@@ -590,7 +580,7 @@ export async function syncWithCloudOnStartupOrPoll(isManual = false): Promise<bo
     return true;
   } catch (err) {
     isSyncInProgress = false;
-    cloudSyncPausedOnError = true;
+    circuitBreakerTripped = true;
     setSyncStatus({
       state: 'offline',
       lastError: formatSupabaseError(err),
