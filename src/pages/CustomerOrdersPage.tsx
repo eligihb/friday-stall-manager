@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useMemo, useCallback } from 'react';
-import { Plus, Minus, Search, ChevronDown, ChevronUp, Users, LayoutGrid, List, ArrowDownWideNarrow } from 'lucide-react';
+import { Plus, Minus, Search, ChevronDown, ChevronUp, Users, LayoutGrid, List, ArrowDownWideNarrow, RefreshCw } from 'lucide-react';
 import { apiFetch } from '../lib/api';
+import { ensureInitialCloudHydration } from '../lib/supabaseSync';
 import { filterUsersByNameOrPhone, getPhoneLast4 } from '../lib/whatsappParser';
 import {
   computeEffectiveOrderTotal,
@@ -43,6 +44,7 @@ export function CustomerOrdersPage() {
   const [users, setUsers] = useState<User[]>([]);
   const [bizSettings, setBizSettings] = useState<BusinessSettings | undefined>(undefined);
   const [loading, setLoading] = useState(true);
+  const [refreshingCloud, setRefreshingCloud] = useState(false);
   const [error, setError] = useState('');
 
   // סנכרון מול בחירת יום השישי בכותרת המובייל
@@ -103,6 +105,16 @@ export function CustomerOrdersPage() {
       setLoading(false);
     }
   }, [fridayDate, statusFilter]);
+
+  const handleQuickCloudRefresh = async () => {
+    setRefreshingCloud(true);
+    try {
+      await ensureInitialCloudHydration(true);
+      await loadData();
+    } finally {
+      setRefreshingCloud(false);
+    }
+  };
 
   useEffect(() => {
     loadData();
@@ -465,6 +477,17 @@ export function CustomerOrdersPage() {
         </div>
 
         <div className="flex items-center gap-2">
+          <button
+            type="button"
+            disabled={refreshingCloud}
+            onClick={handleQuickCloudRefresh}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white hover:bg-[#FFF7ED] border border-[#E8D5BE] text-xs font-extrabold text-[#8A330B] transition-colors disabled:opacity-60"
+            title="רענון מהיר מהענן"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${refreshingCloud ? 'animate-spin' : ''}`} />
+            <span>{refreshingCloud ? 'מרענן...' : 'רענון'}</span>
+          </button>
+
           <div className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-white border border-[#E8D5BE]">
             <ArrowDownWideNarrow className="w-3.5 h-3.5 text-slate-500" />
             <select

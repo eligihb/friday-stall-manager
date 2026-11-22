@@ -365,16 +365,36 @@ function mergeRemoteAndLocalMainDb(
       }
     }
 
+    const baseNotices: Array<{ id: number }> = Array.isArray(baseDb.deleted_order_notices)
+      ? [...baseDb.deleted_order_notices]
+      : [];
+    const baseNoticeIds = new Set(baseNotices.map((n) => String(n.id)));
+    const secNotices: Array<{ id: number }> = Array.isArray(secondaryDb.deleted_order_notices)
+      ? secondaryDb.deleted_order_notices
+      : [];
+    for (const n of secNotices) {
+      if (!baseNoticeIds.has(String(n.id))) {
+        baseNotices.push(n);
+        baseNoticeIds.add(String(n.id));
+      }
+    }
+
     const merged = {
       ...baseDb,
       orders: baseOrders,
       order_items: baseItems,
       users: baseUsers,
       transactions: baseTx,
+      deleted_order_notices: baseNotices,
       nextIds: {
         ...(baseDb.nextIds || {}),
         users: Math.max(1, ...baseUsers.map((u) => Number(u.id) || 0)) + 1,
-        orders: Math.max(1, ...baseOrders.map((o) => Number(o.id) || 0)) + 1,
+        orders:
+          Math.max(
+            1,
+            ...baseOrders.map((o) => Number(o.id) || 0),
+            ...baseNotices.map((n) => Number(n.id) || 0)
+          ) + 1,
         order_items: Math.max(1, ...baseItems.map((i) => Number(i.id) || 0)) + 1,
         transactions: Math.max(1, ...baseTx.map((t) => Number(t.id) || 0)) + 1,
       },
@@ -391,6 +411,8 @@ let isApplyingRemoteData = false;
 let hasCompletedStartupAttempt = false;
 let circuitBreakerTripped = false;
 let lastSyncedFingerprint = '';
+let initialHydrationPromise: Promise<boolean> | null = null;
+let lastSilentPullAt = 0;
 
 function applyCloudPayloadToLocalStorage(
   remotePayload: StallSyncPayload,
@@ -523,10 +545,14 @@ export async function syncWithCloudOnStartupOrPoll(isManual = false): Promise<bo
   if (!isManual && hasCompletedStartupAttempt) {
     return currentStatus.state === 'synced';
   }
+  if (!isManual && initialHydrationPromise) {
+    return initialHydrationPromise;
+  }
   if (isSyncInProgress && !isManual) {
     return false;
   }
 
+  const runPromise = (async (): Promise<boolean> => {
   hasCompletedStartupAttempt = true;
   isSyncInProgress = true;
   if (isManual) {
@@ -585,6 +611,77 @@ export async function syncWithCloudOnStartupOrPoll(isManual = false): Promise<bo
       state: 'offline',
       lastError: formatSupabaseError(err),
     });
+    return false;
+  }
+  })();
+
+  if (!isManual) {
+    initialHydrationPromise = runPromise;
+  }
+  return runPromise;
+}
+
+/**
+ * מבטיח שהנתונים הראשוניים מ-Supabase נטענו לפני הצגת נתיב חיצוני (#/c/:id, #/approve/:id, #/order/:id).
+ * כאשר forceFresh = true, מבצע שליפה רעננה מהענן (GET) וממזג למכשיר ללא שליחה חוזרת.
+ */
+export async function ensureInitialCloudHydration(forceFresh = false): Promise<boolean> {
+  if (!forceFresh) {
+    if (hasCompletedStartupAttempt && !initialHydrationPromise) {
+      return currentStatus.state === 'synced';
+    }
+    return syncWithCloudOnStartupOrPoll(false);
+  }
+
+  try {
+    const row = await fetchRemoteStallSyncRow();
+    const remotePayload = row?.data || null;
+    if (hasRemotePayloadContent(remotePayload) && remotePayload) {
+      const mutated = applyCloudPayloadToLocalStorage(remotePayload, true);
+      if (mutated) {
+        notifyCloudDataUpdated();
+      }
+    }
+    circuitBreakerTripped = false;
+    setSyncStatus({
+      state: 'synced',
+      lastSyncedAt: new Date().toISOString(),
+      lastError: null,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * רענון שקט מהענן בחזרה ללשונית/אפליקציה (visibilitychange / focus) עם Cooldown של 6 שניות למניעת עומס.
+ */
+export async function pullLatestCloudStateSilently(): Promise<boolean> {
+  if (isSyncInProgress || circuitBreakerTripped) return false;
+  const now = Date.now();
+  if (now - lastSilentPullAt < 6000) return false;
+  lastSilentPullAt = now;
+
+  isSyncInProgress = true;
+  try {
+    const row = await fetchRemoteStallSyncRow();
+    const remotePayload = row?.data || null;
+    if (hasRemotePayloadContent(remotePayload) && remotePayload) {
+      const mutated = applyCloudPayloadToLocalStorage(remotePayload, true);
+      if (mutated) {
+        notifyCloudDataUpdated();
+      }
+    }
+    setSyncStatus({
+      state: 'synced',
+      lastSyncedAt: new Date().toISOString(),
+      lastError: null,
+    });
+    isSyncInProgress = false;
+    return true;
+  } catch {
+    isSyncInProgress = false;
     return false;
   }
 }

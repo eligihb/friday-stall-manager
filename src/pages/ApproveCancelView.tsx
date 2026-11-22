@@ -1,6 +1,7 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, XCircle, RotateCcw } from 'lucide-react';
 import { apiFetch } from '../lib/api';
+import { ensureInitialCloudHydration } from '../lib/supabaseSync';
 import { formatFridayLabel, formatILS } from '../lib/format';
 import { decodeOrderLinkPayload } from '../lib/orderLinkCodec';
 
@@ -11,7 +12,18 @@ interface ApproveCancelViewProps {
 
 export function ApproveCancelView({ orderId, encodedData }: ApproveCancelViewProps) {
   const decoded = useMemo(() => decodeOrderLinkPayload(encodedData), [encodedData]);
+  const [hydrating, setHydrating] = useState(true);
   const [submitting, setSubmitting] = useState<'approve' | 'reject' | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    void ensureInitialCloudHydration(false).finally(() => {
+      if (active) setHydrating(false);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
   const [resolved, setResolved] = useState<{
     action: 'approve' | 'reject';
     recipientName: string;
@@ -52,6 +64,17 @@ export function ApproveCancelView({ orderId, encodedData }: ApproveCancelViewPro
       setSubmitting(null);
     }
   };
+
+  if (hydrating) {
+    return (
+      <div className="min-h-screen bg-[#FAF6F0] flex items-center justify-center p-6">
+        <div className="max-w-sm w-full bg-white rounded-3xl border border-[#E8D5BE] shadow-card p-6 text-center space-y-3">
+          <div className="w-10 h-10 border-4 border-[#C85A17] border-t-transparent rounded-full animate-spin mx-auto" />
+          <div className="font-bold text-slate-700">🔄 טוען פרטי הזמנה #{orderId}...</div>
+        </div>
+      </div>
+    );
+  }
 
   if (resolved) {
     const isCancelled = resolved.action === 'approve';

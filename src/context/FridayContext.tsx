@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
 import { getActiveWeekRange, type ActiveWeekRange } from '../lib/format';
 import {
+  pullLatestCloudStateSilently,
   subscribeCloudDataUpdated,
   syncWithCloudOnStartupOrPoll,
 } from '../lib/supabaseSync';
@@ -38,6 +39,18 @@ export function FridayProvider({ children }: { children: React.ReactNode }) {
       setRefreshTick((t) => t + 1);
     });
 
+    // רענון שקט מהענן בחזרה ללשונית/אפליקציה (מוגן ב-Cooldown של 6 שניות)
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        void pullLatestCloudStateSilently();
+      }
+    };
+    const onWindowFocus = () => {
+      void pullLatestCloudStateSilently();
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    window.addEventListener('focus', onWindowFocus);
+
     // בדיקה תקופתית למעבר אוטומטי לשבוע חדש במוצאי שבת 21:00
     const timer = window.setInterval(() => {
       const nextRange = getActiveWeekRange();
@@ -52,6 +65,8 @@ export function FridayProvider({ children }: { children: React.ReactNode }) {
 
     return () => {
       unsubscribe();
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      window.removeEventListener('focus', onWindowFocus);
       window.clearInterval(timer);
     };
   }, []);

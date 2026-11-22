@@ -14,6 +14,7 @@ import {
   Tag,
 } from 'lucide-react';
 import { apiFetch } from '../lib/api';
+import { ensureInitialCloudHydration } from '../lib/supabaseSync';
 import {
   computeEffectiveOrderTotal,
   computeOrderPromoSavings,
@@ -97,19 +98,33 @@ export function CustomerLivePortal({ customerId }: CustomerLivePortalProps) {
   useEffect(() => {
     let active = true;
     setLoading(true);
-    Promise.all([
-      apiFetch<{ customer: User | null; orders: Order[] }>(
-        `/api/public/customer-history?customer_id=${customerId}`
-      ).catch(() => ({ customer: null as User | null, orders: [] as Order[] })),
-      apiFetch<{ business_name?: string; admin_whatsapp_phone?: string; whatsapp_footer?: string }>(
-        '/api/public/storefront'
-      ).catch(() => ({
-        business_name: APP_BRAND_NAME,
-        admin_whatsapp_phone: '0542452100',
-        whatsapp_footer: '',
-      })),
-    ])
-      .then(([histRes, sfRes]) => {
+    const loadFromCloudThenLocal = async () => {
+      try {
+        // המתנה לטעינת הענן לפני הצגת הפרטים (למניעת "אין הזמנות" במכשיר חיצוני)
+        await ensureInitialCloudHydration(false);
+
+        const fetchHist = () =>
+          apiFetch<{ customer: User | null; orders: Order[] }>(
+            `/api/public/customer-history?customer_id=${customerId}`
+          ).catch(() => ({ customer: null as User | null, orders: [] as Order[] }));
+
+        let histRes = await fetchHist();
+        // אם הלקוח או ההזמנות לא נמצאו בזיכרון המקומי — בצע שליפה רעננה מהענן לפני הצגת הודעה
+        if (!histRes.customer || (histRes.orders || []).length === 0) {
+          await ensureInitialCloudHydration(true);
+          histRes = await fetchHist();
+        }
+
+        const sfRes = await apiFetch<{
+          business_name?: string;
+          admin_whatsapp_phone?: string;
+          whatsapp_footer?: string;
+        }>('/api/public/storefront').catch(() => ({
+          business_name: APP_BRAND_NAME,
+          admin_whatsapp_phone: '0542452100',
+          whatsapp_footer: '',
+        }));
+
         if (!active) return;
         setCustomer(histRes.customer);
         const sorted = [...(histRes.orders || [])].sort(
@@ -125,13 +140,13 @@ export function CustomerLivePortal({ customerId }: CustomerLivePortalProps) {
           default_delivery_fee: 0,
           whatsapp_footer: sfRes.whatsapp_footer || '',
         });
-      })
-      .catch((err) => {
+      } catch (err) {
         if (active) setError(err instanceof Error ? err.message : 'שגיאה בטעינת האזור האישי');
-      })
-      .finally(() => {
+      } finally {
         if (active) setLoading(false);
-      });
+      }
+    };
+    void loadFromCloudThenLocal();
     return () => {
       active = false;
     };
@@ -226,7 +241,7 @@ export function CustomerLivePortal({ customerId }: CustomerLivePortalProps) {
       <div className="min-h-screen bg-[#FAF6F0] flex items-center justify-center p-4">
         <div className="text-center">
           <div className="w-10 h-10 border-4 border-[#C85A17] border-t-transparent rounded-full animate-spin mx-auto" />
-          <p className="mt-3 text-sm font-bold text-slate-600">טוען את ההזמנה שלך...</p>
+          <p className="mt-3 text-sm font-bold text-slate-600">🔄 טוען פרטי הזמנה...</p>
         </div>
       </div>
     );

@@ -17,6 +17,7 @@ import { getFridayPricingStatus } from './pricingCutoff';
 import { loadImportedOrdersBackup, removeImportedOrderBackup } from './orderLinkCodec';
 import { loadAllCashRegisters } from './cashRegisterStore';
 import {
+  ensureInitialCloudHydration,
   pushLocalStateToCloud,
   registerDbCacheInvalidator,
   scheduleCloudPush,
@@ -405,7 +406,7 @@ function getMonthBounds(ym: string) {
 }
 
 export async function localApiFetch<T>(url: string, options: RequestInit = {}): Promise<T> {
-  const db = loadDb();
+  let db = loadDb();
   const method = (options.method || 'GET').toUpperCase();
   const body = options.body ? JSON.parse(String(options.body)) : {};
   const parsedUrl = new URL(url, window.location.origin);
@@ -1010,6 +1011,10 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
   }
 
   if (path === '/api/public/orders' && method === 'POST') {
+    // Fetch -> Merge -> Save: מושכים קודם את המצב העדכני מ-Supabase כדי לא לדרוס נתונים ולייצר מספר הזמנה עוקב אמיתי
+    await ensureInitialCloudHydration(true).catch(() => false);
+    db = loadDb();
+
     const friday_date = String(body.friday_date || getNextFridayISO()).slice(0, 10);
     const recipient_name = String(body.recipient_name || '').trim();
     const phone = String(body.phone || '').trim();
@@ -1038,7 +1043,9 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
       null;
 
     if (!matchedCustomer) {
-      const newUid = db.nextIds.users++;
+      const maxUserId = Math.max(0, ...db.users.map((u) => Number(u.id) || 0));
+      const newUid = Math.max(Number(db.nextIds.users) || 1, maxUserId + 1);
+      db.nextIds.users = newUid + 1;
       matchedCustomer = {
         id: newUid,
         name: recipient_name,
@@ -1136,8 +1143,8 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
       matchedCustomer.balance = round2(
         (matchedCustomer.balance || 0) - (nextTotal - oldTotal)
       );
-      saveDb(db, true);
-      await pushLocalStateToCloud({ mergeWithRemoteFirst: true }).catch(() => false);
+      saveDb(db, false);
+      await pushLocalStateToCloud({ mergeWithRemoteFirst: true, force: true }).catch(() => false);
 
       return {
         id: existingToReplace.id,
@@ -1233,8 +1240,8 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
         existingToMerge.notes = [existingToMerge.notes, additionNote].filter(Boolean).join(' | ');
       }
       matchedCustomer.balance = round2((matchedCustomer.balance || 0) - Math.max(0, nextTotal - oldTotal));
-      saveDb(db, true);
-      await pushLocalStateToCloud({ mergeWithRemoteFirst: true }).catch(() => false);
+      saveDb(db, false);
+      await pushLocalStateToCloud({ mergeWithRemoteFirst: true, force: true }).catch(() => false);
 
       return {
         id: existingToMerge.id,
@@ -1254,7 +1261,13 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
       } as T;
     }
 
-    const orderId = db.nextIds.orders++;
+    const maxOrderNumber = Math.max(
+      0,
+      ...db.orders.map((o) => Number(o.id) || 0),
+      ...(db.deleted_order_notices || []).map((n) => Number(n.id) || 0)
+    );
+    const orderId = Math.max(Number(db.nextIds.orders) || 1, maxOrderNumber + 1);
+    db.nextIds.orders = orderId + 1;
     let total_amount = 0;
     const resultItems: Array<{
       product_id: number;
@@ -1302,8 +1315,8 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
       created_at: new Date().toISOString().slice(0, 10),
     });
     matchedCustomer.balance = round2((matchedCustomer.balance || 0) - total_amount);
-    saveDb(db, true);
-    await pushLocalStateToCloud({ mergeWithRemoteFirst: true }).catch(() => false);
+    saveDb(db, false);
+    await pushLocalStateToCloud({ mergeWithRemoteFirst: true, force: true }).catch(() => false);
 
     return {
       id: orderId,
@@ -1665,7 +1678,13 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
     }
 
     let subtotal = 0;
-    const orderId = db.nextIds.orders++;
+    const maxOrderNumber = Math.max(
+      0,
+      ...db.orders.map((o) => Number(o.id) || 0),
+      ...(db.deleted_order_notices || []).map((n) => Number(n.id) || 0)
+    );
+    const orderId = Math.max(Number(db.nextIds.orders) || 1, maxOrderNumber + 1);
+    db.nextIds.orders = orderId + 1;
     const userCustomPrices = user_id ? userMap.get(user_id)?.custom_prices || {} : {};
     const discountPercent =
       order_type === 'charity'

@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { CheckCircle2, AlertTriangle } from 'lucide-react';
 import { apiFetch } from '../lib/api';
+import { ensureInitialCloudHydration } from '../lib/supabaseSync';
 import { formatFridayLabel, formatILS } from '../lib/format';
 import { decodeOrderLinkPayload, persistImportedOrderBackup } from '../lib/orderLinkCodec';
 
@@ -47,6 +48,8 @@ export function QuickApproveView({ orderId, encodedData }: QuickApproveViewProps
     };
 
     const run = async () => {
+      // ממתינים תמיד לטעינת הענן הראשונה לפני בדיקת ההזמנה
+      await ensureInitialCloudHydration(false);
       const decoded = decodeOrderLinkPayload(encodedData);
 
       if (decoded) {
@@ -81,20 +84,34 @@ export function QuickApproveView({ orderId, encodedData }: QuickApproveViewProps
         return;
       }
 
-      try {
-        await apiFetch(`/api/orders/${orderId}`, {
+      const tryApprove = () =>
+        apiFetch(`/api/orders/${orderId}`, {
           method: 'PATCH',
           body: JSON.stringify({ status: 'received' }),
         });
+
+      try {
+        await tryApprove();
         lockSuccess({
           id: orderId,
           recipient_name: `הזמנה #${orderId}`,
           total_amount: 0,
         });
-      } catch (err) {
-        if (lockedSuccessRef.current) return;
-        setErrMsg(err instanceof Error ? err.message : 'ההזמנה לא נמצאה');
-        setLoading(false);
+      } catch {
+        // אם לא נמצא בזיכרון המקומי — מבצעים שליפה רעננה מהענן ומנסים שוב לפני הצגת שגיאה
+        await ensureInitialCloudHydration(true);
+        try {
+          await tryApprove();
+          lockSuccess({
+            id: orderId,
+            recipient_name: `הזמנה #${orderId}`,
+            total_amount: 0,
+          });
+        } catch (err2) {
+          if (lockedSuccessRef.current) return;
+          setErrMsg(err2 instanceof Error ? err2.message : 'ההזמנה לא נמצאה');
+          setLoading(false);
+        }
       }
     };
 
@@ -141,7 +158,7 @@ export function QuickApproveView({ orderId, encodedData }: QuickApproveViewProps
         {loading ? (
           <>
             <div className="w-10 h-10 border-4 border-[#C85A17] border-t-transparent rounded-full animate-spin mx-auto" />
-            <div className="font-bold text-slate-700">מאשר הזמנה #{orderId}...</div>
+            <div className="font-bold text-slate-700">🔄 טוען פרטי הזמנה #{orderId}...</div>
           </>
         ) : (
           <>

@@ -110,7 +110,7 @@ function parseSpecialRoute(): {
     };
   }
 
-  const approveMatch = hashPath.match(/^approve-quick\/(\d+)/);
+  const approveMatch = hashPath.match(/^approve(?:-quick)?\/(\d+)/);
   if (approveMatch) {
     return {
       customerPortalId: null,
