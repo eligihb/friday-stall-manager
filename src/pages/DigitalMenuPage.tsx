@@ -1012,7 +1012,7 @@ export function DigitalMenuPage() {
             <Sparkles className="w-3.5 h-3.5 text-amber-300 shrink-0" />
             <span>
               {preorderOpen
-                ? `המחירים הם בהזמנה מוקדמת · ניתן להזמין עד ליום חמישי בשעה 24:00 · ${formatFridayLabel(fridayDate)}`
+                ? `מחירי מכירה מוקדמת תקפים להזמנות עד יום חמישי בשעה 24:00 · ${formatFridayLabel(fridayDate)}`
                 : `מחירון יום שישי · ${formatFridayLabel(fridayDate)}`}
             </span>
           </div>
@@ -1473,10 +1473,10 @@ export function DigitalMenuPage() {
         title={editingOrderId !== null ? `✏️ עדכון הזמנה #${editingOrderId}` : 'סל ההזמנה שלך'}
         subtitle={
           editingOrderId !== null
-            ? `סה״כ מעודכן להזמנה #${editingOrderId}: ${formatILS(cartSummary.finalTotal)} · ניתן להזמין עד ליום חמישי בשעה 24:00`
+            ? `סה״כ מעודכן להזמנה #${editingOrderId}: ${formatILS(cartSummary.finalTotal)} · מחירי מכירה מוקדמת תקפים להזמנות עד יום חמישי בשעה 24:00`
             : mergeCalculation.isMerging && activeFridayOrder
-            ? `תוספת להזמנה #${activeFridayOrder.id}: ${formatILS(mergeCalculation.addedAmountToPay)} (סה״כ מעודכן: ${formatILS(mergeCalculation.mergedOrderTotal)}) · ניתן להזמין עד ליום חמישי בשעה 24:00`
-            : `סה״כ לתשלום: ${formatILS(cartSummary.finalTotal)} · ניתן להזמין עד ליום חמישי בשעה 24:00`
+            ? `תוספת להזמנה #${activeFridayOrder.id}: ${formatILS(mergeCalculation.addedAmountToPay)} (סה״כ מעודכן: ${formatILS(mergeCalculation.mergedOrderTotal)}) · מחירי מכירה מוקדמת תקפים להזמנות עד יום חמישי בשעה 24:00`
+            : `סה״כ לתשלום: ${formatILS(cartSummary.finalTotal)} · מחירי מכירה מוקדמת תקפים להזמנות עד יום חמישי בשעה 24:00`
         }
         maxWidthClass="md:max-w-md"
       >

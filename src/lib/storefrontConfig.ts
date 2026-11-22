@@ -7,7 +7,7 @@ export const DEFAULT_ADMIN_WHATSAPP = '0542452100';
 
 export const DEFAULT_MENU_SHARE_TEMPLATE = `🫓 *{שם_עסק}*
 🔥 מאפים תימניים טריים ולוהטים לשבת!
-✨ הזמינו עכשיו ותיהנו ממחירים מיוחדים להזמנה מוקדמת (ניתן להזמין עד ליום חמישי בשעה 24:00).
+✨ מחירי מכירה מוקדמת תקפים להזמנות עד יום חמישי בשעה 24:00.
 
 🛒 לתפריט והזמנה מהירה אונליין:
 {קישור}`;
@@ -55,10 +55,17 @@ export function loadStorefrontConfig(): StorefrontConfig {
       if (shareTpl.includes('{פריטים}') && shareTpl.includes('להזמנה מהירה אונליין')) {
         shareTpl = DEFAULT_MENU_SHARE_TEMPLATE;
       }
-      shareTpl = shareTpl.replace(/א[׳']?\s*(?:עד|[–-])\s*ו[׳']?(?:\s*(?:עד)?\s*06:00)?/g, 'ניתן להזמין עד ליום חמישי בשעה 24:00');
-      const orderTpl = (parsed.customerOrderTemplate || DEFAULT_CUSTOMER_ORDER_TEMPLATE)
-        .replace(/ממתין לאישור מנהל/g, 'ממתין לאישור מוכר')
-        .replace(/א[׳']?\s*(?:עד|[–-])\s*ו[׳']?(?:\s*(?:עד)?\s*06:00)?/g, 'ניתן להזמין עד ליום חמישי בשעה 24:00');
+      const normalizeCutoffPhrase = (txt: string) =>
+        txt
+          .replace(/א[׳']?\s*(?:עד|[–-])\s*ו[׳']?(?:\s*(?:עד)?\s*06:00)?/g, 'מחירי מכירה מוקדמת תקפים להזמנות עד יום חמישי בשעה 24:00')
+          .replace(/ניתן להזמין עד ליום חמישי בשעה 24:00/g, 'מחירי מכירה מוקדמת תקפים להזמנות עד יום חמישי בשעה 24:00');
+      shareTpl = normalizeCutoffPhrase(shareTpl);
+      const orderTpl = normalizeCutoffPhrase(
+        (parsed.customerOrderTemplate || DEFAULT_CUSTOMER_ORDER_TEMPLATE).replace(
+          /ממתין לאישור מנהל/g,
+          'ממתין לאישור מוכר'
+        )
+      );
       return {
         customerPriceMode: parsed.customerPriceMode || 'auto',
         hiddenProductIds: parsed.hiddenProductIds || {},
