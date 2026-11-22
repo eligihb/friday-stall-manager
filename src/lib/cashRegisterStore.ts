@@ -1,3 +1,5 @@
+import { scheduleCloudPush } from './supabaseSync';
+
 export const ISRAELI_DENOMINATIONS = [
   { value: 200, label: '200 ₪', kind: 'bill' as const, colorCls: 'from-sky-600 to-blue-800 border-sky-300 text-white' },
   { value: 100, label: '100 ₪', kind: 'bill' as const, colorCls: 'from-amber-500 to-orange-700 border-amber-300 text-white' },
@@ -100,6 +102,7 @@ export function saveFridayCashRegister(entry: FridayCashRegisterEntry): FridayCa
     const all = loadAllCashRegisters();
     all[entry.fridayDate] = normalized;
     localStorage.setItem(CASH_REGISTER_KEY, JSON.stringify(all));
+    scheduleCloudPush();
   } catch {
     // ignore
   }
@@ -126,6 +129,7 @@ export function saveFridayWasteConfigs(
     const all = raw ? JSON.parse(raw) : {};
     all[fridayDate] = configs;
     localStorage.setItem(WASTE_CONFIG_KEY, JSON.stringify(all));
+    scheduleCloudPush();
   } catch {
     // ignore
   }

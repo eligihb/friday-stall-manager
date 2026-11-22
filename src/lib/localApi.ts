@@ -16,6 +16,11 @@ import { getNextFridayISO, isBeforeFridayCancelCutoff } from './format';
 import { getFridayPricingStatus } from './pricingCutoff';
 import { loadImportedOrdersBackup, removeImportedOrderBackup } from './orderLinkCodec';
 import { loadAllCashRegisters } from './cashRegisterStore';
+import {
+  pushLocalStateToCloud,
+  registerDbCacheInvalidator,
+  scheduleCloudPush,
+} from './supabaseSync';
 
 const STORAGE_KEY = 'ht_static_db_v1';
 const SESSION_KEY = 'ht_static_session_uid';
@@ -180,6 +185,8 @@ let memorySessionUid: string | null = null;
 export function invalidateLocalDbCache(): void {
   memoryDbFallback = null;
 }
+
+registerDbCacheInvalidator(invalidateLocalDbCache);
 
 function safeGetItem(key: string): string | null {
   try {
@@ -356,9 +363,10 @@ function loadDb(): LocalDb {
   return fresh;
 }
 
-function saveDb(db: LocalDb) {
+function saveDb(db: LocalDb, immediateCloudSync = false) {
   memoryDbFallback = db;
   safeSetItem(STORAGE_KEY, JSON.stringify(db));
+  scheduleCloudPush(immediateCloudSync);
 }
 
 function sanitizeUser(u: StoredUser): User {
@@ -1051,7 +1059,8 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
         existingToMerge.notes = [existingToMerge.notes, additionNote].filter(Boolean).join(' | ');
       }
       matchedCustomer.balance = round2((matchedCustomer.balance || 0) - Math.max(0, nextTotal - oldTotal));
-      saveDb(db);
+      saveDb(db, true);
+      await pushLocalStateToCloud({ mergeWithRemoteFirst: true }).catch(() => false);
 
       return {
         id: existingToMerge.id,
@@ -1119,7 +1128,8 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
       created_at: new Date().toISOString().slice(0, 10),
     });
     matchedCustomer.balance = round2((matchedCustomer.balance || 0) - total_amount);
-    saveDb(db);
+    saveDb(db, true);
+    await pushLocalStateToCloud({ mergeWithRemoteFirst: true }).catch(() => false);
 
     return {
       id: orderId,

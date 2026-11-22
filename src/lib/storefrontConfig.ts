@@ -1,3 +1,5 @@
+import { scheduleCloudPush } from './supabaseSync';
+
 export type CustomerPriceMode = 'auto' | 'preorder' | 'stall';
 
 export const DEFAULT_ADMIN_NAME = 'אליאב מנהל';
@@ -81,6 +83,7 @@ export function loadStorefrontConfig(): StorefrontConfig {
 export function saveStorefrontConfig(cfg: StorefrontConfig): void {
   try {
     localStorage.setItem(CONFIG_KEY, JSON.stringify(cfg));
+    scheduleCloudPush();
   } catch {
     // ignore
   }

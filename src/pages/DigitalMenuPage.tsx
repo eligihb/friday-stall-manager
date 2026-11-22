@@ -27,6 +27,7 @@ import {
   loadStorefrontConfig,
 } from '../lib/storefrontConfig';
 import { buildWhatsAppShareUrl, formatPublicApprovalWhatsApp } from '../lib/whatsappFormat';
+import { useFriday } from '../context/FridayContext';
 import { BottomSheet } from '../components/BottomSheet';
 import {
   QuickCustomerPayBox,
@@ -131,6 +132,7 @@ function getOrderStepNum(status: OrderStatus): number {
 }
 
 export function DigitalMenuPage() {
+  const { refreshTick } = useFriday();
   const [data, setData] = useState<StorefrontData | null>(null);
   const [stockMap] = useState(() => loadStockMap());
   const [storefrontCfg] = useState(() => loadStorefrontConfig());
@@ -227,7 +229,7 @@ export function DigitalMenuPage() {
 
   useEffect(() => {
     fetchCustomerHistory(savedProfile);
-  }, [savedProfile?.customerId, savedProfile?.phone]);
+  }, [savedProfile?.customerId, savedProfile?.phone, refreshTick]);
 
   const handleSwitchUser = () => {
     try {

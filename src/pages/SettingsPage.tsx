@@ -36,12 +36,21 @@ import {
 import { BottomSheet } from '../components/BottomSheet';
 import { BackupRestoreCard } from '../components/BackupRestoreCard';
 import {
+  DEFAULT_SUPABASE_ANON_KEY,
+  DEFAULT_SUPABASE_URL,
   clearCloudConfig,
   getSavedCloudConfig,
   hasCloudCredentials,
   saveCloudConfig,
   type CloudConfig,
 } from '../lib/cloudConfig';
+import {
+  getCloudSyncStatus,
+  pushLocalStateToCloud,
+  subscribeCloudSyncStatus,
+  syncWithCloudOnStartupOrPoll,
+  type CloudSyncStatusSnapshot,
+} from '../lib/supabaseSync';
 import type { AdminProduct, BusinessSettings, PaymentMethod, User, UserRole } from '../types';
 
 export function SettingsPage() {
@@ -66,7 +75,33 @@ export function SettingsPage() {
   // הגדרות מסד נתונים בענן (Fallback ל-localStorage כשאין משתני סביבה)
   const [cloudCfg, setCloudCfg] = useState<CloudConfig>(() => getSavedCloudConfig());
   const [showCloudForm, setShowCloudForm] = useState(false);
+  const [syncingNow, setSyncingNow] = useState(false);
+  const [cloudSyncStatus, setCloudSyncStatus] = useState<CloudSyncStatusSnapshot>(() =>
+    getCloudSyncStatus()
+  );
   const cloudConfigured = hasCloudCredentials();
+
+  useEffect(() => {
+    return subscribeCloudSyncStatus(setCloudSyncStatus);
+  }, []);
+
+  const handleManualCloudSyncNow = async () => {
+    setSyncingNow(true);
+    setError('');
+    try {
+      saveCloudConfig(cloudCfg);
+      const pushed = await pushLocalStateToCloud({ mergeWithRemoteFirst: true });
+      const pulled = await syncWithCloudOnStartupOrPoll(true);
+      await loadAll();
+      if (pushed || pulled) {
+        notify('הסנכרון מול ענן Supabase הושלם בהצלחה ✓');
+      } else {
+        setError('לא ניתן להתחבר לענן כרגע — הנתונים שמורים מקומית במכשיר.');
+      }
+    } finally {
+      setSyncingNow(false);
+    }
+  };
 
   // ניהול משתמשים
   const [users, setUsers] = useState<User[]>([]);
@@ -378,77 +413,105 @@ export function SettingsPage() {
         </div>
       )}
 
-      {/* באנר עדין למצב אחסון מקומי / חיבור למסד נתונים בענן */}
-      <div className="bg-[#FFF7ED]/90 border border-[#E8D5BE] rounded-2xl p-4 space-y-3">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2.5">
-          <div className="flex items-start gap-2.5">
-            <div className="w-8 h-8 rounded-xl bg-amber-100 text-[#8A330B] flex items-center justify-center shrink-0 mt-0.5">
-              {cloudConfigured ? <Cloud className="w-4 h-4" /> : <Database className="w-4 h-4" />}
+      {/* סנכרון וגיבוי ענן Supabase (טבלת public.stall_sync) */}
+      <div className="bg-white border border-[#E8D5BE] rounded-3xl p-5 shadow-soft space-y-3.5">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div className="flex items-start gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-700 flex items-center justify-center shrink-0">
+              <Cloud className="w-5 h-5" />
             </div>
             <div>
-              <div className="text-xs font-extrabold text-slate-900">
-                {cloudConfigured
-                  ? 'חיבור ענן מוגדר במכשיר זה'
-                  : 'מצב אחסון מקומי בדפדפן (localStorage)'}
+              <div className="flex items-center gap-2 flex-wrap">
+                <h3 className="font-serif text-lg font-bold text-slate-900">
+                  סנכרון וגיבוי ענן Supabase
+                </h3>
+                <span
+                  className={`px-2.5 py-0.5 rounded-full text-[11px] font-extrabold border ${
+                    cloudSyncStatus.state === 'synced'
+                      ? 'bg-emerald-100 text-emerald-900 border-emerald-300'
+                      : cloudSyncStatus.state === 'syncing'
+                      ? 'bg-sky-100 text-sky-900 border-sky-300'
+                      : 'bg-amber-100 text-amber-900 border-amber-300'
+                  }`}
+                >
+                  {cloudSyncStatus.state === 'synced'
+                    ? '☁️ מסונכרן לענן'
+                    : cloudSyncStatus.state === 'syncing'
+                    ? '🔄 מסנכרן...'
+                    : '⚠️ מצב מקומי בלבד'}
+                </span>
               </div>
               <p className="text-xs text-slate-600 mt-0.5">
-                {cloudConfigured
-                  ? 'ניתן לעדכן או לאפס את פרטי החיבור לענן (Supabase / שרת API) בכל עת.'
-                  : 'לא זוהו משתני סביבה של מסד ענן — הנתונים נשמרים מקומית בדפדפן בצורה בטוחה. ניתן להדביק כאן פרטי חיבור לענן.'}
+                כל הנתונים (הזמנות, לקוחות, מוצרים, קופה, פחת, הוצאות, ספקים ונקודות שחזור של ימי שישי) מסונכרנים אוטומטית לטבלת <code className="font-bold">public.stall_sync</code>.
               </p>
+              {cloudSyncStatus.lastError && (
+                <p className="text-[11px] text-amber-800 font-bold mt-1">
+                  הערת ענן: {cloudSyncStatus.lastError}
+                </p>
+              )}
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={() => setShowCloudForm((v) => !v)}
-            className="px-3.5 py-2 rounded-xl bg-white border border-[#E8D5BE] hover:border-[#C85A17] text-xs font-bold text-[#8A330B] shrink-0 self-start sm:self-center"
-          >
-            {showCloudForm ? 'הסתר הגדרות ענן' : 'הגדר חיבור ענן'}
-          </button>
+          <div className="flex items-center gap-2 shrink-0 self-start sm:self-center">
+            <button
+              type="button"
+              disabled={syncingNow}
+              onClick={handleManualCloudSyncNow}
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white text-xs font-extrabold shadow-sm transition-colors"
+            >
+              <RotateCcw className={`w-3.5 h-3.5 ${syncingNow ? 'animate-spin' : ''}`} />
+              <span>{syncingNow ? 'מסנכרן...' : 'סנכרן עכשיו'}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowCloudForm((v) => !v)}
+              className="px-3.5 py-2 rounded-xl bg-[#FAF6F0] border border-[#E8D5BE] hover:border-[#C85A17] text-xs font-bold text-[#8A330B]"
+            >
+              {showCloudForm ? 'הסתר פרטי חיבור' : 'ערוך פרטי חיבור'}
+            </button>
+          </div>
         </div>
 
         {showCloudForm && (
           <form
-            onSubmit={(e) => {
+            onSubmit={async (e) => {
               e.preventDefault();
               saveCloudConfig(cloudCfg);
-              notify('פרטי החיבור לענן נשמרו! מרענן את האפליקציה...');
-              setTimeout(() => window.location.reload(), 600);
+              await handleManualCloudSyncNow();
             }}
             className="pt-3 border-t border-[#E8D5BE] space-y-3"
           >
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Supabase URL (אופציונלי)
+                  Supabase URL
                 </label>
                 <input
                   type="url"
                   dir="ltr"
                   value={cloudCfg.supabaseUrl}
                   onChange={(e) => setCloudCfg({ ...cloudCfg, supabaseUrl: e.target.value })}
-                  placeholder="https://xxxxx.supabase.co"
-                  className="w-full px-3 py-2 rounded-xl border border-[#E8D5BE] bg-white text-left text-xs"
+                  placeholder={DEFAULT_SUPABASE_URL}
+                  className="w-full px-3 py-2 rounded-xl border border-[#E8D5BE] bg-white text-left text-xs font-mono"
                 />
               </div>
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Supabase Anon Key (אופציונלי)
+                  Supabase Publishable / Anon Key
                 </label>
                 <input
-                  type="password"
+                  type="text"
                   dir="ltr"
                   value={cloudCfg.supabaseAnonKey}
                   onChange={(e) => setCloudCfg({ ...cloudCfg, supabaseAnonKey: e.target.value })}
-                  placeholder="eyJhbGciOi..."
-                  className="w-full px-3 py-2 rounded-xl border border-[#E8D5BE] bg-white text-left text-xs"
+                  placeholder={DEFAULT_SUPABASE_ANON_KEY}
+                  className="w-full px-3 py-2 rounded-xl border border-[#E8D5BE] bg-white text-left text-xs font-mono"
                 />
               </div>
             </div>
             <div>
               <label className="block text-xs font-bold text-slate-700 mb-1">
-                כתובת שרת API בענן (Render / Railway — אופציונלי)
+                כתובת שרת API נוסף (אופציונלי)
               </label>
               <input
                 type="url"
@@ -463,34 +526,21 @@ export function SettingsPage() {
             <div className="flex flex-wrap items-center gap-2">
               <button
                 type="submit"
-                className="px-4 py-2 rounded-xl bg-[#C85A17] hover:bg-[#A9440F] text-white text-xs font-bold"
+                className="px-4 py-2 rounded-xl bg-[#C85A17] hover:bg-[#A9440F] text-white text-xs font-extrabold"
               >
-                שמור פרטי ענן
+                שמור וסנכרן עכשיו
               </button>
               <button
                 type="button"
                 onClick={() => {
                   clearCloudConfig();
-                  setCloudCfg({ supabaseUrl: '', supabaseAnonKey: '', apiUrl: '' });
-                  notify('פרטי הענן נוקו — המערכת חוזרת למצב אחסון מקומי.');
+                  const defCfg = getSavedCloudConfig();
+                  setCloudCfg(defCfg);
+                  notify('פרטי הענן אופסו להגדרות ברירת המחדל של Supabase.');
                 }}
                 className="px-3.5 py-2 rounded-xl bg-white border border-[#E8D5BE] text-slate-600 text-xs font-bold"
               >
-                נקה חיבור ענן
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  if (!window.confirm('לאפס את נתוני ההדגמה המקומיים בדפדפן?')) return;
-                  try {
-                    localStorage.removeItem('ht_static_db_v1');
-                  } catch {}
-                  window.location.reload();
-                }}
-                className="inline-flex items-center gap-1 px-3.5 py-2 rounded-xl bg-white border border-red-200 text-red-700 text-xs font-bold mr-auto"
-              >
-                <RotateCcw className="w-3.5 h-3.5" />
-                <span>אפס נתוני הדגמה מקומיים</span>
+                שחזר ברירת מחדל של Supabase
               </button>
             </div>
           </form>

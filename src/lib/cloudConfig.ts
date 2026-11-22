@@ -1,5 +1,8 @@
 const CLOUD_CONFIG_KEY = 'ht_cloud_config_v1';
 
+export const DEFAULT_SUPABASE_URL = 'https://qaahbvzytmxpuwrswxyr.supabase.co';
+export const DEFAULT_SUPABASE_ANON_KEY = 'sb_publishable_ILWfBQ4CFCrVWtWGUYFHCA_gyx116n8';
+
 export interface CloudConfig {
   supabaseUrl: string;
   supabaseAnonKey: string;
@@ -8,9 +11,13 @@ export interface CloudConfig {
 
 export function getEnvCloudConfig(): CloudConfig {
   return {
-    supabaseUrl: String(import.meta.env.VITE_SUPABASE_URL || '').trim(),
-    supabaseAnonKey: String(import.meta.env.VITE_SUPABASE_ANON_KEY || '').trim(),
-    apiUrl: String(import.meta.env.VITE_API_URL || '').trim().replace(/\/$/, ''),
+    supabaseUrl: String(import.meta.env.VITE_SUPABASE_URL || DEFAULT_SUPABASE_URL).trim(),
+    supabaseAnonKey: String(
+      import.meta.env.VITE_SUPABASE_ANON_KEY || DEFAULT_SUPABASE_ANON_KEY
+    ).trim(),
+    apiUrl: String(import.meta.env.VITE_API_URL || '')
+      .trim()
+      .replace(/\/$/, ''),
   };
 }
 
@@ -21,9 +28,11 @@ export function getSavedCloudConfig(): CloudConfig {
     if (raw) {
       const parsed = JSON.parse(raw) as Partial<CloudConfig>;
       return {
-        supabaseUrl: String(parsed.supabaseUrl ?? env.supabaseUrl).trim(),
-        supabaseAnonKey: String(parsed.supabaseAnonKey ?? env.supabaseAnonKey).trim(),
-        apiUrl: String(parsed.apiUrl ?? env.apiUrl).trim().replace(/\/$/, ''),
+        supabaseUrl: String(parsed.supabaseUrl || env.supabaseUrl).trim(),
+        supabaseAnonKey: String(parsed.supabaseAnonKey || env.supabaseAnonKey).trim(),
+        apiUrl: String(parsed.apiUrl ?? env.apiUrl)
+          .trim()
+          .replace(/\/$/, ''),
       };
     }
   } catch {
@@ -37,8 +46,8 @@ export function saveCloudConfig(config: CloudConfig): void {
     localStorage.setItem(
       CLOUD_CONFIG_KEY,
       JSON.stringify({
-        supabaseUrl: config.supabaseUrl.trim(),
-        supabaseAnonKey: config.supabaseAnonKey.trim(),
+        supabaseUrl: (config.supabaseUrl || DEFAULT_SUPABASE_URL).trim(),
+        supabaseAnonKey: (config.supabaseAnonKey || DEFAULT_SUPABASE_ANON_KEY).trim(),
         apiUrl: config.apiUrl.trim().replace(/\/$/, ''),
       })
     );

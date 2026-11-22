@@ -27,6 +27,7 @@ import {
   formatCancelRequestWhatsApp,
 } from '../lib/whatsappFormat';
 import { QuickCustomerPayBox } from '../components/QuickCustomerPayBox';
+import { useFriday } from '../context/FridayContext';
 import { APP_BRAND_NAME } from '../lib/version';
 import type { BusinessSettings, Order, OrderStatus, User } from '../types';
 
@@ -71,6 +72,7 @@ function getPaymentBadge(order: Order): { label: string; cls: string } {
 }
 
 export function CustomerLivePortal({ customerId }: CustomerLivePortalProps) {
+  const { refreshTick } = useFriday();
   const [customer, setCustomer] = useState<User | null>(null);
   const [orders, setOrders] = useState<Order[]>([]);
   const [settings, setSettings] = useState<BusinessSettings | null>(null);
@@ -128,7 +130,7 @@ export function CustomerLivePortal({ customerId }: CustomerLivePortalProps) {
     return () => {
       active = false;
     };
-  }, [customerId]);
+  }, [customerId, refreshTick]);
 
   // הזמנות פעילות/חדשות לסרגל העליון הלחיץ (שאינן מבוטלות)
   const activeBarOrders = useMemo(

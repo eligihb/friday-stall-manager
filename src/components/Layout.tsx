@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Flame,
   LayoutDashboard,
@@ -26,6 +26,12 @@ import { useFriday } from '../context/FridayContext';
 import { useContactDrawer } from '../context/ContactDrawerContext';
 import { formatShortFriday, getFridaysRange, ROLE_LABELS } from '../lib/format';
 import { APP_BRAND_NAME, APP_VERSION } from '../lib/version';
+import {
+  getCloudSyncStatus,
+  subscribeCloudSyncStatus,
+  syncWithCloudOnStartupOrPoll,
+  type CloudSyncStatusSnapshot,
+} from '../lib/supabaseSync';
 import { BottomSheet } from './BottomSheet';
 import { OrderDrawer } from './OrderDrawer';
 
@@ -91,6 +97,29 @@ export function Layout({ activeTab, onSelectTab, children }: LayoutProps) {
   const [editProfileOpen, setEditProfileOpen] = useState(false);
   const [profileNameDraft, setProfileNameDraft] = useState('');
   const [savingProfile, setSavingProfile] = useState(false);
+  const [cloudStatus, setCloudStatus] = useState<CloudSyncStatusSnapshot>(() =>
+    getCloudSyncStatus()
+  );
+
+  useEffect(() => {
+    return subscribeCloudSyncStatus(setCloudStatus);
+  }, []);
+
+  const cloudBadge =
+    cloudStatus.state === 'synced'
+      ? {
+          text: '☁️ מסונכרן לענן',
+          cls: 'bg-emerald-500/20 text-emerald-300 border-emerald-400/40',
+        }
+      : cloudStatus.state === 'syncing'
+      ? {
+          text: '🔄 מסנכרן...',
+          cls: 'bg-sky-500/20 text-sky-200 border-sky-400/40',
+        }
+      : {
+          text: '⚠️ מצב מקומי בלבד',
+          cls: 'bg-amber-500/20 text-amber-300 border-amber-400/40',
+        };
 
   const openEditProfile = () => {
     if (!user) return;
@@ -238,8 +267,18 @@ export function Layout({ activeTab, onSelectTab, children }: LayoutProps) {
             <span>התנתקות</span>
           </button>
 
-          <div className="text-center text-[11px] font-semibold text-slate-400 tabular-nums pt-0.5">
-            גרסה {APP_VERSION}
+          <div className="flex items-center justify-between gap-2 pt-0.5">
+            <button
+              type="button"
+              onClick={() => void syncWithCloudOnStartupOrPoll(true)}
+              className={`px-2.5 py-1 rounded-full border text-[11px] font-extrabold transition-opacity hover:opacity-90 ${cloudBadge.cls}`}
+              title="לחץ לסנכרון מיידי מול הענן"
+            >
+              {cloudBadge.text}
+            </button>
+            <div className="text-[11px] font-semibold text-slate-400 tabular-nums">
+              גרסה {APP_VERSION}
+            </div>
           </div>
         </div>
       </aside>
@@ -264,6 +303,17 @@ export function Layout({ activeTab, onSelectTab, children }: LayoutProps) {
                   <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-white/15 text-amber-300 tabular-nums shrink-0 leading-none">
                     {APP_VERSION}
                   </span>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void syncWithCloudOnStartupOrPoll(true);
+                    }}
+                    className={`text-[10px] font-extrabold px-1.5 py-0.5 rounded-md border shrink-0 leading-none ${cloudBadge.cls}`}
+                    title="לחץ לסנכרון ענן"
+                  >
+                    {cloudBadge.text}
+                  </button>
                 </div>
                 <button
                   type="button"

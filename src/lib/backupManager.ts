@@ -1,4 +1,5 @@
 import { invalidateLocalDbCache } from './localApi';
+import { scheduleCloudPush } from './supabaseSync';
 
 export const BACKUPS_STORAGE_KEY = 'friday_stall_backups';
 export const MAX_WEEKLY_SNAPSHOTS = 12;
@@ -104,6 +105,7 @@ export function saveBackupSnapshots(list: BackupSnapshot[]): BackupSnapshot[] {
   const trimmed = list.slice(0, MAX_WEEKLY_SNAPSHOTS);
   try {
     localStorage.setItem(BACKUPS_STORAGE_KEY, JSON.stringify(trimmed));
+    scheduleCloudPush();
   } catch {
     // If localStorage quota is tight, keep fewer snapshots
     try {
@@ -234,6 +236,7 @@ export function applySnapshotDataToStorage(snapshot: BackupSnapshot): void {
     }
   }
   invalidateLocalDbCache();
+  scheduleCloudPush(true);
 }
 
 /**
