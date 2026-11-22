@@ -15,6 +15,7 @@ import {
   RotateCcw,
 } from 'lucide-react';
 import {
+  computeEffectiveOrderTotal,
   formatFridayLabel,
   formatILS,
   isOrderPrepayPendingVerification,
@@ -61,11 +62,68 @@ export function OrderCard({
   const [copied, setCopied] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
   const [approvedNotice, setApprovedNotice] = useState(false);
+  const [showChanges, setShowChanges] = useState(false);
+  const [confirmCancelOpen, setConfirmCancelOpen] = useState(false);
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const paymentMeta = getOrderPaymentMeta(order.id);
   const prepayPendingVerify = isOrderPrepayPendingVerification(order);
   const isPendingStatus = order.status === 'pending' || order.status === 'awaiting_approval';
+  const effectiveTotal = computeEffectiveOrderTotal(order);
+  const hasCustomerEditDiff = Boolean(
+    order.last_edited_by_customer_at &&
+      order.previous_items &&
+      order.previous_items.length > 0
+  );
+
+  // חישוב מדויק של מה שנוסף, הוסר או השתנה בכמויות לעומת ההזמנה הקודמת
+  const customerEditDiff = React.useMemo(() => {
+    if (!hasCustomerEditDiff || !order.previous_items) return null;
+    const prevMap = new Map<number, { name: string; qty: number; price: number }>();
+    for (const pit of order.previous_items) {
+      const existing = prevMap.get(pit.product_id);
+      prevMap.set(pit.product_id, {
+        name: pit.product_name,
+        qty: (existing?.qty || 0) + pit.quantity,
+        price: pit.unit_price,
+      });
+    }
+    const currMap = new Map<number, { name: string; qty: number; price: number }>();
+    for (const cit of order.items) {
+      const existing = currMap.get(cit.product_id);
+      currMap.set(cit.product_id, {
+        name: cit.product_name,
+        qty: (existing?.qty || 0) + cit.quantity,
+        price: cit.unit_price_snapshot,
+      });
+    }
+
+    const added: Array<{ name: string; qty: number }> = [];
+    const removed: Array<{ name: string; qty: number }> = [];
+    const changed: Array<{ name: string; oldQty: number; newQty: number }> = [];
+
+    for (const [pid, curr] of currMap.entries()) {
+      const prev = prevMap.get(pid);
+      if (!prev) {
+        added.push({ name: curr.name, qty: curr.qty });
+      } else if (prev.qty !== curr.qty) {
+        changed.push({ name: curr.name, oldQty: prev.qty, newQty: curr.qty });
+      }
+    }
+    for (const [pid, prev] of prevMap.entries()) {
+      if (!currMap.has(pid)) {
+        removed.push({ name: prev.name, qty: prev.qty });
+      }
+    }
+
+    const prevTotal =
+      typeof order.previous_total === 'number' && order.previous_total > 0
+        ? order.previous_total
+        : order.previous_items.reduce((s, it) => s + it.quantity * it.unit_price, 0);
+    const totalDiff = Math.round((effectiveTotal - prevTotal) * 100) / 100;
+
+    return { added, removed, changed, prevTotal, totalDiff };
+  }, [hasCustomerEditDiff, order.previous_items, order.previous_total, order.items, effectiveTotal]);
 
   const triggerApproveOrder = () => {
     onCycleStatus(order, 'received');
@@ -168,7 +226,7 @@ export function OrderCard({
         isPendingStatus ? 'cursor-pointer hover:border-blue-400' : ''
       } ${
         order.status === 'cancelled'
-          ? 'border-slate-300 bg-slate-50/70 opacity-75'
+          ? 'border-slate-300 bg-slate-100/80 opacity-75 grayscale'
           : order.status === 'cancel_requested'
           ? 'border-orange-400 bg-orange-50/30 ring-1 ring-orange-300'
           : order.status === 'delivered'
@@ -226,9 +284,9 @@ export function OrderCard({
           {/* סכום + תגית תשלום לחיצה הפותחת חלונית אישור תשלום */}
           <div className="text-left shrink-0 tabular-nums space-y-1">
             <div className="font-extrabold text-lg text-slate-900 leading-tight">
-              {isCharity ? '₪0.00' : formatILS(order.total_amount)}
+              {isCharity || order.status === 'cancelled' ? '₪0.00' : formatILS(effectiveTotal)}
             </div>
-            {!isCharity ? (
+            {!isCharity && order.status !== 'cancelled' ? (
               <div className="flex flex-col items-end gap-1">
                 <button
                   type="button"
@@ -252,7 +310,7 @@ export function OrderCard({
                 </button>
                 {payState.status === 'partial' && (
                   <span className="text-[10px] font-extrabold px-1.5 py-0.5 rounded bg-amber-100 text-amber-950">
-                    שולם חלקית: {formatILS(order.paid_amount)} מתוך {formatILS(order.total_amount)}
+                    שולם חלקית: {formatILS(order.paid_amount)} מתוך {formatILS(effectiveTotal)}
                   </span>
                 )}
                 {order.paid_amount > 0 && paymentMeta && (
@@ -261,6 +319,10 @@ export function OrderCard({
                   </span>
                 )}
               </div>
+            ) : order.status === 'cancelled' ? (
+              <span className="inline-block px-2 py-0.5 rounded-full text-[11px] font-extrabold bg-slate-200 text-slate-700 border border-slate-300">
+                {order.cancelled_by === 'customer' ? 'בוטלה ע"י הלקוח' : 'בוטלה ע"י המוכר'}
+              </span>
             ) : (
               <div className="text-[11px] font-bold text-purple-800">
                 עלות {formatILS(order.estimated_cost ?? 0)}
@@ -292,6 +354,69 @@ export function OrderCard({
               </div>
             );
           })()}
+
+        {/* תגית עודכן ע"י הלקוח + כפתור הצג שינויים */}
+        {hasCustomerEditDiff && customerEditDiff && order.status !== 'cancelled' && (
+          <div
+            className="mt-2.5 p-2.5 rounded-xl bg-blue-50 border border-blue-200 space-y-2"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <span className="text-xs font-extrabold text-blue-900">
+                ✏️ עודכן ע&quot;י הלקוח
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowChanges((v) => !v)}
+                className="px-2.5 py-1 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-[11px] font-extrabold transition-colors"
+              >
+                {showChanges ? 'הסתר שינויים' : 'הצג שינויים'}
+              </button>
+            </div>
+
+            {showChanges && (
+              <div className="pt-2 border-t border-blue-200/80 space-y-1.5 text-xs">
+                {customerEditDiff.added.map((it, idx) => (
+                  <div key={`add-${idx}`} className="text-emerald-800 font-bold">
+                    ➕ נוסף: {it.qty}× {it.name}
+                  </div>
+                ))}
+                {customerEditDiff.removed.map((it, idx) => (
+                  <div key={`rem-${idx}`} className="text-red-700 font-bold line-through">
+                    ➖ הוסר: {it.qty}× {it.name}
+                  </div>
+                ))}
+                {customerEditDiff.changed.map((it, idx) => (
+                  <div key={`chg-${idx}`} className="text-amber-900 font-bold">
+                    🔄 שונה: {it.name} ({it.oldQty} ← {it.newQty})
+                  </div>
+                ))}
+                {customerEditDiff.added.length === 0 &&
+                  customerEditDiff.removed.length === 0 &&
+                  customerEditDiff.changed.length === 0 && (
+                    <div className="text-slate-600 font-semibold">עודכנו הערות או פרטי הזמנה</div>
+                  )}
+                <div className="pt-1.5 border-t border-blue-200/60 flex items-center justify-between text-[11px] font-extrabold tabular-nums">
+                  <span className="text-slate-600">
+                    סה״כ קודם: {formatILS(customerEditDiff.prevTotal)} ← חדש: {formatILS(effectiveTotal)}
+                  </span>
+                  <span
+                    className={
+                      customerEditDiff.totalDiff > 0
+                        ? 'text-emerald-700'
+                        : customerEditDiff.totalDiff < 0
+                        ? 'text-red-700'
+                        : 'text-slate-600'
+                    }
+                  >
+                    ({customerEditDiff.totalDiff >= 0 ? '+' : ''}
+                    {formatILS(customerEditDiff.totalDiff)})
+                  </span>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* תגיות פריטים קומפקטיות */}
         <div className="mt-3 flex flex-wrap gap-1.5">
@@ -361,15 +486,31 @@ export function OrderCard({
             </div>
           </div>
         ) : order.status === 'cancelled' ? (
-          <div className="flex items-center justify-between gap-2 p-2.5 rounded-xl bg-slate-100 border border-slate-300 text-xs font-extrabold text-slate-600">
-            <span>הזמנה זו בוטלה (חיוב אופס ל-₪0.00)</span>
-            <button
-              type="button"
-              onClick={() => onCycleStatus(order, 'pending')}
-              className="px-2.5 py-1 rounded-lg bg-white border border-slate-300 text-[11px] font-bold text-slate-700 hover:bg-slate-50"
-            >
-              ↩️ שחזר
-            </button>
+          <div className="p-3 rounded-xl bg-slate-200/80 border border-slate-300 space-y-2">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <span className="text-xs font-extrabold text-slate-700">
+                ❌ {order.cancelled_by === 'customer' ? 'בוטלה ע"י הלקוח' : 'בוטלה ע"י המוכר'} (לא נספרת בהכנסות ורכש)
+              </span>
+              <button
+                type="button"
+                onClick={() => onCycleStatus(order, order.pre_cancel_status || 'pending')}
+                className="px-3 py-1.5 rounded-lg bg-white hover:bg-slate-50 border border-slate-400 text-xs font-extrabold text-slate-800 shadow-sm"
+              >
+                ↩️ שחזר הזמנה
+              </button>
+            </div>
+            {onDelete && (
+              <div className="pt-1 border-t border-slate-300/70 flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => setConfirmDeleteOpen(true)}
+                  className="text-[11px] font-bold text-slate-500 hover:text-red-600 inline-flex items-center gap-1"
+                >
+                  <Trash2 className="w-3 h-3" />
+                  <span>מחק לצמיתות</span>
+                </button>
+              </div>
+            )}
           </div>
         ) : (
           <div className="flex items-center gap-2">
@@ -426,6 +567,7 @@ export function OrderCard({
         )}
 
         {/* שורת פעולות: עדכון תשלום אלגנטי (או תגית שולם + עריכה) + חשבונית (לספק) + וואטסאפ */}
+        {order.status !== 'cancelled' && (
         <div className="flex items-center gap-2">
           {!isCharity && onQuickPay && (
             payState.status === 'paid' ? (
@@ -480,6 +622,7 @@ export function OrderCard({
             <span className="hidden sm:inline">וואטסאפ</span>
           </a>
         </div>
+        )}
 
         {/* שורת כלים משנית קטנה (העתקה / קישור לקוח / עריכה / כרטסת / מחיקה) */}
         <div className="flex items-center justify-between pt-0.5 text-xs text-slate-500">
@@ -526,15 +669,15 @@ export function OrderCard({
                 <Edit3 className="w-4 h-4" />
               </button>
             )}
-            {onDelete && (
+            {order.status !== 'cancelled' && (
               <button
                 type="button"
                 onClick={(e) => {
                   e.stopPropagation();
-                  setConfirmDeleteOpen(true);
+                  setConfirmCancelOpen(true);
                 }}
                 className="p-2 rounded-lg hover:bg-red-50 hover:text-red-600 text-slate-500"
-                title="מחק הזמנה"
+                title="בטל הזמנה"
               >
                 <Trash2 className="w-4 h-4" />
               </button>
@@ -543,7 +686,52 @@ export function OrderCard({
         </div>
       </div>
 
-      {/* חלונית אישור מחיקת הזמנה מובנית (עובדת בכל דפדפן נייד ללא window.confirm) */}
+      {/* חלונית אזהרה לפני ביטול הזמנה (מסמן כבוטלה ע"י המוכר ומציג ללקוח באפור) */}
+      {confirmCancelOpen && (
+        <div
+          className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
+          onClick={(e) => {
+            e.stopPropagation();
+            setConfirmCancelOpen(false);
+          }}
+        >
+          <div
+            className="max-w-xs w-full bg-white rounded-3xl border border-[#E8D5BE] shadow-card p-5 space-y-3.5 text-center"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="w-12 h-12 rounded-full bg-red-100 text-red-600 flex items-center justify-center mx-auto">
+              <AlertTriangle className="w-6 h-6" />
+            </div>
+            <h3 className="font-serif text-lg font-extrabold text-slate-900">
+              האם לבטל את ההזמנה של {order.recipient_name}?
+            </h3>
+            <p className="text-xs text-slate-600 leading-relaxed">
+              ההזמנה <strong>#{order.id}</strong> ({formatILS(effectiveTotal)}) תסומן כמבוטלת ותוצג ללקוח בהתאם. ניתן יהיה לשחזר אותה בכל עת.
+            </p>
+            <div className="grid grid-cols-2 gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => setConfirmCancelOpen(false)}
+                className="py-2.5 rounded-xl border border-[#E8D5BE] bg-[#FAF6F0] text-slate-700 font-bold text-xs"
+              >
+                ביטול
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  onCycleStatus(order, 'cancelled');
+                  setConfirmCancelOpen(false);
+                }}
+                className="py-2.5 rounded-xl bg-red-600 hover:bg-red-700 text-white font-extrabold text-xs"
+              >
+                כן, בטל הזמנה
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* חלונית אישור מחיקת הזמנה לצמיתות (זמינה רק מתוך הזמנה שכבר בוטלה) */}
       {confirmDeleteOpen && onDelete && (
         <div
           className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"

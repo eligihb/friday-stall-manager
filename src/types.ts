@@ -95,6 +95,24 @@ export interface Order {
   created_at: string;
   items: OrderItem[];
   estimated_cost?: number;
+  /** מי ביטל את ההזמנה (המוכר או הלקוח) */
+  cancelled_by?: 'vendor' | 'customer' | null;
+  cancelled_at?: string | null;
+  /** ערכים לפני הביטול — לצורך שחזור הזמנה שבוטלה בטעות */
+  pre_cancel_total?: number | null;
+  pre_cancel_paid?: number | null;
+  pre_cancel_status?: OrderStatus | null;
+  /** מעקב עריכה ע"י הלקוח */
+  last_edited_by_customer_at?: string | null;
+  previous_items?: OrderItemSnapshot[] | null;
+  previous_total?: number | null;
+}
+
+export interface OrderItemSnapshot {
+  product_id: number;
+  product_name: string;
+  quantity: number;
+  unit_price: number;
 }
 
 export type PaymentMethod = 'cash' | 'paybox' | 'transfer';

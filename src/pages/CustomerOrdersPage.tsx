@@ -3,6 +3,7 @@ import { Plus, Minus, Search, ChevronDown, ChevronUp, Users, LayoutGrid, List, A
 import { apiFetch } from '../lib/api';
 import { filterUsersByNameOrPhone, getPhoneLast4 } from '../lib/whatsappParser';
 import {
+  computeEffectiveOrderTotal,
   formatFridayLabel,
   formatHebrewDate,
   formatILS,
@@ -299,8 +300,14 @@ export function CustomerOrdersPage() {
     setOrders((prev) => prev.map((o) => (o.id === order.id ? { ...o, status: nextStatus } : o)));
     await apiFetch(`/api/orders/${order.id}`, {
       method: 'PATCH',
-      body: JSON.stringify({ status: nextStatus }),
+      body: JSON.stringify({
+        status: nextStatus,
+        ...(nextStatus === 'cancelled' ? { cancelled_by: 'vendor' } : {}),
+      }),
     });
+    if (nextStatus === 'cancelled' || order.status === 'cancelled') {
+      await loadData();
+    }
   };
 
   const handleConfirmQuickPay = async (
@@ -329,8 +336,9 @@ export function CustomerOrdersPage() {
   };
 
   const totals = useMemo(() => {
-    const totalAmount = orders.reduce((s, o) => s + o.total_amount, 0);
-    const totalPaid = orders.reduce((s, o) => s + o.paid_amount, 0);
+    const activeOrders = orders.filter((o) => o.status !== 'cancelled');
+    const totalAmount = activeOrders.reduce((s, o) => s + computeEffectiveOrderTotal(o), 0);
+    const totalPaid = activeOrders.reduce((s, o) => s + o.paid_amount, 0);
     return { totalAmount, totalPaid, unpaid: Math.max(0, totalAmount - totalPaid) };
   }, [orders]);
 

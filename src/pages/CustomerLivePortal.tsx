@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { apiFetch } from '../lib/api';
 import {
+  computeEffectiveOrderTotal,
   computeOrderPromoSavings,
   formatFridayLabel,
   formatILS,
@@ -133,11 +134,8 @@ export function CustomerLivePortal({ customerId }: CustomerLivePortalProps) {
     };
   }, [customerId, refreshTick]);
 
-  // הזמנות פעילות/חדשות לסרגל העליון הלחיץ (שאינן מבוטלות)
-  const activeBarOrders = useMemo(
-    () => orders.filter((o) => o.status !== 'cancelled'),
-    [orders]
-  );
+  // הזמנות לסרגל העליון הלחיץ (כולל הזמנות שבוטלו כדי שהלקוח תמיד יראה את הסטטוס ולא תיעלם לו הזמנה)
+  const activeBarOrders = useMemo(() => orders.slice(0, 8), [orders]);
 
   // ההזמנה הממוקדת כרגע בראש המסך
   const focusedOrder = useMemo(() => {
@@ -356,7 +354,13 @@ export function CustomerLivePortal({ customerId }: CustomerLivePortalProps) {
             טאב 1 (ברירת מחדל): ההזמנה הפעילה לשישי הקרוב בראש המסך
         ================================================================= */}
         {activeTab === 'active_order' ? (
-          <section className="bg-white rounded-3xl border border-[#E8D5BE] shadow-soft p-4 sm:p-5 space-y-4">
+          <section
+            className={`rounded-3xl border shadow-soft p-4 sm:p-5 space-y-4 transition-all ${
+              focusedOrder?.status === 'cancelled'
+                ? 'bg-slate-100/90 border-slate-300 opacity-85 grayscale-[60%]'
+                : 'bg-white border-[#E8D5BE]'
+            }`}
+          >
             <div className="flex items-center justify-between gap-2">
               <h2 className="font-serif text-xl font-bold text-slate-900 flex items-center gap-2">
                 <Clock className="w-5 h-5 text-[#C85A17]" />
@@ -385,14 +389,18 @@ export function CustomerLivePortal({ customerId }: CustomerLivePortalProps) {
                 </a>
               </div>
             ) : (() => {
-              const unpaid = Math.max(0, focusedOrder.total_amount - focusedOrder.paid_amount);
-              const payBadge = getPaymentBadge(focusedOrder);
+              const effectiveTotal = computeEffectiveOrderTotal(focusedOrder);
+              const unpaid = Math.max(0, effectiveTotal - focusedOrder.paid_amount);
+              const payBadge = getPaymentBadge({ ...focusedOrder, total_amount: effectiveTotal });
               const canStillCancel = isBeforeFridayCancelCutoff(focusedOrder.friday_date);
               const isCancelableStatus =
                 focusedOrder.status !== 'delivered' &&
                 focusedOrder.status !== 'cancelled' &&
                 focusedOrder.status !== 'cancel_requested';
-              const savings = computeOrderPromoSavings(focusedOrder);
+              const savings = computeOrderPromoSavings({
+                ...focusedOrder,
+                total_amount: effectiveTotal,
+              });
 
               return (
                 <div className="space-y-4">
@@ -417,8 +425,22 @@ export function CustomerLivePortal({ customerId }: CustomerLivePortalProps) {
                       <span>בקשת הביטול נשלחה — ממתין לאישור מוכר</span>
                     </div>
                   ) : focusedOrder.status === 'cancelled' ? (
-                    <div className="p-3 rounded-2xl bg-slate-100 border border-slate-300 text-xs font-extrabold text-slate-600 text-center">
-                      הזמנה זו בוטלה באישור מוכר
+                    <div className="p-4 rounded-2xl bg-slate-200/90 border border-slate-400/70 space-y-3 text-center">
+                      <div className="text-sm font-extrabold text-slate-800">
+                        {focusedOrder.cancelled_by === 'customer'
+                          ? '❌ ההזמנה בוטלה על ידך'
+                          : '❌ ההזמנה בוטלה על ידי המוכר'}
+                      </div>
+                      <p className="text-xs text-slate-600">
+                        הזמנה זו אינה פעילה עוד וחיובה אופס ל-₪0.00.
+                      </p>
+                      <a
+                        href="#/menu"
+                        className="inline-flex items-center justify-center gap-1.5 px-5 py-2.5 rounded-xl bg-[#C85A17] hover:bg-[#A9440F] text-white text-xs font-extrabold shadow-sm transition-colors"
+                      >
+                        <Plus className="w-4 h-4" />
+                        <span>+ צור הזמנה חדשה</span>
+                      </a>
                     </div>
                   ) : (
                     (() => {
@@ -492,17 +514,19 @@ export function CustomerLivePortal({ customerId }: CustomerLivePortalProps) {
                             : 'text-red-600'
                         }`}
                       >
-                        {focusedOrder.paid_amount > 0
+                        {focusedOrder.status === 'cancelled'
+                          ? 'הזמנה מבוטלת (₪0.00)'
+                          : focusedOrder.paid_amount > 0
                           ? `שולם ${formatILS(focusedOrder.paid_amount)} מתוך ${formatILS(
-                              focusedOrder.total_amount
+                              effectiveTotal
                             )}${unpaid > 0 ? ` · נותר: ${formatILS(unpaid)}` : ''}`
                           : isOrderPrepayPendingVerification(focusedOrder)
                           ? '⏳ ממתין לאימות תשלום מהמוכר — התשלום יאושר ויעודכן בחשבונך מיד לאחר שהמוכר יאמת את ההעברה'
-                          : `לא שולם (₪0.00 מתוך ${formatILS(focusedOrder.total_amount)})`}
+                          : `לא שולם (₪0.00 מתוך ${formatILS(effectiveTotal)})`}
                       </div>
                     </div>
                     <span className="font-extrabold text-xl text-[#C85A17]">
-                      {formatILS(focusedOrder.total_amount)}
+                      {formatILS(effectiveTotal)}
                     </span>
                   </div>
 

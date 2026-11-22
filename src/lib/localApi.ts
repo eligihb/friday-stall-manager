@@ -735,6 +735,9 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
       throwErr('המועד לעריכה או ביטול עצמי הסתיים (יום שישי ב-06:00 בבוקר)', 400);
     }
     if (body.direct_cancel !== false) {
+      order.pre_cancel_total = order.total_amount;
+      order.pre_cancel_paid = order.paid_amount;
+      order.pre_cancel_status = order.status;
       if (order.user_id && order.order_type !== 'charity') {
         const cust = db.users.find((u) => u.id === order.user_id);
         if (cust) {
@@ -742,6 +745,8 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
         }
       }
       order.status = 'cancelled';
+      order.cancelled_by = 'customer';
+      order.cancelled_at = new Date().toISOString();
       order.total_amount = 0;
       order.paid_amount = 0;
       order.delivery_fee = 0;
@@ -871,20 +876,33 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
       .filter((o) => o.user_id === found!.id)
       .sort((a, b) => b.friday_date.localeCompare(a.friday_date) || b.id - a.id);
 
-    const activeOrders = allCustOrders.filter((o) => o.status !== 'cancelled');
+    const custOrders = allCustOrders.map((o) => {
+      const items = db.order_items
+        .filter((it) => it.order_id === o.id)
+        .map((it) => ({
+          ...it,
+          product_name: pMap.get(it.product_id)?.name || `#${it.product_id}`,
+        }));
+      const itemsSum = round2(
+        items.reduce((s, it) => s + (Number(it.unit_price_snapshot) || 0) * (Number(it.quantity) || 0), 0)
+      );
+      const effectiveTotal =
+        o.status === 'cancelled' || o.order_type === 'charity'
+          ? 0
+          : Number(o.total_amount) > 0
+          ? Number(o.total_amount)
+          : itemsSum;
+      return {
+        ...o,
+        total_amount: effectiveTotal,
+        items,
+      };
+    });
+
+    const activeOrders = custOrders.filter((o) => o.status !== 'cancelled');
     const computedTotal = round2(activeOrders.reduce((s, o) => s + (Number(o.total_amount) || 0), 0));
     const computedPaid = round2(activeOrders.reduce((s, o) => s + (Number(o.paid_amount) || 0), 0));
     const computedBalance = round2(computedPaid - computedTotal);
-
-    const custOrders = allCustOrders.map((o) => ({
-        ...o,
-        items: db.order_items
-          .filter((it) => it.order_id === o.id)
-          .map((it) => ({
-            ...it,
-            product_name: pMap.get(it.product_id)?.name || `#${it.product_id}`,
-          })),
-      }));
 
     return {
       customer: {
@@ -1021,6 +1039,19 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
       if (!isBeforeFridayCancelCutoff(existingToReplace.friday_date)) {
         throwErr('המועד לעריכה עצמית הסתיים (יום שישי ב-06:00 בבוקר)', 400);
       }
+      // שמירת צילום מצב הפריטים והסכום שלפני עריכת הלקוח לצורך כפתור "הצג שינויים" אצל המוכר
+      const prevItemsSnapshot = db.order_items
+        .filter((oi) => String(oi.order_id) === String(existingToReplace.id))
+        .map((oi) => ({
+          product_id: oi.product_id,
+          product_name: pMap.get(oi.product_id)?.name || `מוצר #${oi.product_id}`,
+          quantity: oi.quantity,
+          unit_price: oi.unit_price_snapshot,
+        }));
+      existingToReplace.previous_items = prevItemsSnapshot;
+      existingToReplace.previous_total = existingToReplace.total_amount;
+      existingToReplace.last_edited_by_customer_at = new Date().toISOString();
+
       db.order_items = db.order_items.filter(
         (oi) => String(oi.order_id) !== String(existingToReplace.id)
       );
@@ -1099,6 +1130,19 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
       : null;
 
     if (existingToMerge) {
+      // שמירת צילום מצב הפריטים והסכום שלפני ההוספה לצורך כפתור "הצג שינויים"
+      const prevItemsSnapshot = db.order_items
+        .filter((oi) => String(oi.order_id) === String(existingToMerge.id))
+        .map((oi) => ({
+          product_id: oi.product_id,
+          product_name: pMap.get(oi.product_id)?.name || `מוצר #${oi.product_id}`,
+          quantity: oi.quantity,
+          unit_price: oi.unit_price_snapshot,
+        }));
+      existingToMerge.previous_items = prevItemsSnapshot;
+      existingToMerge.previous_total = existingToMerge.total_amount;
+      existingToMerge.last_edited_by_customer_at = new Date().toISOString();
+
       let addedCalcTotal = 0;
       const resultItems: Array<{
         product_id: number;
@@ -1482,12 +1526,22 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
         product_name: prodMap.get(it.product_id)?.name || `מוצר #${it.product_id}`,
         cost_price_snapshot: me.role === 'admin' ? it.cost_price_snapshot : 0,
       }));
+    const itemsSum = round2(
+      items.reduce((s, it) => s + (Number(it.unit_price_snapshot) || 0) * (Number(it.quantity) || 0), 0)
+    );
+    const effectiveTotal =
+      o.status === 'cancelled' || o.order_type === 'charity'
+        ? 0
+        : Number(o.total_amount) > 0
+        ? Number(o.total_amount)
+        : itemsSum;
     const estimated_cost =
       me.role === 'admin'
         ? round2(items.reduce((s, it) => s + it.quantity * (it.cost_price_snapshot ?? 0), 0))
         : undefined;
     return {
       ...o,
+      total_amount: effectiveTotal,
       user_name: o.user_id ? userMap.get(o.user_id)?.name || null : null,
       items,
       ...(me.role === 'admin' ? { estimated_cost } : {}),
@@ -1659,12 +1713,46 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
 
     if (method === 'PATCH') {
       if (body.status) {
-        ord.status = body.status as OrderStatus;
-        if (ord.status === 'cancelled') {
+        const prevStatus = ord.status;
+        const nextStatus = body.status as OrderStatus;
+        ord.status = nextStatus;
+
+        if (nextStatus === 'cancelled' && prevStatus !== 'cancelled') {
+          ord.pre_cancel_total = ord.total_amount;
+          ord.pre_cancel_paid = ord.paid_amount;
+          ord.pre_cancel_status = prevStatus;
+          ord.cancelled_by = body.cancelled_by === 'customer' ? 'customer' : 'vendor';
+          ord.cancelled_at = new Date().toISOString();
+          if (ord.user_id && ord.order_type !== 'charity') {
+            const u = userMap.get(ord.user_id);
+            if (u) u.balance = round2(u.balance + (ord.total_amount - ord.paid_amount));
+          }
           ord.total_amount = 0;
           ord.paid_amount = 0;
           ord.delivery_fee = 0;
           ord.credit_discount = 0;
+        } else if (prevStatus === 'cancelled' && nextStatus !== 'cancelled') {
+          // שחזור הזמנה שבוטלה בטעות: החזרת הסכום המקורי (או חישוב מתוך הפריטים)
+          const itemsTotal = round2(
+            db.order_items
+              .filter((it) => String(it.order_id) === String(ord.id))
+              .reduce((s, it) => s + (Number(it.unit_price_snapshot) || 0) * (Number(it.quantity) || 0), 0)
+          );
+          const restoredTotal =
+            ord.order_type === 'charity'
+              ? 0
+              : (Number(ord.pre_cancel_total) || 0) > 0
+              ? Number(ord.pre_cancel_total)
+              : itemsTotal;
+          const restoredPaid = Number(ord.pre_cancel_paid) || 0;
+          ord.total_amount = restoredTotal;
+          ord.paid_amount = restoredPaid;
+          ord.cancelled_by = null;
+          ord.cancelled_at = null;
+          if (ord.user_id && ord.order_type !== 'charity') {
+            const u = userMap.get(ord.user_id);
+            if (u) u.balance = round2(u.balance - (restoredTotal - restoredPaid));
+          }
         }
       }
       if (body.notes !== undefined) ord.notes = String(body.notes);
@@ -1905,7 +1993,10 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
     requireAdmin();
     const fri = String(q.get('friday_date') || getNextFridayISO()).slice(0, 10);
     const friOrders = db.orders.filter(
-      (o) => o.friday_date === fri && o.status !== 'awaiting_approval'
+      (o) =>
+        o.friday_date === fri &&
+        o.status !== 'awaiting_approval' &&
+        o.status !== 'cancelled'
     );
     const orderTypeById = new Map(friOrders.map((o) => [o.id, o.order_type]));
     const items = sortProducts(db.products)

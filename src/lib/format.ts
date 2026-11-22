@@ -180,6 +180,31 @@ export const WASTE_TYPE_LABELS: Record<WasteType, string> = {
   partial: 'פחת יחסי',
 };
 
+export function computeEffectiveOrderTotal(order: {
+  order_type?: string;
+  status?: string;
+  total_amount?: number;
+  delivery_fee?: number;
+  credit_discount?: number;
+  vat_amount?: number;
+  items?: Array<{ quantity: number; unit_price_snapshot: number }>;
+}): number {
+  if (!order || order.order_type === 'charity' || order.status === 'cancelled') return 0;
+  const stored = Number(order.total_amount) || 0;
+  if (stored > 0) return Math.round(stored * 100) / 100;
+  const itemsSum = (order.items || []).reduce(
+    (sum, item) => sum + (Number(item.unit_price_snapshot) || 0) * (Number(item.quantity) || 0),
+    0
+  );
+  if (itemsSum <= 0) return 0;
+  const adjusted =
+    itemsSum +
+    (Number(order.delivery_fee) || 0) -
+    (Number(order.credit_discount) || 0) +
+    (Number(order.vat_amount) || 0);
+  return Math.max(0, Math.round(adjusted * 100) / 100);
+}
+
 export interface ActiveWeekRange {
   start: Date;
   end: Date;

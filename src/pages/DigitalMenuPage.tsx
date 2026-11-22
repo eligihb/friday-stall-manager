@@ -151,6 +151,8 @@ export function DigitalMenuPage() {
   const [selectedCategory, setSelectedCategory] = useState<MenuCategory>('all');
   const [mergeMode, setMergeMode] = useState<'merge' | 'new'>('merge');
   const [editingOrderId, setEditingOrderId] = useState<number | null>(null);
+  const [editingOrderPaidAmount, setEditingOrderPaidAmount] = useState<number>(0);
+  const [showEditCatalogAdd, setShowEditCatalogAdd] = useState(false);
 
   // חלונית התאמה אישית למוצר (ProductOptionsModal)
   const [activeCard, setActiveCard] = useState<CatalogCardItem | null>(null);
@@ -610,8 +612,14 @@ export function DigitalMenuPage() {
     const zalabiaMixDiscount = Math.floor(zalabiaTrios / 2) * 4;
     const totalMixDiscount = ciabattaMixDiscount + zalabiaMixDiscount;
 
-    const rawSubtotal = cartRows.reduce((s, r) => s + r.quantity * r.unitPrice, 0);
-    const regularSubtotal = cartRows.reduce((s, r) => s + r.quantity * r.regularUnitPrice, 0);
+    const rawSubtotal = cartRows.reduce(
+      (s, r) => s + (Number(r.quantity) || 0) * (Number(r.unitPrice) || 0),
+      0
+    );
+    const regularSubtotal = cartRows.reduce(
+      (s, r) => s + (Number(r.quantity) || 0) * (Number(r.regularUnitPrice) || Number(r.unitPrice) || 0),
+      0
+    );
 
     const finalTotal = Math.max(0, Math.round((rawSubtotal - totalMixDiscount) * 100) / 100);
     const totalSavings = Math.max(0, Math.round((regularSubtotal - finalTotal) * 100) / 100);
@@ -696,20 +704,34 @@ export function DigitalMenuPage() {
   const cardBadgeCount = (cardId: string) =>
     cartRows.filter((r) => r.cardId === cardId).reduce((s, r) => s + r.quantity, 0);
 
-  // טעינת פריטי הזמנה קיימת לסל לעריכה מלאה (✏️ עדכן הזמנה)
+  // טעינת פריטי הזמנה קיימת לסל לעריכה מלאה (✏️ עדכן הזמנה) — מבטיח חישוב מחיר תקין ללא איפוס ל-₪0
   const loadOrderIntoCartForEdit = (orderToEdit: Order) => {
-    if (catalogCards.length === 0) return;
     const rows: CartRow[] = [];
     for (const item of orderToEdit.items || []) {
+      const qty = Math.max(1, Number(item.quantity) || 1);
+      const snapPrice = Math.max(0, Number(item.unit_price_snapshot) || 0);
       const card = catalogCards.find((c) =>
         c.options.some((opt) => opt.productId === item.product_id)
       );
-      if (!card) continue;
+      if (!card) {
+        // פריט מהזמנה קיימת שלא תואם לכרטיסייה פעילה — נשמר עם מחירו האמיתי כדי שהסה״כ לעולם לא יתאפס
+        rows.push({
+          rowKey: `legacy__${item.product_id}__${rows.length}`,
+          cardId: `other_${item.product_id}`,
+          productId: item.product_id,
+          label: item.product_name || `מוצר #${item.product_id}`,
+          quantity: qty,
+          unitsPerQty: 1,
+          unitPrice: snapPrice,
+          regularUnitPrice: snapPrice,
+        });
+        continue;
+      }
       const packOpt = card.options.find((opt) => opt.unitsPerQty === 5);
       const singleOpt = card.options.find((opt) => opt.unitsPerQty === 1);
-      if (packOpt && item.quantity >= 5) {
-        const packs = Math.floor(item.quantity / 5);
-        const rem = item.quantity % 5;
+      if (packOpt && qty >= 5) {
+        const packs = Math.floor(qty / 5);
+        const rem = qty % 5;
         if (packs > 0) {
           rows.push({
             rowKey: `${card.id}__${packOpt.id}____`,
@@ -718,8 +740,8 @@ export function DigitalMenuPage() {
             label: `${card.title} — ${packOpt.label}`,
             quantity: packs,
             unitsPerQty: packOpt.unitsPerQty,
-            unitPrice: packOpt.price,
-            regularUnitPrice: packOpt.regularPrice,
+            unitPrice: Number(packOpt.price) || snapPrice * 5,
+            regularUnitPrice: Number(packOpt.regularPrice) || Number(packOpt.price) || snapPrice * 5,
             mixGroup: packOpt.mixGroup,
           });
         }
@@ -731,8 +753,8 @@ export function DigitalMenuPage() {
             label: `${card.title} — ${singleOpt.label}`,
             quantity: rem,
             unitsPerQty: singleOpt.unitsPerQty,
-            unitPrice: singleOpt.price,
-            regularUnitPrice: singleOpt.regularPrice,
+            unitPrice: Number(singleOpt.price) || snapPrice,
+            regularUnitPrice: Number(singleOpt.regularPrice) || Number(singleOpt.price) || snapPrice,
             mixGroup: singleOpt.mixGroup,
           });
         }
@@ -741,20 +763,21 @@ export function DigitalMenuPage() {
           card.options.find(
             (opt) =>
               opt.productId === item.product_id &&
-              Math.abs(opt.price - (item.unit_price_snapshot || opt.price)) < 1
+              Math.abs(opt.price - (snapPrice || opt.price)) < 1
           ) ||
           card.options.find((opt) => opt.productId === item.product_id) ||
           card.options[0];
         if (matchedOpt) {
+          const effPrice = Number(matchedOpt.price) || snapPrice;
           rows.push({
             rowKey: `${card.id}__${matchedOpt.id}____${rows.length}`,
             cardId: card.id,
             productId: matchedOpt.productId,
             label: `${card.title} — ${matchedOpt.label}`,
-            quantity: item.quantity,
+            quantity: qty,
             unitsPerQty: matchedOpt.unitsPerQty,
-            unitPrice: matchedOpt.price,
-            regularUnitPrice: matchedOpt.regularPrice,
+            unitPrice: effPrice,
+            regularUnitPrice: Number(matchedOpt.regularPrice) || effPrice,
             mixGroup: matchedOpt.mixGroup,
           });
         }
@@ -764,10 +787,42 @@ export function DigitalMenuPage() {
       setCartRows(rows);
     }
     setEditingOrderId(orderToEdit.id);
+    setEditingOrderPaidAmount(Math.max(0, Number(orderToEdit.paid_amount) || 0));
+    setShowEditCatalogAdd(false);
     if (orderToEdit.recipient_name && !customerName) {
       setCustomerName(orderToEdit.recipient_name);
     }
     setCheckoutOpen(true);
+  };
+
+  // הוספה מהירה של מוצר מהמחירון ישירות מתוך חלונית "עדכון הזמנה"
+  const handleQuickAddOptionToCart = (card: CatalogCardItem, opt: CatalogOption) => {
+    const flavorPart = card.hasFlavors ? ' (שום)' : '';
+    const rowKey = `${card.id}__${opt.id}__${card.hasFlavors ? 'שום' : ''}__`;
+    const label =
+      card.options.length === 1 && !card.hasFlavors
+        ? `${card.title} — ${opt.label}`
+        : `${card.title}${flavorPart} — ${opt.label}`;
+    setCartRows((prev) => {
+      const existing = prev.find((r) => r.rowKey === rowKey);
+      if (existing) {
+        return prev.map((r) => (r.rowKey === rowKey ? { ...r, quantity: r.quantity + 1 } : r));
+      }
+      return [
+        ...prev,
+        {
+          rowKey,
+          cardId: card.id,
+          productId: opt.productId,
+          label,
+          quantity: 1,
+          unitsPerQty: opt.unitsPerQty,
+          unitPrice: Number(opt.price) || 0,
+          regularUnitPrice: Number(opt.regularPrice) || Number(opt.price) || 0,
+          mixGroup: opt.mixGroup,
+        },
+      ];
+    });
   };
 
   useEffect(() => {
@@ -928,6 +983,8 @@ export function DigitalMenuPage() {
         prepayMethod,
       });
       setEditingOrderId(null);
+      setEditingOrderPaidAmount(0);
+      setShowEditCatalogAdd(false);
       setCartRows([]);
       setNotes('');
       setCheckoutOpen(false);
@@ -1084,6 +1141,8 @@ export function DigitalMenuPage() {
                   type="button"
                   onClick={() => {
                     setEditingOrderId(null);
+                    setEditingOrderPaidAmount(0);
+                    setShowEditCatalogAdd(false);
                     setCartRows([]);
                   }}
                   className="px-2 py-0.5 rounded-md bg-white border border-blue-300 text-blue-800 text-[10px] font-bold"
@@ -1576,6 +1635,56 @@ export function DigitalMenuPage() {
             ))}
           </div>
 
+          {/* הוספת פריטים נוספים מהמחירון ישירות בתוך חלונית עדכון ההזמנה */}
+          {editingOrderId !== null && (
+            <div className="space-y-2">
+              <button
+                type="button"
+                onClick={() => setShowEditCatalogAdd((v) => !v)}
+                className="w-full py-2.5 px-3 rounded-xl bg-[#FAF6F0] hover:bg-[#FFF7ED] border border-dashed border-[#C85A17]/70 text-[#8A330B] text-xs font-extrabold flex items-center justify-center gap-1.5 transition-colors"
+              >
+                <Plus className="w-4 h-4 shrink-0" />
+                <span>{showEditCatalogAdd ? 'הסתר פריטים מהמחירון' : '+ הוסף פריטים מהמחירון'}</span>
+              </button>
+
+              {showEditCatalogAdd && (
+                <div className="max-h-56 overflow-y-auto divide-y divide-[#F3E9DC] border border-[#E8D5BE] rounded-2xl bg-white">
+                  {catalogCards
+                    .filter((c) => c.inStock)
+                    .flatMap((card) =>
+                      card.options.map((opt) => ({
+                        key: `${card.id}__${opt.id}`,
+                        card,
+                        opt,
+                      }))
+                    )
+                    .map(({ key, card, opt }) => (
+                      <div
+                        key={key}
+                        className="px-3 py-2 flex items-center justify-between gap-2 text-xs hover:bg-[#FAF6F0]"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <div className="font-bold text-slate-800 truncate">
+                            {card.emoji} {card.title} — {opt.label}
+                          </div>
+                          <div className="text-[11px] font-extrabold text-[#C85A17] tabular-nums">
+                            {formatILS(opt.price)}
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleQuickAddOptionToCart(card, opt)}
+                          className="px-2.5 py-1.5 rounded-lg bg-[#C85A17] hover:bg-[#A9440F] text-white text-[11px] font-extrabold shrink-0 active:scale-95"
+                        >
+                          + הוסף
+                        </button>
+                      </div>
+                    ))}
+                </div>
+              )}
+            </div>
+          )}
+
           {cartSummary.totalMixDiscount > 0 && (
             <div className="p-2.5 rounded-xl bg-emerald-50 border border-emerald-300 text-emerald-800 text-xs font-extrabold flex items-center justify-between tabular-nums">
               <span>✨ הנחת מבצע זוג מארזים (2 ב-20 ₪):</span>
@@ -1638,50 +1747,91 @@ export function DigitalMenuPage() {
             className="w-full px-3.5 py-2.5 rounded-xl border border-[#E8D5BE] bg-white text-sm"
           />
 
-          {/* קופסת תשלום נקייה (תשלום מראש / תשלום באיסוף) */}
-          <QuickCustomerPayBox
-            amountToPay={
-              mergeCalculation.isMerging
-                ? mergeCalculation.addedAmountToPay
-                : cartSummary.finalTotal
-            }
-            title={
-              mergeCalculation.isMerging && activeFridayOrder
-                ? `תשלום עבור התוספת להזמנה #${activeFridayOrder.id}`
-                : 'אופן תשלום'
-            }
-            paymentChoice={paymentChoice}
-            onPaymentChoiceChange={setPaymentChoice}
-            prepayMethod={prepayMethod}
-            onPrepayMethodChange={setPrepayMethod}
-          />
+          {/* קופסת תשלום נקייה + פירוט מדויק של הפרש לתשלום בעריכת הזמנה */}
+          {(() => {
+            const isEditing = editingOrderId !== null;
+            const editDeltaToPay = isEditing
+              ? Math.max(0, Math.round((cartSummary.finalTotal - editingOrderPaidAmount) * 100) / 100)
+              : cartSummary.finalTotal;
+            const amountNeededNow = isEditing
+              ? editDeltaToPay
+              : mergeCalculation.isMerging
+              ? mergeCalculation.addedAmountToPay
+              : cartSummary.finalTotal;
+            const isCoveredByPaid = isEditing && editingOrderPaidAmount > 0 && editDeltaToPay <= 0.01;
+            const effectiveCanSubmit = isCoveredByPaid || canSubmitPayment;
 
-          <button
-            type="submit"
-            disabled={submitting || cartRows.length === 0 || !canSubmitPayment}
-            className={`w-full min-h-[52px] py-3.5 rounded-2xl font-extrabold text-sm flex items-center justify-center gap-2 shadow-md transition-all ${
-              canSubmitPayment
-                ? 'bg-[#25D366] hover:bg-[#1EB958] text-white'
-                : 'bg-slate-200 text-slate-600 cursor-not-allowed'
-            }`}
-          >
-            <Send className="w-4 h-4 shrink-0" />
-            <span>
-              {submitting
-                ? 'שומר...'
-                : !canSubmitPayment
-                ? 'יש ללחוץ לתשלום מראש לפני שליחת ההזמנה'
-                : editingOrderId !== null
-                ? `שמור עדכון להזמנה #${editingOrderId} ושלח בוואטסאפ (${formatILS(
-                    cartSummary.finalTotal
-                  )})`
-                : mergeCalculation.isMerging && activeFridayOrder
-                ? `הוסף להזמנה #${activeFridayOrder.id} ושלח בוואטסאפ (+${formatILS(
-                    mergeCalculation.addedAmountToPay
-                  )})`
-                : `שלח הזמנה בוואטסאפ (${formatILS(cartSummary.finalTotal)})`}
-            </span>
-          </button>
+            return (
+              <>
+                {isEditing && editingOrderPaidAmount > 0 && (
+                  <div className="p-3 rounded-2xl bg-emerald-50 border border-emerald-300 text-xs space-y-1 tabular-nums">
+                    <div className="flex items-center justify-between text-emerald-900 font-bold">
+                      <span>סה״כ מעודכן להזמנה #{editingOrderId}:</span>
+                      <span>{formatILS(cartSummary.finalTotal)}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-emerald-800 font-bold">
+                      <span>כבר שולם על ההזמנה:</span>
+                      <span>-{formatILS(editingOrderPaidAmount)}</span>
+                    </div>
+                    <div className="pt-1 border-t border-emerald-200 flex items-center justify-between font-extrabold text-emerald-950">
+                      <span>{isCoveredByPaid ? 'הזמנה מכוסה במלואה:' : 'הפרש נוסף לתשלום:'}</span>
+                      <span className="text-sm text-[#C85A17]">{formatILS(editDeltaToPay)}</span>
+                    </div>
+                  </div>
+                )}
+
+                {!isCoveredByPaid && (
+                  <QuickCustomerPayBox
+                    amountToPay={amountNeededNow}
+                    title={
+                      isEditing && editingOrderPaidAmount > 0
+                        ? `הפרש נוסף לתשלום עבור הזמנה #${editingOrderId}`
+                        : isEditing
+                        ? `סה״כ מעודכן לתשלום — הזמנה #${editingOrderId}`
+                        : mergeCalculation.isMerging && activeFridayOrder
+                        ? `תשלום עבור התוספת להזמנה #${activeFridayOrder.id}`
+                        : 'אופן תשלום'
+                    }
+                    paymentChoice={paymentChoice}
+                    onPaymentChoiceChange={setPaymentChoice}
+                    prepayMethod={prepayMethod}
+                    onPrepayMethodChange={setPrepayMethod}
+                  />
+                )}
+
+                <button
+                  type="submit"
+                  disabled={submitting || cartRows.length === 0 || !effectiveCanSubmit}
+                  className={`w-full min-h-[52px] py-3.5 rounded-2xl font-extrabold text-sm flex items-center justify-center gap-2 shadow-md transition-all ${
+                    effectiveCanSubmit
+                      ? 'bg-[#25D366] hover:bg-[#1EB958] text-white'
+                      : 'bg-slate-200 text-slate-600 cursor-not-allowed'
+                  }`}
+                >
+                  <Send className="w-4 h-4 shrink-0" />
+                  <span>
+                    {submitting
+                      ? 'שומר...'
+                      : !effectiveCanSubmit
+                      ? 'יש ללחוץ לתשלום מראש לפני שליחת ההזמנה'
+                      : isEditing
+                      ? isCoveredByPaid
+                        ? `שמור עדכון להזמנה #${editingOrderId} ושלח בוואטסאפ (שולם)`
+                        : editingOrderPaidAmount > 0
+                        ? `שמור עדכון להזמנה #${editingOrderId} (הפרש לתשלום: ${formatILS(editDeltaToPay)})`
+                        : `שמור עדכון להזמנה #${editingOrderId} ושלח בוואטסאפ (${formatILS(
+                            cartSummary.finalTotal
+                          )})`
+                      : mergeCalculation.isMerging && activeFridayOrder
+                      ? `הוסף להזמנה #${activeFridayOrder.id} ושלח בוואטסאפ (+${formatILS(
+                          mergeCalculation.addedAmountToPay
+                        )})`
+                      : `שלח הזמנה בוואטסאפ (${formatILS(cartSummary.finalTotal)})`}
+                  </span>
+                </button>
+              </>
+            );
+          })()}
         </form>
       </BottomSheet>
     </div>
