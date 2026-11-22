@@ -90,13 +90,17 @@ export function SettingsPage() {
     setError('');
     try {
       saveCloudConfig(cloudCfg);
-      const pushed = await pushLocalStateToCloud({ mergeWithRemoteFirst: true });
-      const pulled = await syncWithCloudOnStartupOrPoll(true);
+      const ok = await syncWithCloudOnStartupOrPoll(true);
       await loadAll();
-      if (pushed || pulled) {
+      if (ok) {
         notify('הסנכרון מול ענן Supabase הושלם בהצלחה ✓');
       } else {
-        setError('לא ניתן להתחבר לענן כרגע — הנתונים שמורים מקומית במכשיר.');
+        const latestErr = getCloudSyncStatus().lastError;
+        setError(
+          latestErr
+            ? `שגיאה מ-Supabase: ${latestErr}`
+            : 'לא ניתן להתחבר לענן כרגע — הנתונים שמורים מקומית במכשיר.'
+        );
       }
     } finally {
       setSyncingNow(false);
@@ -444,11 +448,9 @@ export function SettingsPage() {
               <p className="text-xs text-slate-600 mt-0.5">
                 כל הנתונים (הזמנות, לקוחות, מוצרים, קופה, פחת, הוצאות, ספקים ונקודות שחזור של ימי שישי) מסונכרנים אוטומטית לטבלת <code className="font-bold">public.stall_sync</code>.
               </p>
-              {cloudSyncStatus.lastError && (
-                <p className="text-[11px] text-amber-800 font-bold mt-1">
-                  הערת ענן: {cloudSyncStatus.lastError}
-                </p>
-              )}
+              <div className="text-[11px] text-slate-500 mt-1 font-mono" dir="ltr">
+                URL: {cloudCfg.supabaseUrl || DEFAULT_SUPABASE_URL}
+              </div>
             </div>
           </div>
 
@@ -471,6 +473,16 @@ export function SettingsPage() {
             </button>
           </div>
         </div>
+
+        {/* תצוגת הודעת שגיאה מדויקת מ-Supabase מתחת לכפתור הסנכרון במידה והתרחשה שגיאה */}
+        {cloudSyncStatus.lastError && (
+          <div className="p-3 rounded-2xl bg-red-50 border border-red-300 text-red-900 text-xs space-y-1">
+            <div className="font-extrabold">שגיאת חיבור מ-Supabase:</div>
+            <div className="font-mono text-[11px] break-all" dir="ltr">
+              {cloudSyncStatus.lastError}
+            </div>
+          </div>
+        )}
 
         {showCloudForm && (
           <form

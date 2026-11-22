@@ -186,7 +186,9 @@ export function invalidateLocalDbCache(): void {
   memoryDbFallback = null;
 }
 
-registerDbCacheInvalidator(invalidateLocalDbCache);
+registerDbCacheInvalidator(invalidateLocalDbCache, () => {
+  loadDb();
+});
 
 function safeGetItem(key: string): string | null {
   try {
