@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
-import { getNextFridayISO } from '../lib/format';
+import { getActiveWeekRange, type ActiveWeekRange } from '../lib/format';
 import {
   subscribeCloudDataUpdated,
   syncWithCloudOnStartupOrPoll,
@@ -8,6 +8,7 @@ import {
 interface FridayContextValue {
   fridayDate: string;
   setFridayDate: (date: string) => void;
+  activeWeekRange: ActiveWeekRange;
   refreshTick: number;
   triggerRefresh: () => void;
 }
@@ -15,7 +16,10 @@ interface FridayContextValue {
 const FridayContext = createContext<FridayContextValue | null>(null);
 
 export function FridayProvider({ children }: { children: React.ReactNode }) {
-  const [fridayDate, setFridayDate] = useState(getNextFridayISO());
+  const [activeWeekRange, setActiveWeekRange] = useState<ActiveWeekRange>(() =>
+    getActiveWeekRange()
+  );
+  const [fridayDate, setFridayDate] = useState(() => getActiveWeekRange().fridayDate);
   const [refreshTick, setRefreshTick] = useState(0);
   const startupSyncedRef = useRef(false);
 
@@ -34,13 +38,28 @@ export function FridayProvider({ children }: { children: React.ReactNode }) {
       setRefreshTick((t) => t + 1);
     });
 
+    // בדיקה תקופתית למעבר אוטומטי לשבוע חדש במוצאי שבת 21:00
+    const timer = window.setInterval(() => {
+      const nextRange = getActiveWeekRange();
+      setActiveWeekRange((prev) => {
+        if (prev.fridayDate !== nextRange.fridayDate) {
+          setFridayDate((cur) => (cur === prev.fridayDate ? nextRange.fridayDate : cur));
+          return nextRange;
+        }
+        return prev;
+      });
+    }, 60000);
+
     return () => {
       unsubscribe();
+      window.clearInterval(timer);
     };
   }, []);
 
   return (
-    <FridayContext.Provider value={{ fridayDate, setFridayDate, refreshTick, triggerRefresh }}>
+    <FridayContext.Provider
+      value={{ fridayDate, setFridayDate, activeWeekRange, refreshTick, triggerRefresh }}
+    >
       {children}
     </FridayContext.Provider>
   );

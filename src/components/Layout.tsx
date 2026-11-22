@@ -20,6 +20,7 @@ import {
   UserPlus,
   Image as ImageIcon,
   Coins,
+  History,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useFriday } from '../context/FridayContext';
@@ -40,6 +41,7 @@ export type AdminTab =
   | 'customer-orders'
   | 'supplier-orders'
   | 'charity-orders'
+  | 'archive'
   | 'users'
   | 'products'
   | 'flyer'
@@ -59,6 +61,7 @@ const ADMIN_NAV: NavItem[] = [
   { id: 'customer-orders', label: 'הזמנות לקוחות', icon: ShoppingBag },
   { id: 'supplier-orders', label: 'הזמנות ספקים', icon: Store },
   { id: 'charity-orders', label: 'הזמנות מסובסדות', icon: HeartHandshake },
+  { id: 'archive', label: '📜 הזמנות קודמות', icon: History },
   { id: 'users', label: 'לקוחות וספקים', icon: Users },
   { id: 'products', label: 'מחירון מוצרים', icon: Tag },
   { id: 'flyer', label: 'פלייר מחירון', icon: ImageIcon },
@@ -73,6 +76,7 @@ const TAB_TITLES: Record<AdminTab, string> = {
   'customer-orders': 'הזמנות לקוחות',
   'supplier-orders': 'הזמנות ספקים',
   'charity-orders': 'הזמנות מסובסדות',
+  archive: 'הזמנות קודמות',
   users: 'לקוחות וספקים',
   products: 'מחירון מוצרים',
   flyer: 'פלייר מחירון',
@@ -90,7 +94,7 @@ interface LayoutProps {
 
 export function Layout({ activeTab, onSelectTab, children }: LayoutProps) {
   const { user, logout, updateUserName } = useAuth();
-  const { fridayDate, setFridayDate } = useFriday();
+  const { fridayDate, setFridayDate, activeWeekRange } = useFriday();
   const { openCreateContact } = useContactDrawer();
   const [moreOpen, setMoreOpen] = useState(false);
   const [quickOpen, setQuickOpen] = useState(false);
@@ -285,6 +289,41 @@ export function Layout({ activeTab, onSelectTab, children }: LayoutProps) {
 
       {/* תוכן ראשי */}
       <div className="flex-1 flex flex-col md:pr-64 min-w-0 max-w-full">
+        {/* סרגל עליון לדסקטופ: חיווי השבוע הפעיל + כפתור גישה מהיר להזמנות קודמות */}
+        {isAdmin && (
+          <div className="hidden md:flex items-center justify-between gap-3 px-6 lg:px-8 py-2.5 bg-white/80 backdrop-blur-sm border-b border-[#E8D5BE]/80">
+            <div className="flex items-center gap-2 text-xs">
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-50 border border-amber-200 text-[#8A330B] font-extrabold">
+                <Calendar className="w-3.5 h-3.5 text-[#C85A17]" />
+                <span>שבוע פעיל: {formatShortFriday(activeWeekRange.fridayDate)} (מוצ״ש 21:00 – שישי 16:00)</span>
+              </span>
+              {fridayDate !== activeWeekRange.fridayDate && (
+                <button
+                  type="button"
+                  onClick={() => setFridayDate(activeWeekRange.fridayDate)}
+                  className="px-2.5 py-1 rounded-full bg-[#C85A17] text-white font-bold text-[11px] hover:bg-[#A9440F]"
+                >
+                  חזור לשבוע הפעיל
+                </button>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => onSelectTab(activeTab === 'archive' ? 'customer-orders' : 'archive')}
+                className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-extrabold border transition-colors ${
+                  activeTab === 'archive'
+                    ? 'bg-[#2B1B12] text-amber-50 border-[#2B1B12] shadow-sm'
+                    : 'bg-[#FAF6F0] hover:bg-[#FFF7ED] text-[#8A330B] border-[#E8D5BE]'
+                }`}
+              >
+                <History className="w-3.5 h-3.5" />
+                <span>{activeTab === 'archive' ? 'חזרה להזמנות הפעילות' : '📜 הזמנות קודמות'}</span>
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* כותרת עליונה דביקה למובייל (< 768px) */}
         <header className="md:hidden sticky top-0 z-30 bg-[#1E242B] text-white px-3 pt-[max(0.85rem,env(safe-area-inset-top))] pb-2.5 shadow-md border-b border-white/10">
           <div className="flex items-center justify-between gap-2 min-h-[44px]">
@@ -331,6 +370,21 @@ export function Layout({ activeTab, onSelectTab, children }: LayoutProps) {
             </div>
 
             <div className="flex items-center gap-1.5 shrink-0">
+              {isAdmin && (
+                <button
+                  type="button"
+                  onClick={() => onSelectTab(activeTab === 'archive' ? 'customer-orders' : 'archive')}
+                  className={`px-2 py-1.5 rounded-xl border text-[11px] font-extrabold flex items-center gap-1 shrink-0 transition-colors ${
+                    activeTab === 'archive'
+                      ? 'bg-[#C85A17] border-[#C85A17] text-white'
+                      : 'bg-white/10 hover:bg-white/20 border-white/15 text-amber-200'
+                  }`}
+                  title="הזמנות קודמות (ארכיון)"
+                >
+                  <History className="w-3.5 h-3.5 shrink-0" />
+                  <span className="hidden sm:inline">הזמנות קודמות</span>
+                </button>
+              )}
               {isAdmin && (
                 <button
                   type="button"

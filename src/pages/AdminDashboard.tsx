@@ -12,7 +12,7 @@ import {
   Check,
 } from 'lucide-react';
 import { apiFetch } from '../lib/api';
-import { formatFridayLabel, formatILS } from '../lib/format';
+import { formatFridayLabel, formatILS, isOrderInActiveWeek } from '../lib/format';
 import {
   buildDigitalMenuUrl,
   buildWhatsAppShareUrl,
@@ -28,7 +28,7 @@ interface AdminDashboardProps {
 }
 
 export function AdminDashboard({ onNavigate }: AdminDashboardProps) {
-  const { fridayDate, setFridayDate, refreshTick } = useFriday();
+  const { fridayDate, setFridayDate, activeWeekRange, refreshTick } = useFriday();
   const [orders, setOrders] = useState<Order[]>([]);
   const [awaitingOrders, setAwaitingOrders] = useState<Order[]>([]);
   const [users, setUsers] = useState<User[]>([]);
@@ -46,13 +46,21 @@ export function AdminDashboard({ onNavigate }: AdminDashboardProps) {
       apiFetch<{ products: AdminProduct[] }>('/api/products'),
       apiFetch<{ settings: BusinessSettings }>('/api/settings'),
     ]);
-    setOrders(ordRes.orders.filter((o) => o.status !== 'awaiting_approval'));
-    setAwaitingOrders(awaitRes.orders);
+    setOrders(
+      ordRes.orders.filter(
+        (o) => o.status !== 'awaiting_approval' && o.status !== 'cancelled'
+      )
+    );
+    setAwaitingOrders(
+      awaitRes.orders.filter(
+        (o) => o.friday_date === fridayDate || isOrderInActiveWeek(o, activeWeekRange)
+      )
+    );
     setUsers(usrRes.users);
     setInventory(invRes.items);
     setProducts(prodRes.products);
     setBizSettings(setRes.settings);
-  }, [fridayDate]);
+  }, [fridayDate, activeWeekRange]);
 
   const menuShareUrl = useMemo(() => {
     const text = formatDigitalMenuWhatsApp(products, bizSettings);

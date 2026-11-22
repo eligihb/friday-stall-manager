@@ -179,3 +179,58 @@ export const WASTE_TYPE_LABELS: Record<WasteType, string> = {
   full: 'פחת מלא',
   partial: 'פחת יחסי',
 };
+
+export interface ActiveWeekRange {
+  start: Date;
+  end: Date;
+  startIso: string;
+  fridayDate: string;
+}
+
+function toLocalISODate(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+/**
+ * מחזור שבועי פעיל: מוצאי שבת בשעה 21:00 עד יום שישי שלאחריו בשעה 16:00.
+ * בין שישי 16:00 לשבת 21:00 המערכת ממשיכה להציג את המחזור של יום שישי שזה עתה הסתיים
+ * לצורך סגירת חשבונות וסיכום קופה, ובשבת 21:00 עוברת אוטומטית לשבוע החדש.
+ */
+export function getActiveWeekRange(now = new Date()): ActiveWeekRange {
+  const day = now.getDay(); // 0=ראשון ... 5=שישי, 6=שבת
+  const hour = now.getHours();
+
+  let daysSinceSaturday: number;
+  if (day === 6) {
+    daysSinceSaturday = hour >= 21 ? 0 : 7;
+  } else {
+    daysSinceSaturday = day + 1;
+  }
+
+  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - daysSinceSaturday, 21, 0, 0, 0);
+  const end = new Date(start.getFullYear(), start.getMonth(), start.getDate() + 6, 16, 0, 0, 0);
+
+  return {
+    start,
+    end,
+    startIso: toLocalISODate(start),
+    fridayDate: toLocalISODate(end),
+  };
+}
+
+export function isOrderInActiveWeek(
+  order: { friday_date: string; created_at?: string },
+  range = getActiveWeekRange()
+): boolean {
+  if (order.friday_date === range.fridayDate) return true;
+  if (order.created_at) {
+    const createdDay = order.created_at.slice(0, 10);
+    if (createdDay >= range.startIso && createdDay <= range.fridayDate) {
+      return order.friday_date >= range.startIso && order.friday_date <= range.fridayDate;
+    }
+  }
+  return false;
+}
