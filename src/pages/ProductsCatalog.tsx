@@ -520,7 +520,7 @@ export function ProductsCatalog() {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h2 className="font-serif text-3xl font-bold text-slateink-800">מחירון מוצרים חכם והיסטוריית מחירים</h2>
+          <h2 className="font-serif text-3xl font-bold text-slateink-800">מחירון מוצרים והיסטוריית מחירים</h2>
           <p className="text-sm text-slate-600 mt-1">
             עריכת 4 מדרגות מחיר, תמונות מוצר, התראות חריגה (מתחת לעלות או שינוי מעל 30%), ותאריך תחולה לשימור הזמנות עבר.
           </p>

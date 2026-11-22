@@ -246,7 +246,7 @@ export function PublicStorefront({ onOpenStaffLogin }: PublicStorefrontProps) {
       <header className="sticky top-0 z-30 bg-[#1E242B] text-white border-b border-white/10 shadow-md">
         <div className="max-w-3xl mx-auto px-4 py-3 flex items-center justify-between gap-2">
           <div className="flex items-center gap-2.5 min-w-0">
-            <div className="w-9 h-9 rounded-2xl bg-gradient-to-br from-[#C85A17] to-[#D97706] flex items-center justify-center shadow-md shrink-0">
+            <div className="w-9 h-9 rounded-xl bg-[#C85A17] flex items-center justify-center shrink-0">
               <Flame className="w-5 h-5 text-white" />
             </div>
             <div className="min-w-0">
@@ -259,7 +259,7 @@ export function PublicStorefront({ onOpenStaffLogin }: PublicStorefrontProps) {
                 </span>
               </div>
               <p className="text-[11px] text-amber-200/85 mt-0.5 truncate">
-                מאפים תימניים טריים ליום שישי — הזמנה ישירה ללא הרשמה
+                תפריט יום שישי · איסוף עצמי מהדוכן
               </p>
             </div>
           </div>
@@ -459,7 +459,7 @@ export function PublicStorefront({ onOpenStaffLogin }: PublicStorefrontProps) {
               setError('');
               setCheckoutOpen(true);
             }}
-            className="min-h-[56px] px-6 rounded-2xl bg-gradient-to-l from-[#C85A17] to-[#A9440F] hover:brightness-105 disabled:opacity-45 text-white font-extrabold text-sm sm:text-base shadow-md flex items-center gap-2 active:scale-[0.98] transition-all"
+            className="min-h-[54px] px-6 rounded-2xl bg-[#C85A17] hover:bg-[#A9440F] disabled:opacity-45 text-white font-extrabold text-sm sm:text-base flex items-center gap-2 active:scale-[0.98] transition-colors"
           >
             <span>המשך לאישור</span>
             <Send className="w-4 h-4" />

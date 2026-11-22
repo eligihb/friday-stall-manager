@@ -745,7 +745,7 @@ export function SettingsPage() {
                   className="w-56 px-3.5 py-2 rounded-xl border border-[#E8D5BE] bg-white focus:border-[#C85A17] focus:outline-none text-left tabular-nums font-bold text-sm"
                 />
                 <p className="text-[11px] text-slate-500 mt-1">
-                  מספר זה מוצג ללקוח עם כפתור העתקה בלחיצה אחת במסך אישור ההזמנה ובאזור האישי.
+                  מספר זה מוצג ללקוח עם כפתור העתקה במסך אישור ההזמנה ובאזור האישי.
                 </p>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

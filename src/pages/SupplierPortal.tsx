@@ -482,7 +482,7 @@ export function SupplierPortal({ supplierId }: SupplierPortalProps) {
         <header className="sticky top-0 z-40 bg-[#1E242B] text-white px-4 py-3.5 shadow-md">
           <div className="max-w-3xl mx-auto flex items-center justify-between gap-2">
             <div className="flex items-center gap-2.5">
-              <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-[#C85A17] to-[#D97706] flex items-center justify-center">
+              <div className="w-9 h-9 rounded-xl bg-[#C85A17] flex items-center justify-center">
                 <Flame className="w-5 h-5 text-white" />
               </div>
               <div>

@@ -249,16 +249,16 @@ export function CustomerLivePortal({ customerId }: CustomerLivePortalProps) {
 
   return (
     <div className="min-h-screen bg-[#FAF6F0] text-[#1E242B] pb-16">
-      {/* סרגל עליון צף וקומפקטי (Sticky Header) */}
-      <header className="sticky top-0 z-40 bg-[#1E242B]/95 backdrop-blur-md text-white px-4 py-3 shadow-md border-b border-white/10">
+      {/* סרגל עליון צף וקומפקטי */}
+      <header className="sticky top-0 z-40 bg-[#1E242B] text-white px-4 py-3 border-b border-white/10">
         <div className="max-w-2xl mx-auto flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 min-w-0">
-            <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-[#C85A17] to-[#D97706] flex items-center justify-center shrink-0">
+            <div className="w-8 h-8 rounded-xl bg-[#C85A17] flex items-center justify-center shrink-0">
               <Flame className="w-4 h-4 text-white" />
             </div>
             <div className="min-w-0">
               <div className="font-extrabold text-xs sm:text-sm text-amber-100 truncate">
-                היי {customer ? customer.name : `לקוח #${customerId}`} 👋
+                שלום {customer ? customer.name : `לקוח #${customerId}`}
               </div>
               <p className="text-[11px] text-slate-300 truncate">
                 {settings?.business_name || APP_BRAND_NAME}
@@ -268,10 +268,10 @@ export function CustomerLivePortal({ customerId }: CustomerLivePortalProps) {
           <div className="flex items-center gap-1.5 shrink-0">
             <a
               href="#/menu"
-              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-[#C85A17] hover:bg-[#A9440F] text-white text-xs font-extrabold shadow-sm transition-colors"
+              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-[#C85A17] hover:bg-[#A9440F] text-white text-xs font-extrabold transition-colors"
             >
               <Plus className="w-3.5 h-3.5" />
-              <span>🍽️ לתפריט והזמנה</span>
+              <span>לתפריט והזמנה</span>
             </a>
           </div>
         </div>
@@ -347,7 +347,7 @@ export function CustomerLivePortal({ customerId }: CustomerLivePortalProps) {
             }`}
           >
             <History className="w-4 h-4 shrink-0" />
-            <span>📋 היסטוריית הזמנות ותשלומים</span>
+            <span>היסטוריית הזמנות ותשלומים</span>
           </button>
         </div>
 
@@ -514,7 +514,7 @@ export function CustomerLivePortal({ customerId }: CustomerLivePortalProps) {
                       <span className="flex items-center gap-1.5">
                         <Tag className="w-4 h-4 text-emerald-700 shrink-0" />
                         <span>
-                          🎉 חסכת {savings.percent}% ({formatILS(savings.savedAmount)} הנחה)
+                          חיסכון של {savings.percent}% ({formatILS(savings.savedAmount)})
                         </span>
                       </span>
                       <span className="text-[11px] text-slate-400 line-through">
@@ -738,7 +738,7 @@ export function CustomerLivePortal({ customerId }: CustomerLivePortalProps) {
                         )}
                         {savings.savedAmount > 0 && (
                           <div className="text-[11px] font-extrabold text-emerald-700">
-                            🎉 חסכת {savings.percent}% ({formatILS(savings.savedAmount)} הנחה)
+                            חיסכון {savings.percent}% ({formatILS(savings.savedAmount)})
                           </div>
                         )}
                         <div className="flex items-center justify-between pt-1.5 border-t border-[#E8D5BE]/60 text-[11px] font-bold tabular-nums">

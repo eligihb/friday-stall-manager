@@ -84,14 +84,13 @@ export function CustomerPortal() {
 
   return (
     <div className="space-y-6">
-      <div className="bg-gradient-to-br from-[#6D280B] via-[#8A330B] to-[#C85A17] text-white rounded-3xl p-6 sm:p-8 shadow-card">
-        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/15 text-amber-100 text-xs font-bold mb-3">
-          <Sparkles className="w-3.5 h-3.5" />
-          <span>אזור לקוחות — מחירון הזמנה מוקדמת לשישי</span>
+      <div className="bg-[#2B1B12] text-white rounded-3xl p-6 sm:p-7">
+        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/10 text-amber-100 text-xs font-bold mb-3">
+          <span>אזור לקוחות — תפריט יום שישי</span>
         </div>
-        <h2 className="font-serif text-3xl font-bold">שלום {user.name}!</h2>
-        <p className="text-sm text-amber-100/90 mt-1.5 max-w-xl">
-          המאפים הטריים שלנו מגיעים ישירות מהמאפייה לפנות בוקר ביום שישי. בהזמנה מוקדמת דרך האתר נהנים ממחיר מוזל ושמירה מראש בדוכן.
+        <h2 className="font-serif text-3xl font-bold">שלום {user.name}</h2>
+        <p className="text-sm text-stone-300 mt-1.5 max-w-xl">
+          מחירי מכירה מוקדמת תקפים להזמנות עד יום חמישי בשעה 24:00 · איסוף עצמי מהדוכן.
         </p>
       </div>
 

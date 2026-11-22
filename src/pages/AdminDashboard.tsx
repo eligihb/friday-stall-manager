@@ -194,7 +194,7 @@ export function AdminDashboard({ onNavigate }: AdminDashboardProps) {
 
       {/* הזמנות ממתינות לאישור */}
       {awaitingOrders.length > 0 && (
-        <div className="bg-gradient-to-l from-amber-50 via-[#FFF7ED] to-red-50/70 rounded-3xl border-2 border-[#C85A17]/60 shadow-card p-4 sm:p-5 space-y-3.5">
+        <div className="bg-[#FFF8F0] rounded-2xl border border-[#C85A17]/45 p-4 sm:p-5 space-y-3.5">
           <div className="flex items-center gap-2.5">
             <div className="w-10 h-10 rounded-2xl bg-[#C85A17] text-white flex items-center justify-center shadow-sm shrink-0">
               <ShieldAlert className="w-5 h-5" />

@@ -114,22 +114,22 @@ export function QuickCustomerPayBox({
           onClick={() => setChoice('prepay')}
           className={`py-2 px-2 rounded-lg text-xs font-extrabold transition-all ${
             !isCashMode
-              ? 'bg-[#2B1B12] text-amber-50 shadow-sm'
+              ? 'bg-[#2B1B12] text-amber-50'
               : 'text-slate-600 hover:bg-[#FAF6F0]'
           }`}
         >
-          💳 תשלום מראש
+          תשלום מראש
         </button>
         <button
           type="button"
           onClick={() => setChoice('cash_pickup')}
           className={`py-2 px-2 rounded-lg text-xs font-extrabold transition-all ${
             isCashMode
-              ? 'bg-emerald-700 text-white shadow-sm'
+              ? 'bg-emerald-700 text-white'
               : 'text-slate-600 hover:bg-[#FAF6F0]'
           }`}
         >
-          💵 תשלום באיסוף (מזומן)
+          תשלום באיסוף (מזומן)
         </button>
       </div>
 
@@ -175,12 +175,12 @@ export function QuickCustomerPayBox({
           <button
             type="button"
             onClick={() => handleOpenApp('bit', bitHref)}
-            className={`py-2.5 px-3 rounded-xl bg-gradient-to-br from-[#008C9E] to-[#00B4D8] hover:brightness-105 active:scale-[0.98] text-white shadow-sm flex flex-col items-center justify-center gap-1 transition-all ${
-              activePrepayMethod === 'bit' ? 'ring-2 ring-offset-1 ring-emerald-500' : ''
+            className={`py-2.5 px-3 rounded-xl bg-[#0099A8] hover:bg-[#00828F] active:scale-[0.98] text-white flex flex-col items-center justify-center gap-1 transition-colors ${
+              activePrepayMethod === 'bit' ? 'ring-2 ring-offset-1 ring-emerald-600' : ''
             }`}
           >
             <span
-              className="w-8 h-8 rounded-lg bg-white/20 border border-white/30 flex items-center justify-center font-black text-sm tracking-tight"
+              className="w-8 h-8 rounded-lg bg-white/15 flex items-center justify-center font-black text-sm tracking-tight"
               dir="ltr"
             >
               bit
@@ -193,12 +193,12 @@ export function QuickCustomerPayBox({
           <button
             type="button"
             onClick={() => handleOpenApp('paybox', payboxHref)}
-            className={`py-2.5 px-3 rounded-xl bg-gradient-to-br from-[#4338CA] to-[#6366F1] hover:brightness-105 active:scale-[0.98] text-white shadow-sm flex flex-col items-center justify-center gap-1 transition-all ${
-              activePrepayMethod === 'paybox' ? 'ring-2 ring-offset-1 ring-emerald-500' : ''
+            className={`py-2.5 px-3 rounded-xl bg-[#4338CA] hover:bg-[#3730A3] active:scale-[0.98] text-white flex flex-col items-center justify-center gap-1 transition-colors ${
+              activePrepayMethod === 'paybox' ? 'ring-2 ring-offset-1 ring-emerald-600' : ''
             }`}
           >
             <span
-              className="w-8 h-8 rounded-lg bg-white/20 border border-white/30 flex items-center justify-center font-black text-xs tracking-tight"
+              className="w-8 h-8 rounded-lg bg-white/15 flex items-center justify-center font-black text-xs tracking-tight"
               dir="ltr"
             >
               PB
@@ -218,10 +218,10 @@ export function QuickCustomerPayBox({
 
         {/* 3. שורת הסבר קצרה ומאוחדת */}
         <p className="text-[11px] text-slate-600 leading-snug text-center">
-          💡 המספר מועתק אוטומטית בלחיצה — באפליקציה בחרו &quot;העברה לפי מספר נייד&quot; והדביקו.
+          המספר מועתק אוטומטית בלחיצה — באפליקציה בחרו &quot;העברה לפי נייד&quot; והדביקו.
         </p>
 
-        {/* 4. אפשרות העברה בנקאית נקייה (ללא "במקרים חריגים") */}
+        {/* אפשרות העברה בנקאית */}
         <button
           type="button"
           onClick={handleToggleBankTransfer}
@@ -233,7 +233,7 @@ export function QuickCustomerPayBox({
         >
           <span className="flex items-center gap-1.5">
             <Building2 className="w-3.5 h-3.5 text-slate-600 shrink-0" />
-            <span>🏦 תשלום בהעברה בנקאית</span>
+            <span>העברה בנקאית</span>
           </span>
           <span
             className={`w-4 h-4 rounded border flex items-center justify-center text-[10px] font-extrabold ${

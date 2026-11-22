@@ -5,11 +5,11 @@ export type CustomerPriceMode = 'auto' | 'preorder' | 'stall';
 export const DEFAULT_ADMIN_NAME = 'אליאב מנהל';
 export const DEFAULT_ADMIN_WHATSAPP = '0542452100';
 
-export const DEFAULT_MENU_SHARE_TEMPLATE = `🫓 *{שם_עסק}*
-🔥 מאפים תימניים טריים ולוהטים לשבת!
-✨ מחירי מכירה מוקדמת תקפים להזמנות עד יום חמישי בשעה 24:00.
+export const DEFAULT_MENU_SHARE_TEMPLATE = `*{שם_עסק}*
+תפריט יום שישי — מאפים תימניים מהטאבון.
+מחירי מכירה מוקדמת תקפים להזמנות עד יום חמישי בשעה 24:00.
 
-🛒 לתפריט והזמנה מהירה אונליין:
+לתפריט והזמנה:
 {קישור}`;
 
 export const DEFAULT_CUSTOMER_ORDER_TEMPLATE = `🫓 *{שם_עסק} — הזמנה חדשה לאישור (#{מספר})*

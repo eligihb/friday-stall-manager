@@ -1012,7 +1012,7 @@ export function DigitalMenuPage() {
             {savedProfile ? (
               <>
                 <span className="font-extrabold text-xs sm:text-sm text-amber-100 truncate">
-                  היי {savedProfile.name} 👋
+                  שלום {savedProfile.name}
                 </span>
                 <button
                   type="button"
@@ -1030,14 +1030,14 @@ export function DigitalMenuPage() {
             )}
           </div>
 
-          {/* צד שמאל: כפתור ההזמנות והיתרה שלי + כפתור סל קניות צף */}
+          {/* צד שמאל: כפתור ההזמנות שלי + כפתור סל קניות צף */}
           <div className="flex items-center gap-1.5 shrink-0">
             {savedProfile?.customerId && (
               <a
                 href={`#/c/${savedProfile.customerId}`}
                 className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-amber-400/20 hover:bg-amber-400/30 border border-amber-300/40 text-amber-100 text-[11px] font-extrabold transition-colors"
               >
-                <span>📋 ההזמנות והיתרה שלי</span>
+                <span>ההזמנות שלי</span>
               </a>
             )}
             <button
@@ -1045,10 +1045,10 @@ export function DigitalMenuPage() {
               onClick={() => {
                 if (cartSummary.totalCount > 0) setCheckoutOpen(true);
               }}
-              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-[#C85A17] hover:bg-[#A9440F] text-white text-[11px] font-extrabold tabular-nums shadow-sm transition-colors"
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-[#C85A17] hover:bg-[#A9440F] text-white text-[11px] font-extrabold tabular-nums transition-colors"
             >
               <ShoppingCart className="w-3.5 h-3.5" />
-              <span>🛒 {formatILS(cartSummary.finalTotal)}</span>
+              <span>{formatILS(cartSummary.finalTotal)}</span>
               {cartSummary.totalCount > 0 && (
                 <span className="px-1.5 py-0.2 rounded-full bg-white text-[#C85A17] text-[10px] font-black">
                   {cartSummary.totalCount}
@@ -1059,20 +1059,19 @@ export function DigitalMenuPage() {
         </div>
       </div>
 
-      {/* כותרת ממותגת חמה */}
-      <header className="px-4 pt-3 pb-3.5 bg-gradient-to-b from-[#2B1B12] to-[#4A2816] text-white shadow-sm">
+      {/* כותרת נקייה */}
+      <header className="px-4 pt-3.5 pb-3.5 bg-[#2B1B12] text-white">
         <div className="max-w-lg mx-auto space-y-1.5 text-center">
           <div className="flex items-center justify-center gap-2">
-            <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-[#E59838] to-[#C85A17] flex items-center justify-center shadow">
+            <div className="w-8 h-8 rounded-xl bg-[#C85A17] flex items-center justify-center">
               <Flame className="w-4 h-4 text-white" />
             </div>
             <h1 className="font-serif text-xl font-extrabold text-amber-50">
-              המטבח התימני – תפריט שישי
+              תפריט יום שישי
             </h1>
           </div>
 
-          <div className="inline-flex items-center justify-center gap-1.5 px-3 py-1 rounded-full bg-amber-400/20 border border-amber-300/40 text-xs font-bold text-amber-100">
-            <Sparkles className="w-3.5 h-3.5 text-amber-300 shrink-0" />
+          <div className="inline-flex items-center justify-center gap-1.5 px-3 py-1 rounded-full bg-white/10 border border-white/15 text-xs font-semibold text-amber-100">
             <span>
               {preorderOpen
                 ? `מחירי מכירה מוקדמת תקפים להזמנות עד יום חמישי בשעה 24:00 · ${formatFridayLabel(fridayDate)}`
@@ -1124,10 +1123,10 @@ export function DigitalMenuPage() {
                 ))}
             </div>
             {activeFridayOrder && (
-              <div className="px-2.5 py-1.5 rounded-xl bg-amber-50 border border-amber-300 text-amber-950 text-[11px] font-bold flex items-center justify-between gap-2 flex-wrap">
+              <div className="px-2.5 py-1.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-950 text-[11px] font-bold flex items-center justify-between gap-2 flex-wrap">
                 <span>
-                  💡 יש לך כבר הזמנה פעילה לשישי הקרוב (#{activeFridayOrder.id} —{' '}
-                  {formatILS(activeFridayOrder.total_amount)}). פריטים שתוסיף יצורפו להזמנה הקיימת!
+                  יש לך הזמנה פעילה לשישי (#{activeFridayOrder.id} —{' '}
+                  {formatILS(activeFridayOrder.total_amount)}). פריטים שתוסיף יצורפו אליה.
                 </span>
                 {preorderOpen && (
                   <button
@@ -1135,7 +1134,7 @@ export function DigitalMenuPage() {
                     onClick={() => loadOrderIntoCartForEdit(activeFridayOrder)}
                     className="px-2.5 py-1 rounded-lg bg-white hover:bg-[#FFF7ED] border border-amber-300 text-[#8A330B] text-[11px] font-extrabold shrink-0"
                   >
-                    ✏️ עדכן הזמנה
+                    עדכן הזמנה
                   </button>
                 )}
               </div>
@@ -1183,9 +1182,9 @@ export function DigitalMenuPage() {
                 )}
               </p>
               {(submitted.savedAmount ?? 0) > 0 && (
-                <div className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-emerald-100 border border-emerald-300 text-emerald-900 text-xs font-extrabold tabular-nums">
+                <div className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs font-extrabold tabular-nums">
                   <span>
-                    🎉 חסכת {submitted.savingsPct ?? 0}% ({formatILS(submitted.savedAmount!)} הנחה)
+                    חיסכון של {submitted.savingsPct ?? 0}% ({formatILS(submitted.savedAmount!)})
                   </span>
                 </div>
               )}
@@ -1238,7 +1237,7 @@ export function DigitalMenuPage() {
                   href={`#/c/${savedProfile.customerId}`}
                   className="py-2.5 px-3 rounded-xl bg-[#2A1F18] hover:bg-[#3d2e24] text-white font-extrabold text-xs flex items-center justify-center gap-1.5 text-center"
                 >
-                  <span>📋 ההזמנות והיתרה שלי</span>
+                  <span>ההזמנות שלי</span>
                 </a>
               ) : (
                 <a
@@ -1246,7 +1245,7 @@ export function DigitalMenuPage() {
                   onClick={() => setSubmitted(null)}
                   className="py-2.5 px-3 rounded-xl bg-[#2A1F18] hover:bg-[#3d2e24] text-white font-extrabold text-xs flex items-center justify-center gap-1.5 text-center"
                 >
-                  <span>🍽️ לתפריט הראשי</span>
+                  <span>לתפריט הראשי</span>
                 </a>
               )}
               <button
@@ -1508,11 +1507,11 @@ export function DigitalMenuPage() {
           <div className="tabular-nums">
             <div className="flex items-center gap-2">
               <span className="text-[11px] font-bold text-slate-500">
-                {cartSummary.totalCount > 0 ? `${cartSummary.totalCount} פריטים בסל` : 'לחץ על מוצר לבחירה'}
+                {cartSummary.totalCount > 0 ? `${cartSummary.totalCount} פריטים בסל` : 'סל ריק'}
               </span>
               {cartSummary.totalSavings > 0 && (
-                <span className="text-[11px] font-extrabold text-emerald-800 bg-emerald-100 border border-emerald-300 px-2 py-0.5 rounded-full tabular-nums">
-                  🎉 חסכת {cartSummary.savingsPct}% ({formatILS(cartSummary.totalSavings)} הנחה)
+                <span className="text-[11px] font-extrabold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full tabular-nums">
+                  חיסכון {cartSummary.savingsPct}% ({formatILS(cartSummary.totalSavings)})
                 </span>
               )}
             </div>

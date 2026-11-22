@@ -61,7 +61,7 @@ const ADMIN_NAV: NavItem[] = [
   { id: 'customer-orders', label: 'הזמנות לקוחות', icon: ShoppingBag },
   { id: 'supplier-orders', label: 'הזמנות ספקים', icon: Store },
   { id: 'charity-orders', label: 'הזמנות מסובסדות', icon: HeartHandshake },
-  { id: 'archive', label: '📜 הזמנות קודמות', icon: History },
+  { id: 'archive', label: 'הזמנות קודמות', icon: History },
   { id: 'users', label: 'לקוחות וספקים', icon: Users },
   { id: 'products', label: 'מחירון מוצרים', icon: Tag },
   { id: 'flyer', label: 'פלייר מחירון', icon: ImageIcon },
@@ -169,7 +169,7 @@ export function Layout({ activeTab, onSelectTab, children }: LayoutProps) {
             className="flex items-center gap-3 cursor-pointer"
             onClick={() => onSelectTab('dashboard')}
           >
-            <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-[#C85A17] to-[#D97706] flex items-center justify-center shadow-md shrink-0">
+            <div className="w-10 h-10 rounded-xl bg-[#C85A17] flex items-center justify-center shrink-0">
               <Flame className="w-5 h-5 text-white" />
             </div>
             <div className="min-w-0">
@@ -191,10 +191,10 @@ export function Layout({ activeTab, onSelectTab, children }: LayoutProps) {
               <button
                 type="button"
                 onClick={() => setQuickOpen(true)}
-                className="w-full py-2.5 px-3.5 rounded-xl bg-gradient-to-l from-[#C85A17] to-[#D97706] hover:brightness-110 text-white font-bold text-xs shadow-md flex items-center justify-center gap-2 transition-all"
+                className="w-full py-2.5 px-3.5 rounded-xl bg-[#C85A17] hover:bg-[#A9440F] text-white font-bold text-xs flex items-center justify-center gap-2 transition-colors"
               >
                 <Plus className="w-4 h-4" />
-                <span>+ הוסף הזמנה</span>
+                <span>הוסף הזמנה</span>
               </button>
               <button
                 type="button"
@@ -318,7 +318,7 @@ export function Layout({ activeTab, onSelectTab, children }: LayoutProps) {
                 }`}
               >
                 <History className="w-3.5 h-3.5" />
-                <span>{activeTab === 'archive' ? 'חזרה להזמנות הפעילות' : '📜 הזמנות קודמות'}</span>
+                <span>{activeTab === 'archive' ? 'חזרה להזמנות הפעילות' : 'הזמנות קודמות'}</span>
               </button>
             </div>
           </div>
@@ -331,7 +331,7 @@ export function Layout({ activeTab, onSelectTab, children }: LayoutProps) {
               className="flex items-center gap-2 min-w-0 cursor-pointer"
               onClick={() => onSelectTab('dashboard')}
             >
-              <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-[#C85A17] to-[#D97706] flex items-center justify-center shrink-0">
+              <div className="w-8 h-8 rounded-xl bg-[#C85A17] flex items-center justify-center shrink-0">
                 <Flame className="w-4 h-4 text-white" />
               </div>
               <div className="min-w-0 py-0.5">
@@ -540,7 +540,7 @@ export function Layout({ activeTab, onSelectTab, children }: LayoutProps) {
                 <button
                   type="button"
                   onClick={() => setQuickOpen(true)}
-                  className="w-14 h-14 rounded-full bg-gradient-to-br from-[#C85A17] to-[#9A3412] text-white shadow-[0_8px_20px_rgba(200,90,23,0.45)] border-4 border-[#FAF6F0] flex items-center justify-center active:scale-95 transition-transform"
+                  className="w-14 h-14 rounded-full bg-[#C85A17] hover:bg-[#A9440F] text-white shadow-md border-4 border-[#FAF6F0] flex items-center justify-center active:scale-95 transition-transform"
                   aria-label="הזמנה חדשה"
                 >
                   <Plus className="w-7 h-7 stroke-[2.6]" />

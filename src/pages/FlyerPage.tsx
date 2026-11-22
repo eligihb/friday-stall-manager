@@ -95,7 +95,7 @@ export function FlyerPage() {
 
     ctx.fillStyle = '#FDE68A';
     ctx.font = '600 24px sans-serif';
-    ctx.fillText('מאפים תימניים טריים ולוהטים מהטאבון לשבת', width / 2, 235);
+    ctx.fillText('מאפים תימניים מהטאבון ליום שישי', width / 2, 235);
 
     let y = 370;
     const drawSection = (title: string, rows: Array<{ left: string; right: string; sub?: string }>) => {
@@ -210,17 +210,16 @@ export function FlyerPage() {
 
   return (
     <div className="max-w-md mx-auto space-y-4">
-      {/* כרטיס/פוסטר פלייר מחירון מעוצב שמוצג מיד על המסך — מותאם בול לצילום מסך באייפון */}
-      <div className="rounded-[28px] overflow-hidden shadow-xl border-2 border-[#D9B68C] bg-gradient-to-b from-[#FAF3E8] to-[#F3E3CE]">
-        {/* כותרת מאפייה חמה */}
-        <div className="px-5 py-5 text-center text-white bg-gradient-to-b from-[#2B1B12] to-[#4A2816] space-y-2">
-          <div className="w-11 h-11 mx-auto rounded-2xl bg-gradient-to-br from-[#E59838] to-[#C85A17] flex items-center justify-center shadow-md border border-amber-300/40">
-            <Flame className="w-6 h-6 text-white" />
+      {/* פלייר מחירון נקי */}
+      <div className="rounded-3xl overflow-hidden shadow-sm border border-[#D9B68C] bg-[#FAF3E8]">
+        {/* כותרת */}
+        <div className="px-5 py-5 text-center text-white bg-[#2B1B12] space-y-2">
+          <div className="w-10 h-10 mx-auto rounded-xl bg-[#C85A17] flex items-center justify-center">
+            <Flame className="w-5 h-5 text-white" />
           </div>
           <h2 className="font-serif text-2xl font-extrabold text-amber-50 leading-tight">{bizName}</h2>
-          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-400/20 border border-amber-300/40 text-[11px] font-bold text-amber-100">
-            <Sparkles className="w-3.5 h-3.5 text-amber-300 shrink-0" />
-            <span>המחירים הם בהזמנה מוקדמת · {formatFridayLabel(fridayDate)}</span>
+          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/10 border border-white/15 text-[11px] font-bold text-amber-100">
+            <span>מחירי מכירה מוקדמת · {formatFridayLabel(fridayDate)}</span>
           </div>
         </div>
 
