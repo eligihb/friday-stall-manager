@@ -125,6 +125,49 @@ export function isOrderPrepayPendingVerification(order: {
   );
 }
 
+/**
+ * Calculates promo/bundle savings in ILS and % for a given order compared to regular prices.
+ */
+export function computeOrderPromoSavings(order: {
+  total_amount?: number;
+  credit_discount?: number;
+  notes?: string | null;
+  items?: Array<{
+    product_name?: string;
+    quantity: number;
+    unit_price_snapshot: number;
+  }>;
+}): { savedAmount: number; percent: number; fullPrice: number } {
+  const discountedPrice = Number(order.total_amount) || 0;
+  if (discountedPrice <= 0 || !Array.isArray(order.items) || order.items.length === 0) {
+    return { savedAmount: 0, percent: 0, fullPrice: discountedPrice };
+  }
+
+  let fullPrice = 0;
+  for (const it of order.items) {
+    const name = String(it.product_name || '');
+    const qty = Math.max(0, Number(it.quantity) || 0);
+    const snap = Math.max(0, Number(it.unit_price_snapshot) || 0);
+    let regUnit = snap;
+    if (name.includes("ג'חנון") || name.includes('ג׳חנון')) {
+      regUnit = Math.max(snap, 9);
+    } else if (name.includes('סאלוף') || name.includes('לחוח')) {
+      regUnit = Math.max(snap, 5);
+    } else if (name.includes("ג'בטה") || name.includes('ג׳בטה') || name.includes('זלביה')) {
+      regUnit = Math.max(snap, snap >= 10 ? 12 : 5);
+    }
+    fullPrice += qty * regUnit;
+  }
+
+  fullPrice = Math.max(fullPrice, discountedPrice + (Number(order.credit_discount) || 0));
+  const savedAmount = Math.max(0, Math.round((fullPrice - discountedPrice) * 100) / 100);
+  if (savedAmount < 0.5 || fullPrice <= 0) {
+    return { savedAmount: 0, percent: 0, fullPrice };
+  }
+  const percent = Math.round(((fullPrice - discountedPrice) / fullPrice) * 100);
+  return { savedAmount, percent, fullPrice };
+}
+
 export const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
   cash: 'מזומן',
   paybox: 'פייבוקס',

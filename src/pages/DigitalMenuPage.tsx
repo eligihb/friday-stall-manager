@@ -85,6 +85,7 @@ interface CatalogCardItem {
   title: string;
   description: string;
   priceSummary: string;
+  promoBadgePct?: number;
   inStock: boolean;
   hasFlavors?: boolean;
   options: CatalogOption[];
@@ -175,6 +176,8 @@ export function DigitalMenuPage() {
     total: number;
     addedAmount?: number;
     merged?: boolean;
+    savedAmount?: number;
+    savingsPct?: number;
     paymentChoice: CustomerPaymentChoice;
     prepayMethod: PrepayMethod;
   } | null>(null);
@@ -293,6 +296,7 @@ export function DigitalMenuPage() {
         priceSummary: preorderOpen
           ? 'מארז 5 ב-20 ₪ (במקום 25 ₪) | יחידה 5 ₪'
           : 'מארז 5 ב-25 ₪ | יחידה 5 ₪',
+        promoBadgePct: preorderOpen ? Math.round(((25 - 20) / 25) * 100) : undefined,
         inStock: isProductInStock(saluf.id, stockMap),
         options: [
           {
@@ -327,6 +331,7 @@ export function DigitalMenuPage() {
         priceSummary: preorderOpen
           ? 'מארז 5 ב-20 ₪ (במקום 25 ₪) | יחידה 5 ₪'
           : 'מארז 5 ב-25 ₪ | יחידה 5 ₪',
+        promoBadgePct: preorderOpen ? Math.round(((25 - 20) / 25) * 100) : undefined,
         inStock: isProductInStock(lahoh.id, stockMap),
         options: [
           {
@@ -360,6 +365,7 @@ export function DigitalMenuPage() {
         priceSummary: preorderOpen
           ? 'מגש 5 ב-40 ₪ | יחידה 8 ₪ (במקום 9 ₪)'
           : 'מגש 5 ב-45 ₪ | יחידה 9 ₪',
+        promoBadgePct: preorderOpen ? Math.round(((45 - 40) / 45) * 100) : undefined,
         inStock: isProductInStock(jachnun.id, stockMap),
         options: [
           {
@@ -392,6 +398,7 @@ export function DigitalMenuPage() {
         title: "ג'בטה מאורכת בטעמים",
         description: 'טרייה ופריכה — ניתן לשלב בין טעמי שום, זעתר, שומשום ורגיל!',
         priceSummary: 'שלישייה 12 ₪ | מבצע: 2 שלישיות ב-20 ₪ | יחידה 5 ₪',
+        promoBadgePct: Math.round(((24 - 20) / 24) * 100),
         inStock: isProductInStock(ciabatta.id, stockMap),
         hasFlavors: true,
         options: [
@@ -425,6 +432,7 @@ export function DigitalMenuPage() {
         title: 'זלביה',
         description: 'מאפה מטוגן פריך וזהוב — נמכר במארז שלישייה',
         priceSummary: 'מארז שלישייה 12 ₪ | מבצע: 2 מארזים ב-20 ₪',
+        promoBadgePct: Math.round(((24 - 20) / 24) * 100),
         inStock: isProductInStock(zalabia.id, stockMap),
         options: [
           {
@@ -604,6 +612,10 @@ export function DigitalMenuPage() {
 
     const finalTotal = Math.max(0, Math.round((rawSubtotal - totalMixDiscount) * 100) / 100);
     const totalSavings = Math.max(0, Math.round((regularSubtotal - finalTotal) * 100) / 100);
+    const savingsPct =
+      regularSubtotal > finalTotal && regularSubtotal > 0
+        ? Math.round(((regularSubtotal - finalTotal) / regularSubtotal) * 100)
+        : 0;
     const totalCount = cartRows.reduce((s, r) => s + r.quantity, 0);
 
     let upsell = '';
@@ -616,7 +628,9 @@ export function DigitalMenuPage() {
     return {
       totalCount,
       finalTotal,
+      regularSubtotal,
       totalSavings,
+      savingsPct,
       totalMixDiscount,
       ciabattaTrios,
       zalabiaTrios,
@@ -793,12 +807,23 @@ export function DigitalMenuPage() {
         added_items: isMerging ? addedItemsForWa : undefined,
       });
       const waUrl = buildWhatsAppShareUrl(waText, targetPhone);
+      const totalSavedAmount = Math.round(
+        (cartSummary.totalSavings + mergeCalculation.crossOrderMixBonus) * 100
+      ) / 100;
+      const fullBeforeDiscount = addedAmount + totalSavedAmount;
+      const totalSavedPct =
+        fullBeforeDiscount > addedAmount && fullBeforeDiscount > 0
+          ? Math.round(((fullBeforeDiscount - addedAmount) / fullBeforeDiscount) * 100)
+          : 0;
+
       setSubmitted({
         orderId,
         waUrl,
         total: targetTotal,
         addedAmount,
         merged: Boolean(isMerging),
+        savedAmount: totalSavedAmount,
+        savingsPct: totalSavedPct,
         paymentChoice,
         prepayMethod,
       });
@@ -900,20 +925,45 @@ export function DigitalMenuPage() {
           </div>
         )}
 
-        {/* באנר התראה ללקוח שכבר קיימת עבורו הזמנה פעילה לאותו יום שישי */}
-        {!submitted && activeFridayOrder && (
-          <div className="p-3 rounded-2xl bg-amber-50 border border-amber-300 text-amber-950 text-xs font-bold flex items-center justify-between gap-2 shadow-soft">
-            <span>
-              💡 יש לך כבר הזמנה פעילה לשישי הקרוב (#{activeFridayOrder.id} —{' '}
-              {formatILS(activeFridayOrder.total_amount)}). פריטים שתוסיף יצורפו להזמנה הקיימת!
-            </span>
-            {savedProfile?.customerId && (
-              <a
-                href={`#/c/${savedProfile.customerId}`}
-                className="shrink-0 px-2.5 py-1 rounded-xl bg-[#2B1B12] text-amber-100 text-[11px] font-extrabold whitespace-nowrap"
-              >
-                📋 לצפייה
-              </a>
+        {/* סרגל הזמנות פעילות/חדשות לחיץ בראש התפריט + באנר איחוד הזמנה */}
+        {!submitted && customerHistory && customerHistory.orders.filter((o) => o.status !== 'cancelled').length > 0 && (
+          <div className="bg-white rounded-2xl border border-[#E8D5BE] p-2.5 shadow-soft space-y-2">
+            <div className="flex items-center justify-between px-1">
+              <span className="text-[11px] font-extrabold text-slate-500">
+                ההזמנות הפעילות שלך (לחץ למעבר להזמנה):
+              </span>
+              {savedProfile?.customerId && (
+                <a
+                  href={`#/c/${savedProfile.customerId}`}
+                  className="text-[11px] font-extrabold text-[#C85A17] hover:underline"
+                >
+                  לכל ההזמנות ←
+                </a>
+              )}
+            </div>
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 no-scrollbar">
+              {customerHistory.orders
+                .filter((o) => o.status !== 'cancelled')
+                .slice(0, 5)
+                .map((ord) => (
+                  <a
+                    key={ord.id}
+                    href={savedProfile?.customerId ? `#/c/${savedProfile.customerId}` : '#/menu'}
+                    className="px-2.5 py-1.5 rounded-xl bg-[#FAF6F0] hover:bg-[#FFF7ED] border border-[#E8D5BE] hover:border-[#C85A17] text-[11px] font-extrabold text-slate-800 whitespace-nowrap flex items-center gap-1.5 tabular-nums transition-colors"
+                  >
+                    <span>הזמנה #{ord.id}</span>
+                    <span>•</span>
+                    <span className="text-[#C85A17]">{formatILS(ord.total_amount)}</span>
+                    <span>•</span>
+                    <span>{ORDER_STATUS_LABELS[ord.status]}</span>
+                  </a>
+                ))}
+            </div>
+            {activeFridayOrder && (
+              <div className="px-2.5 py-1.5 rounded-xl bg-amber-50 border border-amber-300 text-amber-950 text-[11px] font-bold">
+                💡 יש לך כבר הזמנה פעילה לשישי הקרוב (#{activeFridayOrder.id} —{' '}
+                {formatILS(activeFridayOrder.total_amount)}). פריטים שתוסיף יצורפו להזמנה הקיימת!
+              </div>
             )}
           </div>
         )}
@@ -940,6 +990,13 @@ export function DigitalMenuPage() {
                   </span>
                 )}
               </p>
+              {(submitted.savedAmount ?? 0) > 0 && (
+                <div className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-emerald-100 border border-emerald-300 text-emerald-900 text-xs font-extrabold tabular-nums">
+                  <span>
+                    🎉 חסכת {submitted.savingsPct ?? 0}% ({formatILS(submitted.savedAmount!)} הנחה)
+                  </span>
+                </div>
+              )}
               {submitted.paymentChoice === 'prepay' && submitted.prepayMethod && (
                 <div className="mt-2 p-2.5 rounded-2xl bg-orange-50 border border-orange-300 space-y-1">
                   <div className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-orange-100 text-orange-950 text-xs font-extrabold">
@@ -1085,6 +1142,11 @@ export function DigitalMenuPage() {
                               >
                                 {card.inStock ? 'במלאי' : 'אזל'}
                               </span>
+                              {card.promoBadgePct && card.promoBadgePct > 0 && (
+                                <span className="px-2 py-0.5 rounded-full bg-amber-100 border border-amber-300 text-[#8A330B] text-[10px] font-extrabold tabular-nums">
+                                  חיסכון של {card.promoBadgePct}%
+                                </span>
+                              )}
                               {inCartCount > 0 && (
                                 <span className="px-2 py-0.5 rounded-full bg-[#C85A17] text-white text-[10px] font-extrabold tabular-nums">
                                   {inCartCount} בסל
@@ -1136,7 +1198,19 @@ export function DigitalMenuPage() {
                       }`}
                     >
                       <div className="min-w-0">
-                        <div className="font-extrabold text-sm text-slate-900">{opt.label}</div>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="font-extrabold text-sm text-slate-900">{opt.label}</span>
+                          {opt.regularPrice > opt.price && (
+                            <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-extrabold tabular-nums">
+                              חיסכון של {Math.round(((opt.regularPrice - opt.price) / opt.regularPrice) * 100)}%
+                            </span>
+                          )}
+                          {opt.mixGroup && (
+                            <span className="px-2 py-0.5 rounded-full bg-amber-100 text-[#8A330B] text-[10px] font-extrabold tabular-nums">
+                              במבצע זוג: חיסכון של {Math.round(((24 - 20) / 24) * 100)}%
+                            </span>
+                          )}
+                        </div>
                         {opt.sublabel && (
                           <div className="text-[11px] font-bold text-emerald-700 mt-0.5">{opt.sublabel}</div>
                         )}
@@ -1245,8 +1319,8 @@ export function DigitalMenuPage() {
                 {cartSummary.totalCount > 0 ? `${cartSummary.totalCount} פריטים בסל` : 'לחץ על מוצר לבחירה'}
               </span>
               {cartSummary.totalSavings > 0 && (
-                <span className="text-[11px] font-extrabold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">
-                  חסכת {formatILS(cartSummary.totalSavings)}!
+                <span className="text-[11px] font-extrabold text-emerald-800 bg-emerald-100 border border-emerald-300 px-2 py-0.5 rounded-full tabular-nums">
+                  🎉 חסכת {cartSummary.savingsPct}% ({formatILS(cartSummary.totalSavings)} הנחה)
                 </span>
               )}
             </div>
@@ -1387,12 +1461,25 @@ export function DigitalMenuPage() {
             </div>
           )}
 
-          {cartSummary.totalSavings > 0 && (
-            <div className="p-2.5 rounded-xl bg-emerald-100/80 border border-emerald-300 text-emerald-900 text-xs font-extrabold flex items-center justify-between tabular-nums">
-              <span>🎉 סה״כ חסכת בהזמנה זו:</span>
-              <span className="text-sm">{formatILS(cartSummary.totalSavings)}</span>
-            </div>
-          )}
+          {(cartSummary.totalSavings > 0 || mergeCalculation.crossOrderMixBonus > 0) && (() => {
+            const combinedSaved = Math.round(
+              (cartSummary.totalSavings + mergeCalculation.crossOrderMixBonus) * 100
+            ) / 100;
+            const effectivePaid = mergeCalculation.isMerging
+              ? mergeCalculation.addedAmountToPay
+              : cartSummary.finalTotal;
+            const fullRef = effectivePaid + combinedSaved;
+            const pct =
+              fullRef > effectivePaid && fullRef > 0
+                ? Math.round(((fullRef - effectivePaid) / fullRef) * 100)
+                : cartSummary.savingsPct;
+            return (
+              <div className="p-2.5 rounded-xl bg-emerald-100/80 border border-emerald-300 text-emerald-900 text-xs font-extrabold flex items-center justify-between tabular-nums">
+                <span>🎉 חסכת {pct}% ({formatILS(combinedSaved)} הנחה)</span>
+                <span className="text-[11px] text-slate-500 line-through">{formatILS(fullRef)}</span>
+              </div>
+            );
+          })()}
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
             <input
