@@ -83,8 +83,9 @@ export function CustomerLivePortal({ customerId }: CustomerLivePortalProps) {
   const [activeTab, setActiveTab] = useState<'active_order' | 'history'>('active_order');
   const [selectedOrderId, setSelectedOrderId] = useState<number | null>(null);
 
-  // מודאל בקשת ביטול הזמנה
+  // מודאל ביטול הזמנה (עם אישור כפול)
   const [cancelTarget, setCancelTarget] = useState<Order | null>(null);
+  const [cancelConfirmStep, setCancelConfirmStep] = useState<1 | 2>(1);
   const [cancelling, setCancelling] = useState(false);
   const [cancelWaUrl, setCancelWaUrl] = useState<string>('');
   const [cancelNoticeOrderId, setCancelNoticeOrderId] = useState<number | null>(null);
@@ -156,19 +157,40 @@ export function CustomerLivePortal({ customerId }: CustomerLivePortalProps) {
     return { totalOrdered, totalPaid, balanceDue };
   }, [orders]);
 
+  const handleStartEditOrder = (order: Order) => {
+    try {
+      localStorage.setItem('ht_edit_order_draft_v1', JSON.stringify(order));
+      if (customer) {
+        localStorage.setItem(
+          'ht_public_customer_profile_v1',
+          JSON.stringify({
+            customerId: customer.id,
+            name: customer.name,
+            phone: customer.phone || '',
+          })
+        );
+      }
+    } catch {
+      // ignore
+    }
+    window.location.hash = `#/menu?editOrder=${order.id}`;
+  };
+
   const handleConfirmCancelRequest = async () => {
     if (!cancelTarget) return;
     setCancelling(true);
     setError('');
     try {
-      await apiFetch('/api/public/request-cancel', {
+      await apiFetch('/api/public/cancel-order', {
         method: 'POST',
-        body: JSON.stringify({ order_id: cancelTarget.id }),
+        body: JSON.stringify({ order_id: cancelTarget.id, direct_cancel: true }),
       });
 
       setOrders((prev) =>
         prev.map((o) =>
-          o.id === cancelTarget.id ? { ...o, status: 'cancel_requested' } : o
+          o.id === cancelTarget.id
+            ? { ...o, status: 'cancelled', total_amount: 0, paid_amount: 0 }
+            : o
         )
       );
 
@@ -186,10 +208,11 @@ export function CustomerLivePortal({ customerId }: CustomerLivePortalProps) {
       setCancelWaUrl(waUrl);
       setCancelNoticeOrderId(cancelTarget.id);
       setCancelTarget(null);
-      window.open(waUrl, '_blank', 'noopener,noreferrer');
+      setCancelConfirmStep(1);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'לא ניתן לשלוח בקשת ביטול להזמנה זו');
+      setError(err instanceof Error ? err.message : 'לא ניתן לבטל את ההזמנה');
       setCancelTarget(null);
+      setCancelConfirmStep(1);
     } finally {
       setCancelling(false);
     }
@@ -310,12 +333,12 @@ export function CustomerLivePortal({ customerId }: CustomerLivePortalProps) {
           </button>
         </div>
 
-        {/* הודעת אישור שליחת בקשת ביטול לוואטסאפ */}
+        {/* הודעת אישור ביטול הזמנה */}
         {cancelWaUrl && cancelNoticeOrderId && (
-          <div className="p-4 rounded-2xl bg-orange-50 border border-orange-300 space-y-2.5">
-            <div className="flex items-center gap-2 text-orange-950 font-extrabold text-sm">
-              <CheckCircle2 className="w-5 h-5 text-orange-600 shrink-0" />
-              <span>בקשת הביטול להזמנה #{cancelNoticeOrderId} נרשמה — ממתין לאישור מוכר</span>
+          <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-300 space-y-2.5">
+            <div className="flex items-center gap-2 text-emerald-950 font-extrabold text-sm">
+              <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+              <span>הזמנה #{cancelNoticeOrderId} בוטלה בהצלחה בענן ובדוכן</span>
             </div>
             <a
               href={cancelWaUrl}
@@ -324,7 +347,7 @@ export function CustomerLivePortal({ customerId }: CustomerLivePortalProps) {
               className="w-full py-2.5 px-4 rounded-xl bg-[#25D366] hover:bg-[#1EB958] text-white font-extrabold text-sm flex items-center justify-center gap-2 shadow-sm"
             >
               <ExternalLink className="w-4 h-4" />
-              <span>שלח הודעת ביטול למוכר בוואטסאפ</span>
+              <span>עדכן את המוכר בוואטסאפ על הביטול</span>
             </a>
           </div>
         )}
@@ -493,31 +516,51 @@ export function CustomerLivePortal({ customerId }: CustomerLivePortalProps) {
                       />
                     )}
 
-                  {/* אפשרויות עריכה/הוספת פריטים וביטול הזמנה (עד שישי 06:00 בלבד) */}
+                  {/* אפשרויות עריכה וביטול הזמנה (עד שישי 06:00 בלבד, כל עוד ההזמנה אינה נמסרה) */}
                   {isCancelableStatus && (
                     <div className="pt-2 border-t border-[#F3E9DC] space-y-2">
                       {canStillCancel ? (
                         <div className="grid grid-cols-2 gap-2.5">
-                          <a
-                            href="#/menu"
-                            className="py-2.5 px-3 rounded-xl bg-[#FAF6F0] hover:bg-[#F3E9DC] border border-[#E8D5BE] text-[#8A330B] text-xs font-extrabold flex items-center justify-center gap-1.5 transition-colors text-center"
-                          >
-                            <Plus className="w-4 h-4 shrink-0" />
-                            <span>הוסף פריטים להזמנה</span>
-                          </a>
                           <button
                             type="button"
-                            onClick={() => setCancelTarget(focusedOrder)}
+                            onClick={() => handleStartEditOrder(focusedOrder)}
+                            className="py-2.5 px-3 rounded-xl bg-[#FAF6F0] hover:bg-[#F3E9DC] border border-[#E8D5BE] text-[#8A330B] text-xs font-extrabold flex items-center justify-center gap-1.5 transition-colors text-center"
+                          >
+                            <span>✏️ עדכן הזמנה</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setCancelConfirmStep(1);
+                              setCancelTarget(focusedOrder);
+                            }}
                             className="py-2.5 px-3 rounded-xl border border-red-200 bg-red-50/70 hover:bg-red-100 text-red-700 text-xs font-extrabold flex items-center justify-center gap-1.5 transition-colors"
                           >
-                            <XCircle className="w-4 h-4 shrink-0" />
-                            <span>בקשת ביטול הזמנה</span>
+                            <span>🗑️ בטל הזמנה</span>
                           </button>
                         </div>
                       ) : (
-                        <div className="p-3 rounded-xl bg-slate-100 border border-slate-200 text-slate-600 text-xs font-bold flex items-center justify-center gap-2 text-center">
-                          <Lock className="w-4 h-4 shrink-0 text-slate-500" />
-                          <span>לא ניתן לבטל הזמנות לאחר השעה 06:00 בבוקר ביום שישי</span>
+                        <div className="p-3.5 rounded-2xl bg-slate-100 border border-slate-200 space-y-2.5 text-center">
+                          <div className="text-slate-700 text-xs font-bold flex items-center justify-center gap-1.5">
+                            <Lock className="w-4 h-4 shrink-0 text-slate-500" />
+                            <span>
+                              המועד לעריכה או ביטול עצמי הסתיים (יום שישי בשעה 06:00 בבוקר)
+                            </span>
+                          </div>
+                          <a
+                            href={buildWhatsAppShareUrl(
+                              `שלום, לגבי הזמנה #${focusedOrder.id} (${
+                                customer?.name || focusedOrder.recipient_name
+                              }) ל-${formatFridayLabel(focusedOrder.friday_date)}: אשמח לעדכן / לשאול לגבי ההזמנה.`,
+                              settings?.admin_whatsapp_phone
+                            )}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="w-full py-2.5 px-4 rounded-xl bg-[#25D366] hover:bg-[#1EB958] text-white font-extrabold text-xs inline-flex items-center justify-center gap-1.5 shadow-sm transition-colors"
+                          >
+                            <ExternalLink className="w-4 h-4 shrink-0" />
+                            <span>💬 פנייה ישירה למוכר בוואטסאפ</span>
+                          </a>
                         </div>
                       )}
                     </div>
@@ -682,44 +725,83 @@ export function CustomerLivePortal({ customerId }: CustomerLivePortalProps) {
         )}
       </main>
 
-      {/* חלונית אישור בקשת ביטול הזמנה */}
+      {/* חלונית ביטול הזמנה עם אישור כפול */}
       {cancelTarget && (
         <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
           <div className="max-w-sm w-full bg-white rounded-3xl border border-[#E8D5BE] shadow-card p-5 space-y-4">
             <div className="flex items-start justify-between gap-2">
               <div className="flex items-center gap-2 text-red-700">
                 <AlertTriangle className="w-5 h-5 shrink-0" />
-                <h3 className="font-serif text-lg font-extrabold">בקשת ביטול הזמנה #{cancelTarget.id}</h3>
+                <h3 className="font-serif text-lg font-extrabold">
+                  {cancelConfirmStep === 1
+                    ? `ביטול הזמנה #${cancelTarget.id}`
+                    : `אישור סופי לביטול הזמנה #${cancelTarget.id}`}
+                </h3>
               </div>
               <button
                 type="button"
-                onClick={() => setCancelTarget(null)}
+                onClick={() => {
+                  setCancelTarget(null);
+                  setCancelConfirmStep(1);
+                }}
                 className="p-1 rounded-lg text-slate-400 hover:text-slate-700"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
-            <p className="text-xs text-slate-600 leading-relaxed">
-              בקשת הביטול תועבר לאישור המוכר בוואטסאפ, וההזמנה תעבור לסטטוס{' '}
-              <strong>״ממתין לאישור ביטול״</strong> עד לאישור המוכר. האם להמשיך?
-            </p>
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                onClick={() => setCancelTarget(null)}
-                className="py-2.5 rounded-xl border border-[#E8D5BE] bg-[#FAF6F0] text-slate-700 font-bold text-xs"
-              >
-                חזור
-              </button>
-              <button
-                type="button"
-                disabled={cancelling}
-                onClick={handleConfirmCancelRequest}
-                className="py-2.5 rounded-xl bg-red-600 hover:bg-red-700 disabled:opacity-60 text-white font-extrabold text-xs"
-              >
-                {cancelling ? 'שולח...' : 'אשר ושלח למוכר'}
-              </button>
-            </div>
+
+            {cancelConfirmStep === 1 ? (
+              <>
+                <p className="text-xs text-slate-600 leading-relaxed">
+                  האם ברצונך לבטל את הזמנה <strong>#{cancelTarget.id}</strong> (
+                  {formatILS(cancelTarget.total_amount)}) ל-
+                  {formatFridayLabel(cancelTarget.friday_date)}?
+                </p>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCancelTarget(null);
+                      setCancelConfirmStep(1);
+                    }}
+                    className="py-2.5 rounded-xl border border-[#E8D5BE] bg-[#FAF6F0] text-slate-700 font-bold text-xs"
+                  >
+                    חזור
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCancelConfirmStep(2)}
+                    className="py-2.5 rounded-xl bg-red-600 hover:bg-red-700 text-white font-extrabold text-xs"
+                  >
+                    המשך לביטול
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="p-3 rounded-2xl bg-red-50 border border-red-200 text-xs text-red-900 font-bold leading-relaxed">
+                  ⚠️ אישור כפול: לחיצה על הכפתור תבטל את ההזמנה מיידית בענן ותעדכן את הדוכן (חיוב ההזמנה יאופס ל-₪0.00). האם אתה בטוח?
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    disabled={cancelling}
+                    onClick={() => setCancelConfirmStep(1)}
+                    className="py-2.5 rounded-xl border border-[#E8D5BE] bg-[#FAF6F0] text-slate-700 font-bold text-xs"
+                  >
+                    לא, שמור הזמנה
+                  </button>
+                  <button
+                    type="button"
+                    disabled={cancelling}
+                    onClick={handleConfirmCancelRequest}
+                    className="py-2.5 rounded-xl bg-red-600 hover:bg-red-700 disabled:opacity-60 text-white font-extrabold text-xs"
+                  >
+                    {cancelling ? 'מבטל בענן...' : '🗑️ כן, בטל סופית'}
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}

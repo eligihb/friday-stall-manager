@@ -723,19 +723,35 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
     return { id: orderId, order: newOrder, imported: true } as T;
   }
 
-  // בקשת ביטול הזמנה מצד הלקוח (עד שישי 06:00 בלבד — מועבר לממתין לאישור ביטול)
-  if (path === '/api/public/request-cancel' && method === 'POST') {
+  // ביטול הזמנה מצד הלקוח (עד שישי 06:00 בלבד — מעדכן מיד את ההזמנה, הדוכן והענן)
+  if ((path === '/api/public/request-cancel' || path === '/api/public/cancel-order') && method === 'POST') {
     const orderId = Number(body.order_id || body.id || 0);
-    const order = db.orders.find((o) => o.id === orderId);
+    const order = db.orders.find((o) => String(o.id) === String(orderId));
     if (!order) throwErr('ההזמנה לא נמצאה', 404);
     if (order.status === 'cancelled') {
       return { ok: true, order } as T;
     }
     if (!isBeforeFridayCancelCutoff(order.friday_date)) {
-      throwErr('לא ניתן לבטל הזמנות לאחר השעה 06:00 בבוקר ביום שישי', 400);
+      throwErr('המועד לעריכה או ביטול עצמי הסתיים (יום שישי ב-06:00 בבוקר)', 400);
     }
-    order.status = 'cancel_requested';
-    saveDb(db);
+    if (body.direct_cancel !== false) {
+      if (order.user_id && order.order_type !== 'charity') {
+        const cust = db.users.find((u) => u.id === order.user_id);
+        if (cust) {
+          cust.balance = round2((cust.balance || 0) + (order.total_amount - order.paid_amount));
+        }
+      }
+      order.status = 'cancelled';
+      order.total_amount = 0;
+      order.paid_amount = 0;
+      order.delivery_fee = 0;
+      order.credit_discount = 0;
+      removeImportedOrderBackup(order.id, order.recipient_name, order.friday_date);
+    } else {
+      order.status = 'cancel_requested';
+    }
+    saveDb(db, true);
+    await pushLocalStateToCloud({ mergeWithRemoteFirst: true }).catch(() => false);
     return { ok: true, order } as T;
   }
 
@@ -989,6 +1005,87 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
       paybox: 'תשלום מראש ב-PayBox',
     };
     const payPrefNote = payPrefMap[String(body.payment_preference || '')] || '';
+
+    // בדיקה אם התבקשה עריכה/החלפה מלאה של הזמנה קיימת (✏️ עדכן הזמנה) לפני שישי 06:00
+    const replaceOrderId = Number(body.replace_order_id || 0);
+    const existingToReplace = replaceOrderId
+      ? db.orders.find(
+          (o) =>
+            String(o.id) === String(replaceOrderId) &&
+            o.status !== 'cancelled' &&
+            o.status !== 'delivered'
+        ) || null
+      : null;
+
+    if (existingToReplace) {
+      if (!isBeforeFridayCancelCutoff(existingToReplace.friday_date)) {
+        throwErr('המועד לעריכה עצמית הסתיים (יום שישי ב-06:00 בבוקר)', 400);
+      }
+      db.order_items = db.order_items.filter(
+        (oi) => String(oi.order_id) !== String(existingToReplace.id)
+      );
+      let replacedCalcTotal = 0;
+      const resultItems: Array<{
+        product_id: number;
+        product_name: string;
+        quantity: number;
+        unit_price: number;
+      }> = [];
+
+      for (const it of validItems) {
+        const prod = pMap.get(Number(it.product_id));
+        if (!prod || !prod.is_active) throwErr('אחד המוצרים שנבחרו אינו זמין', 400);
+        const unitPrice = pricing.isPreorder ? prod.preorder_price : prod.customer_price;
+        replacedCalcTotal += unitPrice * it.quantity;
+        db.order_items.push({
+          id: db.nextIds.order_items++,
+          order_id: existingToReplace.id,
+          product_id: prod.id,
+          quantity: it.quantity,
+          unit_price_snapshot: unitPrice,
+          cost_price_snapshot: prod.cost_price,
+        });
+        resultItems.push({
+          product_id: prod.id,
+          product_name: prod.name,
+          quantity: it.quantity,
+          unit_price: unitPrice,
+        });
+      }
+
+      const oldTotal = existingToReplace.total_amount;
+      const clientReplacedTotal = Number(body.total_amount ?? 0);
+      const nextTotal =
+        clientReplacedTotal > 0 ? round2(clientReplacedTotal) : round2(replacedCalcTotal);
+
+      existingToReplace.total_amount = nextTotal;
+      existingToReplace.status = 'awaiting_approval';
+      existingToReplace.notes = [`טלפון: ${phone}`, payPrefNote, notesRaw]
+        .filter(Boolean)
+        .join(' | ');
+      matchedCustomer.balance = round2(
+        (matchedCustomer.balance || 0) - (nextTotal - oldTotal)
+      );
+      saveDb(db, true);
+      await pushLocalStateToCloud({ mergeWithRemoteFirst: true }).catch(() => false);
+
+      return {
+        id: existingToReplace.id,
+        replaced: true,
+        customer_id: matchedCustomer.id,
+        user_id: matchedCustomer.id,
+        friday_date: existingToReplace.friday_date,
+        recipient_name: matchedCustomer.name || recipient_name,
+        phone,
+        pricing_mode: pricing.mode,
+        total_amount: nextTotal,
+        status: 'awaiting_approval',
+        items: resultItems,
+        business_name: db.settings.business_name || 'דוכן שישי תימני',
+        admin_whatsapp_phone: db.settings.admin_whatsapp_phone || '0542452100',
+        whatsapp_footer: db.settings.whatsapp_footer || 'שבת שלום ומבורכת! 🕯️',
+      } as T;
+    }
 
     // בדיקה אם התבקש מיזוג להזמנה קיימת לאותו יום שישי
     const mergeOrderId = Number(body.merge_order_id || 0);

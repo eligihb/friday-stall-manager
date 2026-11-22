@@ -117,9 +117,12 @@ export function formatOrderWhatsApp(order: Order, settings?: Partial<BusinessSet
   }
   lines.push(`📌 סטטוס: ${ORDER_STATUS_LABELS[order.status]}`);
   if (order.notes) lines.push(`📝 הערות: ${order.notes}`);
-  if (order.user_id) {
-    lines.push(`🔗 לאזור האישי ומעקב חי אחר ההזמנה: ${buildCustomerPortalUrl(order.user_id)}`);
-  }
+  const personalUrl = order.user_id
+    ? buildCustomerPortalUrl(order.user_id)
+    : buildDigitalMenuUrl();
+  lines.push(``);
+  lines.push(`🔗 לצפייה בהזמנה, תשלום או עדכון/ביטול (עד יום שישי ב-06:00):`);
+  lines.push(personalUrl);
   if (footer) lines.push(`\n${footer}`);
   return lines.join('\n');
 }
@@ -138,6 +141,7 @@ export function buildWhatsAppShareUrl(text: string, phone?: string): string {
 
 export function formatPublicApprovalWhatsApp(payload: {
   id: number;
+  customer_id?: number | null;
   business_name: string;
   recipient_name: string;
   phone: string;
@@ -149,6 +153,7 @@ export function formatPublicApprovalWhatsApp(payload: {
   payment_label?: string;
   notes?: string;
   is_update?: boolean;
+  is_replace?: boolean;
   previous_total?: number;
   added_items?: Array<{ product_name: string; quantity: number; unit_price: number }>;
 }): string {
@@ -198,7 +203,11 @@ export function formatPublicApprovalWhatsApp(payload: {
     })),
   });
 
-  const baseMsg = cfg.customerOrderTemplate
+  const customerPersonalLink = payload.customer_id
+    ? buildCustomerPortalUrl(payload.customer_id)
+    : buildDigitalMenuUrl();
+
+  let baseMsg = cfg.customerOrderTemplate
     .replace(/\{שם_עסק\}/g, payload.business_name)
     .replace(/\{מספר\}/g, String(payload.id))
     .replace(/\{שם\}/g, payload.recipient_name)
@@ -208,12 +217,20 @@ export function formatPublicApprovalWhatsApp(payload: {
     .replace(/\{סהכ\}/g, formatILS(payload.total_amount))
     .replace(/\{הערות\}\n?/g, notesLine ? `${notesLine}\n` : '')
     .replace(/ממתין לאישור מנהל/g, 'ממתין לאישור מוכר')
+    .replace(/\{קישור_לקוח\}/g, customerPersonalLink)
     .replace(/\{קישור_אישור\}/g, buildQuickApproveUrl(payload.id, encoded))
     .replace(/\{קישור_צפייה\}/g, buildAdminOrderViewUrl(payload.id, encoded))
     .replace(/\{קישור\}/g, buildAdminOrderViewUrl(payload.id, encoded))
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 
+  if (!baseMsg.includes('לצפייה בהזמנה, תשלום או עדכון/ביטול')) {
+    baseMsg += `\n\n🔗 לצפייה בהזמנה, תשלום או עדכון/ביטול (עד יום שישי ב-06:00):\n${customerPersonalLink}`;
+  }
+
+  if (payload.is_replace) {
+    return `✏️ *עדכון הזמנה קיימת (#${payload.id})*\n` + baseMsg;
+  }
   if (payload.is_update) {
     return `🔄 *תוספת להזמנה קיימת (#${payload.id})*\n` + baseMsg;
   }

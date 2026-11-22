@@ -12,6 +12,7 @@ import {
   Link2,
   XCircle,
   AlertTriangle,
+  RotateCcw,
 } from 'lucide-react';
 import {
   formatFridayLabel,
@@ -59,11 +60,77 @@ export function OrderCard({
   const { openContactById } = useContactDrawer();
   const [copied, setCopied] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
-  const [pendingStatus, setPendingStatus] = useState<OrderStatus | null>(null);
+  const [approvedNotice, setApprovedNotice] = useState(false);
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const paymentMeta = getOrderPaymentMeta(order.id);
   const prepayPendingVerify = isOrderPrepayPendingVerification(order);
+  const isPendingStatus = order.status === 'pending' || order.status === 'awaiting_approval';
+
+  const triggerApproveOrder = () => {
+    onCycleStatus(order, 'received');
+    setApprovedNotice(true);
+    setTimeout(() => setApprovedNotice(false), 2600);
+  };
+
+  const handleCardBodyClick = () => {
+    if (isPendingStatus) {
+      triggerApproveOrder();
+    } else if (onEdit) {
+      onEdit(order);
+    }
+  };
+
+  const getNextAndPrevStage = (
+    status: OrderStatus
+  ): {
+    nextStatus: OrderStatus | null;
+    nextLabel: string;
+    nextBtnCls: string;
+    prevStatus: OrderStatus | null;
+  } => {
+    if (status === 'pending' || status === 'awaiting_approval') {
+      return {
+        nextStatus: 'received',
+        nextLabel: 'אשר הזמנה',
+        nextBtnCls: 'bg-blue-600 hover:bg-blue-700 text-white',
+        prevStatus: null,
+      };
+    }
+    if (status === 'received') {
+      return {
+        nextStatus: 'ready',
+        nextLabel: 'מוכן למסירה',
+        nextBtnCls: 'bg-orange-500 hover:bg-orange-600 text-white',
+        prevStatus: 'pending',
+      };
+    }
+    if (status === 'ready') {
+      return {
+        nextStatus: 'delivered',
+        nextLabel: 'סמן כנמסר',
+        nextBtnCls: 'bg-emerald-600 hover:bg-emerald-700 text-white',
+        prevStatus: 'received',
+      };
+    }
+    if (status === 'delivered') {
+      return {
+        nextStatus: null,
+        nextLabel: 'נמסר ללקוח ✓',
+        nextBtnCls: 'bg-emerald-100 text-emerald-800 border border-emerald-300',
+        prevStatus: 'ready',
+      };
+    }
+    return {
+      nextStatus: null,
+      nextLabel: '',
+      nextBtnCls: '',
+      prevStatus: null,
+    };
+  };
+
+  const stageFlow = getNextAndPrevStage(order.status);
+  const paidMethodDisplay = paymentMeta?.methodLabel || 'מלא';
 
   const handleCopyCustomerLink = async () => {
     if (!order.user_id) return;
@@ -75,7 +142,6 @@ export function OrderCard({
     setTimeout(() => setCopiedLink(false), 1800);
   };
 
-  const unpaid = Math.max(0, order.total_amount - order.paid_amount);
   const isCharity = order.order_type === 'charity';
   const payState = getPaymentVisualState(order);
 
@@ -96,7 +162,11 @@ export function OrderCard({
 
   return (
     <div
+      onClick={handleCardBodyClick}
+      title={isPendingStatus ? 'לחץ על הכרטיס לאישור מהיר של ההזמנה' : undefined}
       className={`bg-white rounded-2xl border shadow-soft p-4 flex flex-col justify-between transition-all ${
+        isPendingStatus ? 'cursor-pointer hover:border-blue-400' : ''
+      } ${
         order.status === 'cancelled'
           ? 'border-slate-300 bg-slate-50/70 opacity-75'
           : order.status === 'cancel_requested'
@@ -111,11 +181,15 @@ export function OrderCard({
       }`}
     >
       <div>
-        {/* כותרת הכרטיסייה — לחיצה על שם לקוח פותחת כרטסת, לחיצה על גוף ההזמנה פותחת עריכה */}
-        <div
-          className={`flex items-start justify-between gap-2 ${onEdit ? 'cursor-pointer' : ''}`}
-          onClick={() => onEdit?.(order)}
-        >
+        {approvedNotice && (
+          <div className="mb-2.5 px-3 py-1.5 rounded-xl bg-emerald-600 text-white text-xs font-extrabold flex items-center justify-center gap-1.5 shadow-sm animate-pulse">
+            <CheckCircle2 className="w-4 h-4 shrink-0" />
+            <span>ההזמנה אושרה ✓</span>
+          </div>
+        )}
+
+        {/* כותרת הכרטיסייה — לחיצה על שם לקוח פותחת כרטסת, לחיצה על גוף ההזמנה במצב ממתין מאשרת מיד */}
+        <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
             <div className="flex items-center gap-1.5 flex-wrap">
               {order.user_id ? (
@@ -141,6 +215,11 @@ export function OrderCard({
               <span>#{order.id}</span>
               {showFridayDate && <span>· {formatFridayLabel(order.friday_date)}</span>}
               <span className="font-semibold text-slate-700">· {ORDER_STATUS_LABELS[order.status]}</span>
+              {isPendingStatus && (
+                <span className="text-[10px] font-extrabold text-blue-700 bg-blue-50 border border-blue-200 px-1.5 py-0.2 rounded-md">
+                  לחץ לאישור מהיר
+                </span>
+              )}
             </div>
           </div>
 
@@ -164,7 +243,7 @@ export function OrderCard({
                   }`}
                 >
                   {payState.status === 'paid'
-                    ? 'שולם מלא'
+                    ? `✅ שולם (${paidMethodDisplay})`
                     : payState.status === 'partial'
                     ? 'שולם חלקית'
                     : prepayPendingVerify
@@ -191,26 +270,28 @@ export function OrderCard({
         </div>
 
         {/* סרגל התקדמות ויזואלי 4 שלבים */}
-        {order.status !== 'awaiting_approval' &&
-          order.status !== 'cancel_requested' &&
+        {order.status !== 'cancel_requested' &&
           order.status !== 'cancelled' &&
           (() => {
-          const currentStage = STATUS_STAGES.find((s) => s.key === order.status) || STATUS_STAGES[0];
-          return (
-            <div className="mt-2.5">
-              <div className="w-full h-2 rounded-full bg-slate-100 overflow-hidden flex gap-0.5">
-                {STATUS_STAGES.map((st) => (
-                  <div
-                    key={st.key}
-                    className={`flex-1 h-full transition-colors ${
-                      st.step <= currentStage.step ? currentStage.barCls : 'bg-slate-200'
-                    }`}
-                  />
-                ))}
+            const normalizedKey: OrderStatus =
+              order.status === 'awaiting_approval' ? 'pending' : order.status;
+            const currentStage =
+              STATUS_STAGES.find((s) => s.key === normalizedKey) || STATUS_STAGES[0];
+            return (
+              <div className="mt-2.5">
+                <div className="w-full h-2 rounded-full bg-slate-100 overflow-hidden flex gap-0.5">
+                  {STATUS_STAGES.map((st) => (
+                    <div
+                      key={st.key}
+                      className={`flex-1 h-full transition-colors ${
+                        st.step <= currentStage.step ? currentStage.barCls : 'bg-slate-200'
+                      }`}
+                    />
+                  ))}
+                </div>
               </div>
-            </div>
-          );
-        })()}
+            );
+          })()}
 
         {/* תגיות פריטים קומפקטיות */}
         <div className="mt-3 flex flex-wrap gap-1.5">
@@ -249,13 +330,16 @@ export function OrderCard({
         )}
       </div>
 
-      {/* סרגל 4 שלבי סטטוס הזמנה עם אישור מפורש ("עדכן") למניעת לחיצות בטעות */}
-      <div className="mt-3.5 pt-3 border-t border-[#F3E9DC] space-y-2.5">
+      {/* כפתור פעולה ראשי לשלב הבא + כפתור חרטה קומפקטי (↩️ חזור שלב) */}
+      <div
+        className="mt-3.5 pt-3 border-t border-[#F3E9DC] space-y-2.5"
+        onClick={(e) => e.stopPropagation()}
+      >
         {order.status === 'cancel_requested' ? (
           <div className="p-2.5 rounded-xl bg-orange-50 border border-orange-300 space-y-2">
             <div className="flex items-center gap-1.5 text-xs font-extrabold text-orange-900">
               <AlertTriangle className="w-4 h-4 text-orange-600 shrink-0" />
-              <span>הלקוח ביקש לבטל הזמנה זו — נדרש אישור מנהל</span>
+              <span>הלקוח ביקש לבטל הזמנה זו — נדרש אישור מוכר</span>
             </div>
             <div className="grid grid-cols-2 gap-2">
               <button
@@ -277,72 +361,55 @@ export function OrderCard({
             </div>
           </div>
         ) : order.status === 'cancelled' ? (
-          <div className="p-2.5 rounded-xl bg-slate-100 border border-slate-300 text-center text-xs font-extrabold text-slate-600">
-            הזמנה זו בוטלה באישור מנהל (חיוב אופס ל-₪0.00)
+          <div className="flex items-center justify-between gap-2 p-2.5 rounded-xl bg-slate-100 border border-slate-300 text-xs font-extrabold text-slate-600">
+            <span>הזמנה זו בוטלה (חיוב אופס ל-₪0.00)</span>
+            <button
+              type="button"
+              onClick={() => onCycleStatus(order, 'pending')}
+              className="px-2.5 py-1 rounded-lg bg-white border border-slate-300 text-[11px] font-bold text-slate-700 hover:bg-slate-50"
+            >
+              ↩️ שחזר
+            </button>
           </div>
-        ) : order.status === 'awaiting_approval' ? (
-          <button
-            type="button"
-            onClick={() => onCycleStatus(order, 'received')}
-            className="w-full min-h-[44px] rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-extrabold flex items-center justify-center gap-1.5"
-          >
-            <CheckCircle2 className="w-4 h-4" />
-            <span>אשר הזמנה (העבר ל״התקבל״)</span>
-          </button>
         ) : (
-          <div className="space-y-2">
-            <div className="grid grid-cols-4 gap-1">
-              {STATUS_STAGES.map((st) => {
-                const isSelected = (pendingStatus ?? order.status) === st.key;
-                return (
-                  <button
-                    key={st.key}
-                    type="button"
-                    onClick={() => {
-                      if (st.key === order.status) setPendingStatus(null);
-                      else setPendingStatus(st.key);
-                    }}
-                    className={`min-h-[40px] px-1 rounded-xl border text-[11px] font-extrabold leading-tight transition-all ${
-                      isSelected
-                        ? `${st.activeCls} shadow-sm ${pendingStatus === st.key ? 'ring-2 ring-offset-1 ring-slate-900' : ''}`
-                        : 'bg-[#FAF6F0] text-slate-600 border-[#E8D5BE] hover:bg-[#F3E9DC]'
-                    }`}
-                  >
-                    {st.label}
-                  </button>
-                );
-              })}
-            </div>
-            {pendingStatus && pendingStatus !== order.status && (
-              <div className="flex items-center justify-between gap-2 p-2 rounded-xl bg-amber-50 border border-amber-300">
-                <span className="text-[11px] font-extrabold text-amber-950">
-                  לעדכן סטטוס ל״{ORDER_STATUS_LABELS[pendingStatus]}״?
-                </span>
-                <div className="flex items-center gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => setPendingStatus(null)}
-                    className="px-2.5 py-1 rounded-lg bg-white border border-amber-300 text-[11px] font-bold text-slate-600"
-                  >
-                    בטל
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onCycleStatus(order, pendingStatus);
-                      setPendingStatus(null);
-                    }}
-                    className="px-3 py-1 rounded-lg bg-[#C85A17] hover:bg-[#A9440F] text-white text-[11px] font-extrabold"
-                  >
-                    עדכן
-                  </button>
-                </div>
+          <div className="flex items-center gap-2">
+            {stageFlow.nextStatus ? (
+              <button
+                type="button"
+                onClick={() => {
+                  if (stageFlow.nextStatus === 'received') {
+                    triggerApproveOrder();
+                  } else if (stageFlow.nextStatus) {
+                    onCycleStatus(order, stageFlow.nextStatus);
+                  }
+                }}
+                className={`flex-1 min-h-[42px] px-3 rounded-xl text-xs font-extrabold flex items-center justify-center gap-1.5 shadow-sm active:scale-[0.98] transition-all ${stageFlow.nextBtnCls}`}
+              >
+                <CheckCircle2 className="w-4 h-4 shrink-0" />
+                <span>{stageFlow.nextLabel}</span>
+              </button>
+            ) : (
+              <div className="flex-1 min-h-[42px] px-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-extrabold flex items-center justify-center gap-1.5">
+                <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600" />
+                <span>נמסר ללקוח ✓</span>
               </div>
+            )}
+
+            {stageFlow.prevStatus && (
+              <button
+                type="button"
+                onClick={() => onCycleStatus(order, stageFlow.prevStatus!)}
+                className="min-h-[42px] px-3 rounded-xl bg-[#FAF6F0] hover:bg-[#F3E9DC] border border-[#E8D5BE] text-slate-700 text-xs font-extrabold inline-flex items-center justify-center gap-1 shrink-0 active:scale-[0.98] transition-colors"
+                title="החזר שלב אחד אחורה"
+              >
+                <RotateCcw className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+                <span>↩️ חזור שלב</span>
+              </button>
             )}
           </div>
         )}
 
-        {/* תגית כתומה מעל כפתור סמן תשלום כאשר הלקוח לחץ על Bit / PayBox / העברה בנקאית */}
+        {/* תגית כתומה מעל כפתור עדכון תשלום כאשר הלקוח לחץ על Bit / PayBox / העברה בנקאית */}
         {!isCharity && prepayPendingVerify && (
           <div className="px-3 py-1.5 rounded-xl bg-orange-100 border border-orange-300 text-orange-950 text-[11px] font-extrabold flex items-center justify-between gap-2">
             <span>⏳ ממתין לאימות תשלום (הלקוח לחץ לתשלום מראש ב-Bit/PayBox)</span>
@@ -358,36 +425,43 @@ export function OrderCard({
           </div>
         )}
 
-        {/* שורת פעולות: תשלום + חשבונית (לספק) + וואטסאפ */}
+        {/* שורת פעולות: עדכון תשלום אלגנטי (או תגית שולם + עריכה) + חשבונית (לספק) + וואטסאפ */}
         <div className="flex items-center gap-2">
           {!isCharity && onQuickPay && (
-            <button
-              type="button"
-              onClick={() => onQuickPay(order)}
-              className={`flex-1 min-h-[48px] px-2.5 rounded-xl active:scale-[0.98] text-xs font-extrabold flex items-center justify-center gap-1.5 shadow-sm transition-transform ${
-                payState.status === 'paid'
-                  ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
-                  : payState.status === 'partial'
-                  ? 'bg-amber-600 hover:bg-amber-700 text-white'
-                  : 'bg-red-600 hover:bg-red-700 text-white'
-              }`}
-            >
-              <CreditCard className="w-4 h-4 shrink-0" />
-              <span className="truncate">
-                {payState.status === 'paid'
-                  ? 'שולם ✓'
-                  : payState.status === 'partial'
-                  ? 'השלם תשלום'
-                  : 'סמן תשלום'}
-              </span>
-            </button>
+            payState.status === 'paid' ? (
+              <div className="flex-1 min-h-[44px] px-3 rounded-xl bg-emerald-50 border border-emerald-300 text-emerald-900 text-xs font-extrabold flex items-center justify-between gap-2">
+                <span className="truncate">✅ שולם ({paidMethodDisplay})</span>
+                <button
+                  type="button"
+                  onClick={() => onQuickPay(order)}
+                  className="px-2 py-1 rounded-lg bg-white hover:bg-emerald-100 border border-emerald-300 text-emerald-800 text-[11px] font-extrabold inline-flex items-center gap-1 shrink-0 transition-colors"
+                  title="ערוך אמצעי או סכום תשלום"
+                >
+                  <Edit3 className="w-3 h-3" />
+                  <span>עריכה</span>
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => onQuickPay(order)}
+                className="flex-1 min-h-[44px] px-3 rounded-xl bg-emerald-800 hover:bg-emerald-900 text-white border border-emerald-700/40 active:scale-[0.98] text-xs font-extrabold flex items-center justify-center gap-1.5 shadow-sm transition-all"
+              >
+                <CreditCard className="w-4 h-4 shrink-0 text-emerald-200" />
+                <span className="truncate">
+                  {payState.status === 'partial'
+                    ? `💳 עדכון תשלום (שולם ${formatILS(order.paid_amount)})`
+                    : '💳 עדכון תשלום'}
+                </span>
+              </button>
+            )
           )}
 
           {order.order_type === 'supplier' && onOpenInvoice && (
             <button
               type="button"
               onClick={() => onOpenInvoice(order)}
-              className="min-h-[48px] px-3 rounded-xl bg-[#1E242B] hover:bg-slate-800 text-white text-xs font-extrabold flex items-center justify-center gap-1.5 shrink-0"
+              className="min-h-[44px] px-3 rounded-xl bg-[#1E242B] hover:bg-slate-800 text-white text-xs font-extrabold flex items-center justify-center gap-1.5 shrink-0"
               title="תצוגת חשבונית והדפסה"
             >
               <FileText className="w-4 h-4 shrink-0" />
@@ -399,7 +473,7 @@ export function OrderCard({
             href={waUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="min-h-[48px] px-3 rounded-xl bg-[#25D366]/15 hover:bg-[#25D366]/25 border border-[#25D366]/40 text-emerald-900 text-xs font-extrabold flex items-center justify-center gap-1 shrink-0 active:scale-[0.98]"
+            className="min-h-[44px] px-3 rounded-xl bg-[#25D366]/15 hover:bg-[#25D366]/25 border border-[#25D366]/40 text-emerald-900 text-xs font-extrabold flex items-center justify-center gap-1 shrink-0 active:scale-[0.98]"
             title="שלח בוואטסאפ"
           >
             <Share2 className="w-4 h-4 text-[#128C7E] shrink-0" />
