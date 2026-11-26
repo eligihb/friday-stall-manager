@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo, useCallback } from 'react';
-import { Plus, Minus, Search, ChevronDown, ChevronUp, Users, LayoutGrid, List, ArrowDownWideNarrow, RefreshCw } from 'lucide-react';
+import { Plus, Minus, Search, ChevronDown, ChevronUp, Users, LayoutGrid, List, ArrowDownWideNarrow, RefreshCw, Zap } from 'lucide-react';
 import { apiFetch } from '../lib/api';
 import { ensureInitialCloudHydration } from '../lib/supabaseSync';
 import { filterUsersByNameOrPhone, getPhoneLast4 } from '../lib/whatsappParser';
@@ -19,6 +19,7 @@ import { FridaySelector } from '../components/FridaySelector';
 import { OrderCard } from '../components/OrderCard';
 import { BottomSheet } from '../components/BottomSheet';
 import { QuickPaymentSheet } from '../components/QuickPaymentSheet';
+import { QuickAdminOrderModal } from '../components/QuickAdminOrderModal';
 import type {
   AdminProduct,
   BusinessSettings,
@@ -35,8 +36,12 @@ export function CustomerOrdersPage() {
   const [fridayDate, setFridayDate] = useState(globalFriday);
   const [statusFilter, setStatusFilter] = useState('');
   const [viewMode, setViewMode] = useState<'cards' | 'list'>('cards');
+  const [includeSuppliers, setIncludeSuppliers] = useState(true);
+  const [includeSpecialPackages, setIncludeSpecialPackages] = useState(true);
+  const [quickAdminOpen, setQuickAdminOpen] = useState(false);
   const [sortBy, setSortBy] = useState<'newest' | 'amount_desc' | 'amount_asc'>('newest');
   const [orders, setOrders] = useState<Order[]>([]);
+  const [allTypesWeekOrders, setAllTypesWeekOrders] = useState<Order[]>([]);
   const [recentOrdersHistory, setRecentOrdersHistory] = useState<Order[]>([]);
   const [quickCustSearch, setQuickCustSearch] = useState('');
   const [showAllRecentCusts, setShowAllRecentCusts] = useState(false);
@@ -86,14 +91,19 @@ export function CustomerOrdersPage() {
       if (fridayDate && statusFilter !== 'deleted_by_vendor') qs.set('friday_date', fridayDate);
       if (statusFilter && statusFilter !== 'pending') qs.set('status', statusFilter);
 
-      const [ordRes, allCustOrdRes, prodRes, usrRes, setRes] = await Promise.all([
+      const allTypesQs = new URLSearchParams();
+      if (fridayDate) allTypesQs.set('friday_date', fridayDate);
+
+      const [ordRes, allTypesRes, allCustOrdRes, prodRes, usrRes, setRes] = await Promise.all([
         apiFetch<{ orders: Order[] }>(`/api/orders?${qs.toString()}`),
+        apiFetch<{ orders: Order[] }>(`/api/orders?${allTypesQs.toString()}`),
         apiFetch<{ orders: Order[] }>('/api/orders?order_type=customer'),
         apiFetch<{ products: AdminProduct[] }>('/api/products'),
         apiFetch<{ users: User[] }>('/api/users'),
         apiFetch<{ settings: BusinessSettings }>('/api/settings'),
       ]);
       setOrders(ordRes.orders);
+      setAllTypesWeekOrders(allTypesRes.orders);
       setRecentOrdersHistory(allCustOrdRes.orders);
       setProducts(prodRes.products.filter((p) => p.is_active));
       setUsers(usrRes.users.filter((u) => u.role === 'customer'));
@@ -365,6 +375,84 @@ export function CustomerOrdersPage() {
     return { totalAmount, totalPaid, unpaid: Math.max(0, totalAmount - totalPaid) };
   }, [orders]);
 
+  // הזמנות פעילות לתצוגת "טבלה מרוכזת" (כולל מתגי סינון ספקים ומארזים מיוחדים + שורת סה"כ דינמית)
+  const consolidatedTableOrders = useMemo(() => {
+    let base = allTypesWeekOrders.filter(
+      (o) => o.status !== 'cancelled' && o.status !== 'deleted_by_vendor'
+    );
+    if (!includeSuppliers) {
+      base = base.filter((o) => o.order_type !== 'supplier');
+    }
+    if (!includeSpecialPackages) {
+      base = base.filter((o) => o.order_type !== 'charity');
+    }
+    if (statusFilter === 'pending') {
+      base = base.filter((o) => o.status === 'pending' || o.status === 'awaiting_approval');
+    } else if (statusFilter && statusFilter !== 'deleted_by_vendor') {
+      base = base.filter((o) => o.status === statusFilter);
+    }
+
+    const q = quickCustSearch.trim().toLowerCase();
+    if (q) {
+      const qDigits = q.replace(/\D/g, '');
+      const userById = new Map(users.map((u) => [u.id, u]));
+      base = base.filter((o) => {
+        const u = o.user_id ? userById.get(o.user_id) : undefined;
+        const phoneDigits = String(u?.phone || '').replace(/\D/g, '');
+        const itemsText = o.items.map((it) => it.product_name).join(' ').toLowerCase();
+        return (
+          o.recipient_name.toLowerCase().includes(q) ||
+          String(o.id).includes(q) ||
+          (o.notes || '').toLowerCase().includes(q) ||
+          itemsText.includes(q) ||
+          (qDigits.length >= 2 && phoneDigits.includes(qDigits))
+        );
+      });
+    }
+
+    const copy = [...base];
+    if (sortBy === 'amount_desc') {
+      copy.sort((a, b) => computeEffectiveOrderTotal(b) - computeEffectiveOrderTotal(a));
+    } else if (sortBy === 'amount_asc') {
+      copy.sort((a, b) => computeEffectiveOrderTotal(a) - computeEffectiveOrderTotal(b));
+    } else {
+      copy.sort((a, b) => b.id - a.id);
+    }
+    return copy;
+  }, [
+    allTypesWeekOrders,
+    includeSuppliers,
+    includeSpecialPackages,
+    statusFilter,
+    quickCustSearch,
+    users,
+    sortBy,
+  ]);
+
+  const consolidatedSummary = useMemo(() => {
+    const productTotals = new Map<string, number>();
+    let totalUnits = 0;
+    let totalAmount = 0;
+    let totalPaid = 0;
+    for (const o of consolidatedTableOrders) {
+      totalAmount += computeEffectiveOrderTotal(o);
+      totalPaid += Number(o.paid_amount) || 0;
+      for (const it of o.items) {
+        const qty = Number(it.quantity) || 0;
+        totalUnits += qty;
+        productTotals.set(it.product_name, (productTotals.get(it.product_name) || 0) + qty);
+      }
+    }
+    const productBreakdown = Array.from(productTotals.entries()).sort((a, b) => b[1] - a[1]);
+    return {
+      count: consolidatedTableOrders.length,
+      totalUnits,
+      totalAmount: Math.round(totalAmount * 100) / 100,
+      totalPaid: Math.round(totalPaid * 100) / 100,
+      productBreakdown,
+    };
+  }, [consolidatedTableOrders]);
+
   return (
     <div className="space-y-4">
       {/* כותרת ובורר תאריך לדסקטופ בלבד — במובייל קיים בורר ב-Header וכפתור הזמנה חדשה בסרגל התחתון */}
@@ -379,13 +467,33 @@ export function CustomerOrdersPage() {
           <FridaySelector value={fridayDate} onChange={setFridayDate} allowAll />
           <button
             type="button"
+            onClick={() => setQuickAdminOpen(true)}
+            className="inline-flex items-center gap-1.5 px-4 min-h-[42px] rounded-xl bg-[#2B1B12] hover:bg-[#3f281b] text-amber-50 font-bold text-sm"
+          >
+            <Zap className="w-4 h-4 text-amber-300" />
+            <span>הזמנה מהירה (מנהל)</span>
+          </button>
+          <button
+            type="button"
             onClick={() => openCreateModal()}
-            className="inline-flex items-center gap-1.5 px-4 min-h-[42px] rounded-xl bg-[#C85A17] hover:bg-[#A9440F] text-white font-bold text-sm shadow-sm"
+            className="inline-flex items-center gap-1.5 px-4 min-h-[42px] rounded-xl bg-[#C85A17] hover:bg-[#A9440F] text-white font-bold text-sm"
           >
             <Plus className="w-4 h-4" />
             <span>הזמנה חדשה</span>
           </button>
         </div>
+      </div>
+
+      {/* כפתור הזמנה מהירה (מנהל) במובייל */}
+      <div className="md:hidden">
+        <button
+          type="button"
+          onClick={() => setQuickAdminOpen(true)}
+          className="w-full py-2.5 px-4 rounded-xl bg-[#2B1B12] hover:bg-[#3f281b] text-amber-50 font-extrabold text-xs flex items-center justify-center gap-1.5"
+        >
+          <Zap className="w-4 h-4 text-amber-300" />
+          <span>הזמנה מהירה (מנהל) — שמור והמשך ללקוח הבא</span>
+        </button>
       </div>
 
       {/* שורת צ'יפים קומפקטית ודקה ל-5 לקוחות אחרונים */}
@@ -505,22 +613,24 @@ export function CustomerOrdersPage() {
             <button
               type="button"
               onClick={() => setViewMode('cards')}
-              className={`p-1.5 rounded-lg transition-colors ${
-                viewMode === 'cards' ? 'bg-[#C85A17] text-white' : 'text-slate-500 hover:text-slate-800'
+              className={`px-2.5 py-1.5 rounded-lg text-xs font-extrabold inline-flex items-center gap-1 transition-colors ${
+                viewMode === 'cards' ? 'bg-[#C85A17] text-white' : 'text-slate-600 hover:text-slate-900'
               }`}
-              title="תצוגת בלוקים"
+              title="תצוגת כרטיסים"
             >
-              <LayoutGrid className="w-4 h-4" />
+              <LayoutGrid className="w-3.5 h-3.5" />
+              <span>כרטיסים</span>
             </button>
             <button
               type="button"
               onClick={() => setViewMode('list')}
-              className={`p-1.5 rounded-lg transition-colors ${
-                viewMode === 'list' ? 'bg-[#C85A17] text-white' : 'text-slate-500 hover:text-slate-800'
+              className={`px-2.5 py-1.5 rounded-lg text-xs font-extrabold inline-flex items-center gap-1 transition-colors ${
+                viewMode === 'list' ? 'bg-[#C85A17] text-white' : 'text-slate-600 hover:text-slate-900'
               }`}
-              title="תצוגת רשימה"
+              title="טבלה מרוכזת"
             >
-              <List className="w-4 h-4" />
+              <List className="w-3.5 h-3.5" />
+              <span>טבלה מרוכזת</span>
             </button>
           </div>
         </div>
@@ -536,11 +646,12 @@ export function CustomerOrdersPage() {
         <div className="bg-white rounded-2xl p-10 text-center text-slate-400 border border-[#E8D5BE]">
           טוען הזמנות לקוחות...
         </div>
-      ) : sortedOrders.length === 0 ? (
-        <div className="bg-white rounded-2xl p-10 text-center text-slate-500 border border-[#E8D5BE]">
-          לא נמצאו הזמנות לקוחות לפי הסינון הנבחר.
-        </div>
       ) : viewMode === 'cards' ? (
+        sortedOrders.length === 0 ? (
+          <div className="bg-white rounded-2xl p-10 text-center text-slate-500 border border-[#E8D5BE]">
+            לא נמצאו הזמנות לקוחות לפי הסינון הנבחר.
+          </div>
+        ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3.5">
           {sortedOrders.map((o) => (
             <OrderCard
@@ -557,84 +668,143 @@ export function CustomerOrdersPage() {
             />
           ))}
         </div>
+        )
       ) : (
         <div className="bg-white rounded-3xl border border-[#E8D5BE] shadow-soft overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-right text-sm">
-              <thead className="bg-[#FAF6F0] border-b border-[#E8D5BE] text-xs font-bold text-slate-600">
-                <tr>
-                  <th className="py-3 px-4">לקוח</th>
-                  <th className="py-3 px-3">פריטים</th>
-                  <th className="py-3 px-3">סטטוס</th>
-                  <th className="py-3 px-3">סכום</th>
-                  <th className="py-3 px-3">תשלום</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-[#F3E9DC]">
-                {sortedOrders.map((o) => {
-                  const payState = getPaymentVisualState(o);
-                  return (
-                    <tr
-                      key={o.id}
-                      onClick={() => openEditModal(o)}
-                      className="hover:bg-[#FFFBF5] cursor-pointer"
-                    >
-                      <td className="py-3 px-4">
-                        {o.user_id ? (
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              openContactById(o.user_id!);
-                            }}
-                            className="font-bold text-slate-900 hover:text-[#C85A17] hover:underline"
-                          >
-                            {o.recipient_name}
-                          </button>
-                        ) : (
-                          <span className="font-bold text-slate-900">{o.recipient_name}</span>
-                        )}
-                        <div className="text-[11px] text-slate-400 tabular-nums">#{o.id}</div>
-                      </td>
-                      <td className="py-3 px-3 text-xs text-slate-600 max-w-[260px] truncate">
-                        {o.items.map((it) => `${it.quantity}× ${it.product_name}`).join(', ')}
-                      </td>
-                      <td className="py-3 px-3">
-                        <span
-                          className={`inline-block px-2.5 py-0.5 rounded-full text-xs font-bold text-white ${
-                            o.status === 'delivered'
-                              ? 'bg-emerald-600'
-                              : o.status === 'ready'
-                              ? 'bg-orange-500'
-                              : o.status === 'received'
-                              ? 'bg-blue-600'
-                              : 'bg-red-600'
-                          }`}
-                        >
-                          {ORDER_STATUS_LABELS[o.status]}
-                        </span>
-                      </td>
-                      <td className="py-3 px-3 font-extrabold tabular-nums text-slate-900">
-                        {formatILS(o.total_amount)}
-                      </td>
-                      <td className="py-3 px-3">
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setPayOrder(o);
-                          }}
-                          className={`px-2.5 py-1 rounded-full text-xs font-extrabold border ${payState.badgeCls}`}
-                        >
-                          {payState.label}
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+          {/* מתגי סינון מהירים בראש הטבלה המרוכזת */}
+          <div className="px-4 py-3 bg-[#FAF6F0] border-b border-[#E8D5BE] flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-3 text-xs font-extrabold text-slate-700">
+              <label className="inline-flex items-center gap-1.5 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={includeSuppliers}
+                  onChange={(e) => setIncludeSuppliers(e.target.checked)}
+                  className="w-4 h-4 rounded accent-[#C85A17]"
+                />
+                <span>כולל ספקים</span>
+              </label>
+              <label className="inline-flex items-center gap-1.5 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={includeSpecialPackages}
+                  onChange={(e) => setIncludeSpecialPackages(e.target.checked)}
+                  className="w-4 h-4 rounded accent-[#C85A17]"
+                />
+                <span>כולל מארזים מיוחדים</span>
+              </label>
+            </div>
+            <div className="text-xs font-bold text-slate-600 tabular-nums">
+              מציג {consolidatedSummary.count} הזמנות פעילות · {consolidatedSummary.totalUnits} יח׳
+            </div>
           </div>
+
+          {consolidatedTableOrders.length === 0 ? (
+            <div className="p-10 text-center text-slate-500 text-sm">
+              אין הזמנות פעילות התואמות לסינון בטבלה.
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-right text-sm">
+                <thead className="bg-[#FAF6F0] border-b border-[#E8D5BE] text-xs font-bold text-slate-600">
+                  <tr>
+                    <th className="py-3 px-3">מס׳</th>
+                    <th className="py-3 px-3">לקוח</th>
+                    <th className="py-3 px-3">סוג</th>
+                    <th className="py-3 px-3">פריטים וכמויות</th>
+                    <th className="py-3 px-3">סה״כ</th>
+                    <th className="py-3 px-3">תשלום</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#F3E9DC]">
+                  {consolidatedTableOrders.map((o) => {
+                    const effTotal = computeEffectiveOrderTotal(o);
+                    const payState = getPaymentVisualState({ ...o, total_amount: effTotal });
+                    const typeInfo =
+                      o.order_type === 'supplier'
+                        ? { label: 'ספק', cls: 'bg-orange-100 text-[#8A330B]' }
+                        : o.order_type === 'charity'
+                        ? { label: 'מארז', cls: 'bg-purple-100 text-purple-800' }
+                        : { label: 'פרטי', cls: 'bg-sky-100 text-sky-800' };
+                    return (
+                      <tr
+                        key={o.id}
+                        onClick={() => openEditModal(o)}
+                        className="hover:bg-[#FFFBF5] cursor-pointer"
+                      >
+                        <td className="py-2.5 px-3 text-xs font-bold text-slate-500 tabular-nums">
+                          #{o.id}
+                        </td>
+                        <td className="py-2.5 px-3">
+                          {o.user_id ? (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openContactById(o.user_id!);
+                              }}
+                              className="font-bold text-slate-900 hover:text-[#C85A17] hover:underline text-right"
+                            >
+                              {o.recipient_name}
+                            </button>
+                          ) : (
+                            <span className="font-bold text-slate-900">{o.recipient_name}</span>
+                          )}
+                        </td>
+                        <td className="py-2.5 px-3">
+                          <span className={`px-2 py-0.5 rounded-full text-[11px] font-bold ${typeInfo.cls}`}>
+                            {typeInfo.label}
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-3 text-xs text-slate-700">
+                          {o.items.map((it) => `${it.quantity}× ${it.product_name}`).join(', ')}
+                        </td>
+                        <td className="py-2.5 px-3 font-extrabold tabular-nums text-slate-900">
+                          {o.order_type === 'charity' ? '₪0.00' : formatILS(effTotal)}
+                        </td>
+                        <td className="py-2.5 px-3">
+                          {o.order_type === 'charity' ? (
+                            <span className="text-xs font-bold text-purple-800">מסובסד</span>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setPayOrder(o);
+                              }}
+                              className={`px-2.5 py-1 rounded-full text-xs font-extrabold border ${payState.badgeCls}`}
+                            >
+                              {payState.label}
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+                <tfoot className="bg-[#FAF6F0] border-t-2 border-[#E8D5BE] text-xs font-extrabold tabular-nums">
+                  <tr>
+                    <td className="py-3 px-3 text-slate-900" colSpan={2}>
+                      סה״כ ({consolidatedSummary.count} הזמנות)
+                    </td>
+                    <td className="py-3 px-3 text-slate-600">
+                      {consolidatedSummary.totalUnits} יח׳
+                    </td>
+                    <td className="py-3 px-3 text-[11px] font-bold text-slate-700">
+                      {consolidatedSummary.productBreakdown
+                        .map(([name, qty]) => `${name}: ${qty}`)
+                        .join(' · ')}
+                    </td>
+                    <td className="py-3 px-3 text-sm text-[#C85A17]">
+                      {formatILS(consolidatedSummary.totalAmount)}
+                    </td>
+                    <td className="py-3 px-3 text-emerald-700">
+                      שולם: {formatILS(consolidatedSummary.totalPaid)}
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          )}
         </div>
       )}
 
@@ -929,6 +1099,12 @@ export function CustomerOrdersPage() {
           </div>
         )}
       </BottomSheet>
+
+      <QuickAdminOrderModal
+        open={quickAdminOpen}
+        onClose={() => setQuickAdminOpen(false)}
+        onOrderSaved={() => void loadData()}
+      />
     </div>
   );
 }

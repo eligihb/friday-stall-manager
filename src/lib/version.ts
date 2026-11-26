@@ -1,2 +1,2 @@
-export const APP_VERSION = 'v2.22.0';
+export const APP_VERSION = 'v2.23.0';
 export const APP_BRAND_NAME = 'דוכן שישי תימני';

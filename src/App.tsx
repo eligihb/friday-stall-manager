@@ -10,6 +10,7 @@ import { AdminDashboard } from './pages/AdminDashboard';
 import { CustomerOrdersPage } from './pages/CustomerOrdersPage';
 import { SupplierOrdersPage } from './pages/SupplierOrdersPage';
 import { CharityOrdersPage } from './pages/CharityOrdersPage';
+import { OrderPlanningPage } from './pages/OrderPlanningPage';
 import { PastOrdersArchivePage } from './pages/PastOrdersArchivePage';
 import { UsersPage } from './pages/UsersPage';
 import { ProductsCatalog } from './pages/ProductsCatalog';
@@ -34,6 +35,7 @@ const VALID_TABS: AdminTab[] = [
   'customer-orders',
   'supplier-orders',
   'charity-orders',
+  'order-planning',
   'archive',
   'users',
   'products',
@@ -293,6 +295,7 @@ function AppRouter() {
           {adminTab === 'customer-orders' && <CustomerOrdersPage />}
           {adminTab === 'supplier-orders' && <SupplierOrdersPage />}
           {adminTab === 'charity-orders' && <CharityOrdersPage />}
+          {adminTab === 'order-planning' && <OrderPlanningPage />}
           {adminTab === 'archive' && <PastOrdersArchivePage />}
           {adminTab === 'users' && <UsersPage />}
           {adminTab === 'products' && <ProductsCatalog />}

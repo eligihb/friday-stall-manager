@@ -10,6 +10,7 @@ import {
   Share2,
   Link2,
   Check,
+  Zap,
 } from 'lucide-react';
 import { apiFetch } from '../lib/api';
 import { formatFridayLabel, formatILS, isOrderInActiveWeek } from '../lib/format';
@@ -20,6 +21,7 @@ import {
 } from '../lib/whatsappFormat';
 import { useFriday } from '../context/FridayContext';
 import { FridaySelector } from '../components/FridaySelector';
+import { QuickAdminOrderModal } from '../components/QuickAdminOrderModal';
 import type { AdminTab } from '../components/Layout';
 import type { AdminProduct, BusinessSettings, FridayInventoryItem, Order, User } from '../types';
 
@@ -35,6 +37,7 @@ export function AdminDashboard({ onNavigate }: AdminDashboardProps) {
   const [products, setProducts] = useState<AdminProduct[]>([]);
   const [bizSettings, setBizSettings] = useState<BusinessSettings | undefined>(undefined);
   const [copiedMenuLink, setCopiedMenuLink] = useState(false);
+  const [quickAdminOpen, setQuickAdminOpen] = useState(false);
   const [inventory, setInventory] = useState<FridayInventoryItem[]>([]);
 
   const loadAll = useCallback(async () => {
@@ -136,6 +139,14 @@ export function AdminDashboard({ onNavigate }: AdminDashboardProps) {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setQuickAdminOpen(true)}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-[#2B1B12] hover:bg-[#3f281b] text-amber-50 font-extrabold text-xs"
+          >
+            <Zap className="w-4 h-4 text-amber-300" />
+            <span>הזמנה מהירה (מנהל)</span>
+          </button>
           <a
             href={menuShareUrl}
             target="_blank"
@@ -164,8 +175,17 @@ export function AdminDashboard({ onNavigate }: AdminDashboardProps) {
         </div>
       </div>
 
-      {/* כפתורי שיתוף תפריט ופלייר גם במובייל */}
-      <div className="md:hidden grid grid-cols-3 gap-2">
+      {/* כפתורי שיתוף תפריט והזמנה מהירה במובייל */}
+      <div className="md:hidden space-y-2">
+        <button
+          type="button"
+          onClick={() => setQuickAdminOpen(true)}
+          className="w-full py-2.5 px-4 rounded-xl bg-[#2B1B12] hover:bg-[#3f281b] text-amber-50 font-extrabold text-xs flex items-center justify-center gap-1.5"
+        >
+          <Zap className="w-4 h-4 text-amber-300" />
+          <span>הזמנה מהירה (מנהל)</span>
+        </button>
+        <div className="grid grid-cols-3 gap-2">
         <a
           href={menuShareUrl}
           target="_blank"
@@ -190,6 +210,7 @@ export function AdminDashboard({ onNavigate }: AdminDashboardProps) {
           {copiedMenuLink ? <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" /> : <Link2 className="w-3.5 h-3.5 shrink-0" />}
           <span>{copiedMenuLink ? 'הועתק!' : 'קישור תפריט'}</span>
         </button>
+        </div>
       </div>
 
       {/* הזמנות ממתינות לאישור */}
@@ -295,7 +316,10 @@ export function AdminDashboard({ onNavigate }: AdminDashboardProps) {
           </div>
         </button>
 
-        <div className="bg-white rounded-2xl p-3.5 sm:p-5 border border-[#E8D5BE]/80 shadow-soft">
+        <div
+          onClick={() => onNavigate('order-planning')}
+          className="bg-white rounded-2xl p-3.5 sm:p-5 border border-[#E8D5BE]/80 hover:border-[#C85A17]/50 shadow-soft cursor-pointer transition-colors"
+        >
           <div className="flex items-center justify-between gap-1">
             <span className="text-[11px] sm:text-xs font-bold text-slate-500">יחידות לרכש מאפייה</span>
             <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-amber-50 text-amber-700 flex items-center justify-center shrink-0">
@@ -346,6 +370,12 @@ export function AdminDashboard({ onNavigate }: AdminDashboardProps) {
           <div className="text-[11px] text-slate-500 mt-0.5">{kpis.debtorsCount} חשבונות ←</div>
         </button>
       </div>
+
+      <QuickAdminOrderModal
+        open={quickAdminOpen}
+        onClose={() => setQuickAdminOpen(false)}
+        onOrderSaved={() => void loadAll()}
+      />
     </div>
   );
 }

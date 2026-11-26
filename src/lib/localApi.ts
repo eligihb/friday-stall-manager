@@ -2152,6 +2152,143 @@ export async function localApiFetch<T>(url: string, options: RequestInit = {}): 
     return { ok: true } as T;
   }
 
+  // --- ORDER PLANNING (תכנון הזמנה למאפייה + המלצה מבוססת פחת והיסטוריה של עד 4 שבועות) ---
+  if (path === '/api/planning' && method === 'GET') {
+    requireAdmin();
+    const fri = String(q.get('friday_date') || getNextFridayISO()).slice(0, 10);
+    const activeOrders = db.orders.filter(
+      (o) =>
+        o.friday_date === fri &&
+        o.status !== 'awaiting_approval' &&
+        o.status !== 'cancelled' &&
+        o.status !== 'deleted_by_vendor'
+    );
+    const orderTypeById = new Map(activeOrders.map((o) => [o.id, o.order_type]));
+
+    // איתור עד 4 ימי שישי קודמים שבהם הייתה פעילות (מלאי דוכן או פחת)
+    const pastFridaysSet = new Set<string>();
+    for (const fi of db.friday_inventory) {
+      if (fi.friday_date && fi.friday_date < fri && fi.extra_stall_qty > 0) {
+        pastFridaysSet.add(fi.friday_date);
+      }
+    }
+    for (const wl of db.waste_logs || []) {
+      if (wl.friday_date && wl.friday_date < fri) {
+        pastFridaysSet.add(wl.friday_date);
+      }
+    }
+    const pastFridays = Array.from(pastFridaysSet)
+      .sort((a, b) => b.localeCompare(a))
+      .slice(0, 4);
+
+    const items = sortProducts(db.products)
+      .filter((p) => p.is_active)
+      .map((p) => {
+        let customer_qty = 0;
+        let supplier_qty = 0;
+        let package_qty = 0;
+        for (const oi of db.order_items) {
+          if (oi.product_id !== p.id) continue;
+          const ot = orderTypeById.get(oi.order_id);
+          if (ot === 'customer') customer_qty += oi.quantity;
+          else if (ot === 'supplier') supplier_qty += oi.quantity;
+          else if (ot === 'charity') package_qty += oi.quantity;
+        }
+        const closed_total = customer_qty + supplier_qty + package_qty;
+
+        // ניתוח עד 4 שבועות קודמים עבור המוצר
+        const weekStats: Array<{ fri: string; extra: number; waste: number; freeSold: number }> = [];
+        for (const pf of pastFridays) {
+          const extraVal =
+            db.friday_inventory.find((f) => f.friday_date === pf && f.product_id === p.id)
+              ?.extra_stall_qty ?? 0;
+          const wasteVal = (db.waste_logs || [])
+            .filter((w) => w.friday_date === pf && w.product_id === p.id)
+            .reduce((s, w) => s + (Number(w.quantity) || 0), 0);
+          if (extraVal > 0 || wasteVal > 0) {
+            weekStats.push({
+              fri: pf,
+              extra: extraVal,
+              waste: wasteVal,
+              freeSold: Math.max(0, extraVal - wasteVal),
+            });
+          }
+        }
+
+        const has_history = weekStats.length > 0;
+        let avg_free_sold = 0;
+        let last_waste = 0;
+        let recommended_extra = 0;
+        let recommendation_reason = 'אין היסטוריה קודמת';
+
+        if (has_history) {
+          const totalFreeSold = weekStats.reduce((s, w) => s + w.freeSold, 0);
+          const totalWaste = weekStats.reduce((s, w) => s + w.waste, 0);
+          avg_free_sold = Math.round(totalFreeSold / weekStats.length);
+          const avgWaste = totalWaste / weekStats.length;
+          last_waste = weekStats[0].waste;
+
+          if (totalWaste === 0 && avg_free_sold > 0) {
+            // המלאי נמכר כולו ללא פחת — מוסיפים 15%
+            recommended_extra = Math.max(avg_free_sold + 1, Math.ceil(avg_free_sold * 1.15));
+            recommendation_reason = `ממוצע מכירה חופשית: ${avg_free_sold} | פחת אחרון: 0 (+15% בגלל ביקוש מלא)`;
+          } else {
+            // ניכוי פחת חוזר מממוצע המכירה
+            recommended_extra = Math.max(0, Math.round(avg_free_sold - avgWaste * 0.25));
+            recommendation_reason = `ממוצע מכירה חופשית: ${avg_free_sold} | פחת אחרון: ${last_waste}`;
+          }
+        } else {
+          // אומדן התחלתי שמרני כשאין היסטוריה (15% מההזמנות הסגורות)
+          recommended_extra = closed_total > 0 ? Math.max(1, Math.round(closed_total * 0.15)) : 0;
+          recommendation_reason = 'אין היסטוריה קודמת (אומדן התחלתי שמרני)';
+        }
+
+        const savedExtraEntry = db.friday_inventory.find(
+          (f) => f.friday_date === fri && f.product_id === p.id
+        );
+        const extra_stall_qty = savedExtraEntry ? savedExtraEntry.extra_stall_qty : 0;
+
+        return {
+          product_id: p.id,
+          product_name: p.name,
+          cost_price: p.cost_price,
+          customer_price: p.customer_price,
+          customer_qty,
+          supplier_qty,
+          package_qty,
+          closed_total,
+          has_history,
+          history_weeks_count: weekStats.length,
+          avg_free_sold,
+          last_waste,
+          recommended_extra,
+          recommendation_reason,
+          extra_stall_qty,
+          has_saved_extra: Boolean(savedExtraEntry),
+        };
+      });
+
+    return { friday_date: fri, history_fridays: pastFridays, items } as T;
+  }
+
+  if (path === '/api/planning' && method === 'PUT') {
+    requireAdmin();
+    const fri = String(body.friday_date || '').slice(0, 10);
+    const updates = Array.isArray(body.items)
+      ? (body.items as Array<{ product_id: number; extra_stall_qty: number }>)
+      : [];
+    for (const u of updates) {
+      const pid = Number(u.product_id);
+      const qty = Math.max(0, Math.floor(Number(u.extra_stall_qty || 0)));
+      const ex = db.friday_inventory.find((f) => f.friday_date === fri && f.product_id === pid);
+      if (ex) ex.extra_stall_qty = qty;
+      else db.friday_inventory.push({ friday_date: fri, product_id: pid, extra_stall_qty: qty });
+    }
+    saveDb(db, true);
+    await pushLocalStateToCloud({ mergeWithRemoteFirst: true, force: true }).catch(() => false);
+    return { ok: true } as T;
+  }
+
   // --- SUBSIDIZED ENTITIES & PAYMENTS ---
   if (path.startsWith('/api/subsidized')) {
     requireAdmin();
